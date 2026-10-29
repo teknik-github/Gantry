@@ -21,8 +21,14 @@ export type ContainerSummary = {
   Status: string
   Ports: { IP?: string; PrivatePort: number; PublicPort?: number; Type: string }[]
   Labels: Record<string, string>
-  Mounts: { Type: string; Name?: string; Source: string; Destination: string }[]
-  NetworkSettings: { Networks: Record<string, { NetworkID: string; IPAddress: string }> }
+  Mounts: { Type: string; Name?: string; Source: string; Destination: string; Driver?: string; Mode?: string; RW?: boolean }[]
+  NetworkSettings: {
+    Networks: Record<
+      string,
+      { NetworkID: string; IPAddress: string; Aliases?: string[] | null; DNSNames?: string[] | null }
+    >
+  }
+  HostConfig?: { NetworkMode?: string }
 }
 
 export type ContainerInspect = {
@@ -61,7 +67,10 @@ export type ContainerInspect = {
   }
   Mounts: { Type: string; Name?: string; Source: string; Destination: string; Mode: string; RW: boolean }[]
   NetworkSettings: {
-    Networks: Record<string, { IPAddress: string; Gateway: string; MacAddress: string }>
+    Networks: Record<
+      string,
+      { IPAddress: string; Gateway: string; MacAddress: string; NetworkID?: string; Aliases?: string[] | null }
+    >
   }
 }
 
@@ -92,6 +101,7 @@ export type Network = {
   Internal: boolean
   IPAM: { Config: { Subnet?: string; Gateway?: string }[] | null }
   Containers?: Record<string, unknown>
+  Labels?: Record<string, string> | null
 }
 
 export type DockerInfo = {
