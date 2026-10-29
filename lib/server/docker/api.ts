@@ -137,6 +137,8 @@ function seg(value: string) {
 
 export function docker(target: DockerTarget) {
   return {
+    /** The endpoint this client talks to (used to point the docker CLI at it, e.g. for stacks). */
+    target,
     ping: () => dockerRaw(target, "GET", "/_ping", { timeoutMs: 5_000 }).then(() => true),
     info: () => dockerJson<DockerInfo>(target, "GET", "/info", { timeoutMs: 10_000 }),
 
