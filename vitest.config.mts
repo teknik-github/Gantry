@@ -11,7 +11,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/unit/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
+    testTimeout: 30_000,
     env: {
       GANTRY_SECRET: "unit-test-secret-unit-test-secret-0123456789",
       DATA_DIR: ".test-data/unit",

@@ -1,6 +1,8 @@
 import "server-only"
 
 import http from "node:http"
+import https from "node:https"
+import net from "node:net"
 
 import type { EnvironmentType } from "@/lib/server/db/schema"
 
@@ -27,11 +29,64 @@ type RequestOptions = {
   timeoutMs?: number
 }
 
-export function connectionOptions(target: DockerTarget): http.RequestOptions {
+export type DockerTls = NonNullable<DockerTarget["tls"]>
+
+/**
+ * Where to connect for a target: a Unix socket, or host/port for "tcp"
+ * (plus the PEM material when it uses TLS). Accepts "host:port",
+ * "tcp://host:port", "http://host:port" and "https://host:port".
+ */
+export function connectionOptions(target: DockerTarget): https.RequestOptions {
   if (target.type === "socket") return { socketPath: target.url }
   const raw = /^[a-z]+:\/\//i.test(target.url) ? target.url : `tcp://${target.url}`
-  const url = new URL(raw.replace(/^tcp:/i, "http:"))
-  return { host: url.hostname, port: Number(url.port || 2375) }
+  const url = new URL(raw.replace(/^[a-z]+:/i, "http:"))
+  const tls = target.tls
+  const host = url.hostname
+  const port = Number(url.port || (tls ? 2376 : 2375))
+  if (!tls) return { host, port }
+  return {
+    host,
+    port,
+    ca: tls.ca,
+    cert: tls.cert,
+    key: tls.key,
+    // Verify the daemon's certificate against the CA (and its name/IP).
+    rejectUnauthorized: true,
+    // SNI must be a hostname; IP literals are verified against the cert's IP SANs.
+    servername: net.isIP(host) ? undefined : host,
+  }
+}
+
+/**
+ * The one place that opens a connection to Docker: picks http or https for
+ * the target and sets the connection options. Used for plain API calls and
+ * for hijacked (Upgrade) exec connections.
+ */
+export function dockerRequest(
+  target: DockerTarget,
+  options: Omit<http.RequestOptions, "host" | "hostname" | "port" | "socketPath">,
+  onResponse?: (res: http.IncomingMessage) => void
+): http.ClientRequest {
+  const conn = connectionOptions(target)
+  // Over TCP the Host header must name the daemon: Node derives the TLS
+  // server name from it. Over a socket any value works.
+  const host = target.type === "socket" ? "docker" : `${conn.host}:${conn.port}`
+  const opts: https.RequestOptions = {
+    ...options,
+    ...conn,
+    headers: { ...options.headers, Host: host },
+  }
+  return target.type === "tcp" && target.tls ? https.request(opts, onResponse) : http.request(opts, onResponse)
+}
+
+/** Maps a socket/TLS error to a DockerError without leaking anything sensitive. */
+export function connectionError(err: NodeJS.ErrnoException): DockerError {
+  if (err instanceof DockerError) return err
+  const code = err.code ?? err.message
+  if (/CERT|SSL|TLS|SELF_SIGNED|UNABLE_TO|ALTNAME/i.test(code)) {
+    return new DockerError(`TLS handshake with Docker failed (${code})`, 502)
+  }
+  return new DockerError(`Cannot reach Docker (${code})`, 502)
 }
 
 function buildPath(path: string, query?: RequestOptions["query"]) {
@@ -53,13 +108,12 @@ export function dockerRaw(
   const payload = opts.body === undefined ? undefined : Buffer.from(JSON.stringify(opts.body))
 
   return new Promise((resolve, reject) => {
-    const req = http.request(
+    const req = dockerRequest(
+      target,
       {
-        ...connectionOptions(target),
         method,
         path: buildPath(path, opts.query),
         headers: {
-          Host: "docker",
           ...(payload
             ? { "Content-Type": "application/json", "Content-Length": payload.length }
             : {}),
@@ -86,10 +140,7 @@ export function dockerRaw(
       }
     )
     req.on("timeout", () => req.destroy(new DockerError("Docker API request timed out", 504)))
-    req.on("error", (err: NodeJS.ErrnoException) => {
-      if (err instanceof DockerError) return reject(err)
-      reject(new DockerError(`Cannot reach Docker (${err.code ?? err.message})`, 502))
-    })
+    req.on("error", (err: NodeJS.ErrnoException) => reject(connectionError(err)))
     if (payload) req.write(payload)
     req.end()
   })

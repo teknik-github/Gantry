@@ -8,7 +8,7 @@ import { getCurrentUser } from "@/lib/server/auth/dal"
 import { CONTAINER_ACTIONS, type ContainerAction } from "@/lib/server/docker/api"
 import { DockerError } from "@/lib/server/docker/client"
 import { ExecSessionError, openExecSession } from "@/lib/server/docker/exec"
-import { getCurrentEnvironment } from "@/lib/server/environments"
+import { environmentTarget, getCurrentEnvironment } from "@/lib/server/environments"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const idSchema = z.string().regex(/^[a-f0-9]{12,64}$/, "Invalid container id")
@@ -169,7 +169,7 @@ export async function startExecSession(input: {
   try {
     const sid = await openExecSession({
       userId: user.id,
-      target: { type: env.type, url: env.url },
+      target: environmentTarget(env),
       containerId: id,
       cmd: [...SHELLS[shell]],
       user: parsed.data.user || undefined,

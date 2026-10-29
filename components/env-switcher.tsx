@@ -19,7 +19,15 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui
 
 type Env = { id: number; name: string; type: string; url: string }
 
-export function EnvSwitcher({ environments, currentId }: { environments: Env[]; currentId: number | null }) {
+export function EnvSwitcher({
+  environments,
+  currentId,
+  isAdmin,
+}: {
+  environments: Env[]
+  currentId: number | null
+  isAdmin: boolean
+}) {
   const [pending, startTransition] = useTransition()
   const current = environments.find((e) => e.id === currentId)
 
@@ -33,7 +41,7 @@ export function EnvSwitcher({ environments, currentId }: { environments: Env[]; 
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">Gantry</span>
                 <span className="truncate text-xs text-muted-foreground">
-                  {current ? current.name : "No environment"}
+                  {current ? current.name : isAdmin ? "No environment" : "No environment assigned"}
                 </span>
               </div>
               <ChevronsUpDownIcon className="ml-auto size-4" />
@@ -41,6 +49,9 @@ export function EnvSwitcher({ environments, currentId }: { environments: Env[]; 
           </DropdownMenuTrigger>
           <DropdownMenuContent className="min-w-56 rounded-lg" align="start" sideOffset={4}>
             <DropdownMenuLabel className="text-xs text-muted-foreground">Environments</DropdownMenuLabel>
+            {environments.length === 0 ? (
+              <DropdownMenuItem disabled>{isAdmin ? "No environments" : "None assigned — ask an administrator"}</DropdownMenuItem>
+            ) : null}
             {environments.map((env) => (
               <DropdownMenuItem
                 key={env.id}
@@ -59,10 +70,14 @@ export function EnvSwitcher({ environments, currentId }: { environments: Env[]; 
                 {env.id === currentId ? <CheckIcon className="ml-auto" /> : null}
               </DropdownMenuItem>
             ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/environments">Manage environments</Link>
-            </DropdownMenuItem>
+            {isAdmin ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href="/environments">Manage environments</Link>
+                </DropdownMenuItem>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
