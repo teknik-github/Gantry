@@ -3,6 +3,7 @@ import "server-only"
 import type { Migration, MigrationProvider } from "kysely/migration"
 
 import { initial } from "@/lib/server/db/migrations/001_initial"
+import { stacks } from "@/lib/server/db/migrations/002_stacks"
 import { environmentTls } from "@/lib/server/db/migrations/003_environment_tls"
 import { environmentAccess } from "@/lib/server/db/migrations/004_environment_access"
 
@@ -11,6 +12,7 @@ import { environmentAccess } from "@/lib/server/db/migrations/004_environment_ac
 // shipped; add a new file and register it here. Keys sort in apply order.
 const migrations: Record<string, Migration> = {
   "001_initial": initial,
+  "002_stacks": stacks,
   "003_environment_tls": environmentTls,
   "004_environment_access": environmentAccess,
 }

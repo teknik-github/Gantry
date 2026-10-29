@@ -40,14 +40,37 @@ export interface AuditLogsTable {
   created_at: string
 }
 
+export type StackRunStatus = "success" | "error"
+
+export interface StacksTable {
+  id: Generated<number>
+  environment_id: number
+  /** Compose project name (`-p`), unique per environment */
+  name: string
+  compose: string
+  /** dotenv text written to the stack's .env, may be empty */
+  env: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  /** Outcome of the last docker compose run, shown on the stack page */
+  last_action: string | null
+  last_status: StackRunStatus | null
+  last_output: string | null
+  last_run_at: string | null
+  last_run_by: string | null
+}
+
 export interface Database {
   users: UsersTable
   environments: EnvironmentsTable
   environment_access: EnvironmentAccessTable
   audit_logs: AuditLogsTable
+  stacks: StacksTable
 }
 
 export type User = Selectable<UsersTable>
 export type NewUser = Insertable<UsersTable>
 export type Environment = Selectable<EnvironmentsTable>
 export type AuditLog = Selectable<AuditLogsTable>
+export type Stack = Selectable<StacksTable>
