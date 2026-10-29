@@ -7,3 +7,7 @@ data
 .git
 Dockerfile
 docker-compose.yml
+.claude
+.test-data
+test-results
+playwright-report
