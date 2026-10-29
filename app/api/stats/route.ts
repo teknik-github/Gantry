@@ -1,7 +1,7 @@
 import { getCurrentUser } from "@/lib/server/auth/dal"
-import { cpuPercent, memoryUsage } from "@/lib/server/docker/api"
 import { DockerError } from "@/lib/server/docker/client"
 import { getDocker } from "@/lib/server/environments"
+import { sampleHost } from "@/lib/server/metrics"
 
 export type StatsResponse = {
   ts: number
@@ -9,6 +9,8 @@ export type StatsResponse = {
   memory: number
   memTotal: number
   ncpu: number
+  /** All running containers (only the first MAX_CONTAINERS are sampled). */
+  running: number
   containers: { id: string; name: string; cpu: number; memory: number }[]
 }
 
@@ -21,34 +23,18 @@ export async function GET() {
   }
 
   try {
-    const api = await getDocker()
-    const [info, running] = await Promise.all([api.info(), api.listContainers(false)])
-
-    const samples = await Promise.all(
-      running.slice(0, MAX_CONTAINERS).map(async (c) => {
-        try {
-          const s = await api.containerStats(c.Id)
-          return {
-            id: c.Id,
-            name: c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12),
-            cpu: cpuPercent(s),
-            memory: memoryUsage(s),
-          }
-        } catch {
-          return null // container stopped mid-request
-        }
-      })
-    )
-    const containers = samples.filter((s) => s !== null)
-
+    const usage = await sampleHost(await getDocker(), {
+      maxContainers: MAX_CONTAINERS,
+      concurrency: MAX_CONTAINERS,
+    })
     const body: StatsResponse = {
       ts: Date.now(),
-      // Normalised to the whole host (100% = all CPUs busy).
-      cpu: containers.reduce((a, c) => a + c.cpu, 0) / Math.max(1, info.NCPU),
-      memory: containers.reduce((a, c) => a + c.memory, 0),
-      memTotal: info.MemTotal,
-      ncpu: info.NCPU,
-      containers: containers.sort((a, b) => b.memory - a.memory),
+      cpu: usage.cpu,
+      memory: usage.memory,
+      memTotal: usage.memTotal,
+      ncpu: usage.ncpu,
+      running: usage.running,
+      containers: usage.containers.sort((a, b) => b.memory - a.memory),
     }
     return Response.json(body, { headers: { "Cache-Control": "no-store" } })
   } catch (err) {

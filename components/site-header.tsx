@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation"
 
+import { LiveIndicator } from "@/components/live-updates"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 
@@ -28,6 +29,7 @@ export function SiteHeader() {
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="mx-2 data-[orientation=vertical]:h-4" />
         <h1 className="text-base font-medium">{TITLES[segment] ?? "Gantry"}</h1>
+        <LiveIndicator className="ml-auto" />
       </div>
     </header>
   )

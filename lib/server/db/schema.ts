@@ -29,13 +29,31 @@ export interface AuditLogsTable {
   created_at: string
 }
 
+/** Periodic resource usage samples per environment (lib/server/metrics-sampler.ts). */
+export interface MetricsTable {
+  id: Generated<number>
+  environment_id: number
+  /** ISO timestamp of the sample */
+  ts: string
+  /** Running containers */
+  containers: number
+  /** CPU % normalised to the host's CPUs */
+  cpu: number
+  /** Bytes; stored as double so MySQL returns numbers, not BIGINT strings */
+  mem_used: number
+  mem_total: number
+}
+
 export interface Database {
   users: UsersTable
   environments: EnvironmentsTable
   audit_logs: AuditLogsTable
+  metrics: MetricsTable
 }
 
 export type User = Selectable<UsersTable>
 export type NewUser = Insertable<UsersTable>
 export type Environment = Selectable<EnvironmentsTable>
 export type AuditLog = Selectable<AuditLogsTable>
+export type Metric = Selectable<MetricsTable>
+export type NewMetric = Insertable<MetricsTable>
