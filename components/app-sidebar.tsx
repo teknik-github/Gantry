@@ -7,6 +7,8 @@ import {
   LayersIcon,
   HardDriveIcon,
   NetworkIcon,
+  LayersPlusIcon,
+  WaypointsIcon,
   ServerIcon,
   UsersIcon,
   HistoryIcon,
@@ -26,6 +28,8 @@ const navMain = [
   { title: "Images", url: "/images", icon: <LayersIcon /> },
   { title: "Volumes", url: "/volumes", icon: <HardDriveIcon /> },
   { title: "Networks", url: "/networks", icon: <NetworkIcon /> },
+  { title: "Stacks", url: "/stacks", icon: <LayersPlusIcon /> },
+  { title: "Topology", url: "/topology", icon: <WaypointsIcon /> },
 ]
 
 const navAdmin = [

@@ -4,7 +4,12 @@ import http from "node:http"
 
 import type { EnvironmentType } from "@/lib/server/db/schema"
 
-export type DockerTarget = { type: EnvironmentType; url: string }
+export type DockerTarget = {
+  type: EnvironmentType
+  url: string
+  /** PEM material for "tcp" endpoints that require TLS (Docker's --tlsverify). */
+  tls?: { ca: string; cert: string; key: string } | null
+}
 
 export class DockerError extends Error {
   constructor(

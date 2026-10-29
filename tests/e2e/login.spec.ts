@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 
+import { ACCOUNT_LIMIT } from "../../lib/server/login-limits"
 import { ADMIN } from "./credentials"
 
 // The suite starts from an empty database (see playwright.config.ts), so the
@@ -175,15 +176,18 @@ test("login works before hydration and never leaks credentials into a URL", asyn
   expect(documents.filter((d) => /password|username=/.test(d.url))).toEqual([])
 })
 
-test("repeated failures are rate limited", async ({ page }) => {
+test("repeated failures lock the account even when X-Forwarded-For is rotated", async ({ page }) => {
   // A dedicated username so the lockout doesn't affect the admin account.
   const user = "ratelimit-probe"
   await page.goto("/login")
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < ACCOUNT_LIMIT; i++) {
+    // An attacker pretending to be a new client on every attempt.
+    await page.setExtraHTTPHeaders({ "x-forwarded-for": `203.0.113.${i + 1}` })
     await login(page, user, `wrong-${i}`)
     await expect(page.getByText("Invalid username or password")).toBeVisible()
     await expect(page.getByLabel("Password")).toHaveValue("")
   }
+  await page.setExtraHTTPHeaders({ "x-forwarded-for": "198.51.100.77" })
   await login(page, user, "wrong-again")
   await expect(page.getByText(/Too many attempts\. Try again in \d+s\./)).toBeVisible()
 })

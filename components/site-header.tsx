@@ -11,6 +11,8 @@ const TITLES: Record<string, string> = {
   images: "Images",
   volumes: "Volumes",
   networks: "Networks",
+  stacks: "Stacks",
+  topology: "Topology",
   environments: "Environments",
   users: "Users",
   activity: "Activity",

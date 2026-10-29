@@ -10,6 +10,8 @@ import { getDummyHash, hashPassword, verifyPassword } from "@/lib/server/auth/pa
 import { createSession, destroySession } from "@/lib/server/auth/session"
 import { getDb } from "@/lib/server/db"
 import { checkRateLimit, clearFailures, recordFailure } from "@/lib/server/rate-limit"
+import { clientAddress, LOGIN_WINDOW_MS, loginRateKeys } from "@/lib/server/login-limits"
+import { config } from "@/lib/server/config"
 import { safeNext } from "@/lib/safe-redirect"
 import {
   fieldErrors,
@@ -18,13 +20,6 @@ import {
   type ActionState,
 } from "@/lib/validation"
 
-const LOGIN_LIMIT = 5
-const LOGIN_WINDOW_MS = 5 * 60_000
-
-async function clientIp() {
-  const h = await headers()
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local"
-}
 
 export async function login(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const values = { username: String(formData.get("username") ?? "").slice(0, 64) }
@@ -34,8 +29,8 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
   if (!parsed.success) return { error: "Enter your username and password", values }
 
   const { username, password } = parsed.data
-  const key = `login:${await clientIp()}:${username.toLowerCase()}`
-  const wait = checkRateLimit(key, LOGIN_LIMIT)
+  const limits = loginRateKeys(username, clientAddress(await headers(), config.trustProxy))
+  const wait = Math.max(...limits.map((l) => checkRateLimit(l.key, l.limit)))
   if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.`, values }
 
   const db = await getDb()
@@ -47,12 +42,12 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
 
   const valid = await verifyPassword(password, user?.password_hash ?? (await getDummyHash()))
   if (!user || !valid) {
-    recordFailure(key, LOGIN_WINDOW_MS)
+    for (const l of limits) recordFailure(l.key, LOGIN_WINDOW_MS)
     await audit(null, "auth.login_failed", username)
     return { error: "Invalid username or password", values }
   }
 
-  clearFailures(key)
+  for (const l of limits) clearFailures(l.key)
   await createSession({ uid: user.id, role: user.role })
   await audit({ id: user.id, username: user.username, role: user.role }, "auth.login", user.username)
   redirect(safeNext(formData.get("next")))

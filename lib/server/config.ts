@@ -27,6 +27,8 @@ export const config = {
   /** "true" | "false" | "auto" (secure when the request came in over https) */
   cookieSecure: env("COOKIE_SECURE", "auto")!,
   sessionTtlHours: Number(env("SESSION_TTL_HOURS", "12")),
+  /** Set when a reverse proxy you control sets X-Forwarded-For. */
+  trustProxy: env("TRUST_PROXY", "false") === "true",
 }
 
 if (config.dbDriver !== "sqlite" && config.dbDriver !== "mysql") {

@@ -67,6 +67,7 @@ The first run needs a browser: `pnpm exec playwright install chromium`.
 | `GANTRY_SECRET` | generated | Session signing key (≥ 32 characters) |
 | `COOKIE_SECURE` | `auto` | `true`, `false` or `auto` (Secure behind HTTPS) |
 | `SESSION_TTL_HOURS` | `12` | Session lifetime |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` from your reverse proxy (per-client login limits) |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Socket of the default `local` environment |
 
 ## Security model
@@ -76,7 +77,9 @@ The first run needs a browser: `pnpm exec playwright install chromium`.
   only `/api/health` is public. Pages without a session redirect to `/login`.
 - Route handlers and Server Actions re-check the user against the database,
   so deleted users and role changes take effect immediately.
-- Passwords are hashed with scrypt. Login is rate limited per IP and username.
+- Passwords are hashed with scrypt. Failed logins are limited per account
+  (10 per 5 minutes, regardless of client address) and, with `TRUST_PROXY=true`,
+  per client address too. Forwarding headers are ignored unless trusted.
 - Standard users can view resources and start/stop/restart containers.
   Creating and removing things, and managing users and environments, is
   limited to administrators. Container environment variable values are

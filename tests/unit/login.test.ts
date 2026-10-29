@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import { safeNext } from "@/lib/safe-redirect"
 import { hashPassword, verifyPassword } from "@/lib/server/auth/password"
 import { signSession, verifySession } from "@/lib/server/auth/token"
+import { ACCOUNT_LIMIT, CLIENT_LIMIT, clientAddress, loginRateKeys } from "@/lib/server/login-limits"
 import { checkRateLimit, clearFailures, recordFailure } from "@/lib/server/rate-limit"
 
 const secret = new TextEncoder().encode(process.env.GANTRY_SECRET)
@@ -134,5 +135,37 @@ describe("login rate limit", () => {
     for (let i = 0; i < 5; i++) recordFailure(a, 60_000)
     expect(checkRateLimit(a, 5)).toBeGreaterThan(0)
     expect(checkRateLimit(b, 5)).toBe(0)
+  })
+})
+
+describe("login rate-limit keys", () => {
+  const headers = (h: Record<string, string>) => ({ get: (n: string) => h[n.toLowerCase()] ?? null })
+
+  it("ignores forwarding headers unless the proxy is trusted", () => {
+    expect(clientAddress(headers({ "x-forwarded-for": "1.2.3.4" }), false)).toBeNull()
+    expect(clientAddress(headers({ "x-real-ip": "1.2.3.4" }), false)).toBeNull()
+  })
+
+  it("uses the hop appended by the trusted proxy, not the client-supplied ones", () => {
+    // Client sent "6.6.6.6", the proxy appended the real peer address.
+    expect(clientAddress(headers({ "x-forwarded-for": "6.6.6.6, 10.0.0.9" }), true)).toBe("10.0.0.9")
+    expect(clientAddress(headers({ "x-real-ip": "10.0.0.9" }), true)).toBe("10.0.0.9")
+    expect(clientAddress(headers({}), true)).toBeNull()
+  })
+
+  it("always counts against the account, whatever address is claimed", () => {
+    const a = loginRateKeys("Admin", "1.1.1.1")
+    const b = loginRateKeys("admin ", "2.2.2.2")
+    const accountKey = (keys: { key: string }[]) => keys.find((k) => k.key.startsWith("login:account:"))?.key
+    expect(accountKey(a)).toBe("login:account:admin")
+    expect(accountKey(b)).toBe(accountKey(a))
+    expect(loginRateKeys("admin", null)).toEqual([{ key: "login:account:admin", limit: ACCOUNT_LIMIT }])
+  })
+
+  it("adds a stricter per-client bucket only for a trusted address", () => {
+    expect(loginRateKeys("admin", "10.0.0.9")).toContainEqual({
+      key: "login:client:10.0.0.9:admin",
+      limit: CLIENT_LIMIT,
+    })
   })
 })
