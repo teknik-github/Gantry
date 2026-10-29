@@ -2,6 +2,7 @@ import { Suspense } from "react"
 
 import { AdminNav, AppSidebar } from "@/components/app-sidebar"
 import { EnvSwitcher } from "@/components/env-switcher"
+import { LiveUpdates } from "@/components/live-updates"
 import { NavUser } from "@/components/nav-user"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
@@ -51,6 +52,9 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
           <div className="@container/main flex flex-1 flex-col gap-2">{children}</div>
         </div>
       </SidebarInset>
+      <Suspense fallback={null}>
+        <LiveUpdatesForEnvironment />
+      </Suspense>
     </SidebarProvider>
   )
 }
@@ -65,6 +69,13 @@ async function SidebarEnvironments() {
       isAdmin={user.role === "admin"}
     />
   )
+}
+
+// Keyed to the current environment so switching it reconnects the event stream.
+async function LiveUpdatesForEnvironment() {
+  await requireUser()
+  const env = await getCurrentEnvironment()
+  return <LiveUpdates environmentId={env?.id ?? null} />
 }
 
 async function SidebarAdmin() {

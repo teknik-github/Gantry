@@ -6,6 +6,7 @@ import { initial } from "@/lib/server/db/migrations/001_initial"
 import { stacks } from "@/lib/server/db/migrations/002_stacks"
 import { environmentTls } from "@/lib/server/db/migrations/003_environment_tls"
 import { environmentAccess } from "@/lib/server/db/migrations/004_environment_access"
+import { metrics } from "@/lib/server/db/migrations/005_metrics"
 
 // One file per migration, written with Kysely's schema builder only so the
 // same migrations run on SQLite and MySQL. Never edit a migration that has
@@ -15,6 +16,7 @@ const migrations: Record<string, Migration> = {
   "002_stacks": stacks,
   "003_environment_tls": environmentTls,
   "004_environment_access": environmentAccess,
+  "005_metrics": metrics,
 }
 
 export const migrationProvider: MigrationProvider = {

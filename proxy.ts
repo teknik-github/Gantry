@@ -36,7 +36,9 @@ export async function proxy(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
     const res = NextResponse.next()
-    res.headers.set("Cache-Control", "no-store")
+    // no-transform: streamed routes (/api/events, /api/exec) must not be
+    // buffered by compressing proxies; this header replaces the handler's.
+    res.headers.set("Cache-Control", "no-store, no-transform")
     return res
   }
 

@@ -34,6 +34,9 @@ services:
       # Or create the first admin at startup instead of using /setup.
       GANTRY_ADMIN_USERNAME: ${GANTRY_ADMIN_USERNAME:-}
       GANTRY_ADMIN_PASSWORD: ${GANTRY_ADMIN_PASSWORD:-}
+      # Dashboard history: sampling interval (seconds) and retention (days).
+      METRICS_INTERVAL_SECONDS: ${METRICS_INTERVAL_SECONDS:-60}
+      METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-7}
     # Group that owns /var/run/docker.sock on the host: stat -c '%g' /var/run/docker.sock
     group_add:
       - "${DOCKER_GID:-999}"

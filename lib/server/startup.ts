@@ -1,6 +1,7 @@
 import "server-only"
 
 import { bootstrapFirstRun } from "@/lib/server/bootstrap"
+import { startMetricsSampler } from "@/lib/server/metrics-sampler"
 
 /**
  * One-time server startup work (called from instrumentation.ts). Keep each
@@ -9,6 +10,7 @@ import { bootstrapFirstRun } from "@/lib/server/bootstrap"
 export async function runStartupTasks() {
   const tasks: [string, () => Promise<void>][] = [
     ["first-run setup", bootstrapFirstRun],
+    ["metrics sampler", startMetricsSampler],
   ]
 
   for (const [name, task] of tasks) {
