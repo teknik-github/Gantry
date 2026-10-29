@@ -1,0 +1,61 @@
+# Gantry — choose the database in .env (see .env.example):
+#
+#   SQLite (default):  docker compose up -d
+#   MySQL:             DB_DRIVER=mysql COMPOSE_PROFILES=mysql docker compose up -d
+#                      (or put both variables in .env)
+
+services:
+  gantry:
+    build: .
+    image: gantry:latest
+    container_name: gantry
+    restart: unless-stopped
+    ports:
+      - "${GANTRY_PORT:-3000}:3000"
+    environment:
+      DB_DRIVER: ${DB_DRIVER:-sqlite}
+      # SQLite
+      SQLITE_PATH: /data/gantry.db
+      # MySQL (used when DB_DRIVER=mysql)
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-gantry}
+      MYSQL_USER: ${MYSQL_USER:-gantry}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-gantry}
+      # Session signing secret; generated into /data/secret.key when empty.
+      GANTRY_SECRET: ${GANTRY_SECRET:-}
+      # "auto" marks the cookie Secure when served over HTTPS (via a reverse proxy).
+      COOKIE_SECURE: ${COOKIE_SECURE:-auto}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+    # Group that owns /var/run/docker.sock on the host: stat -c '%g' /var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-999}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gantry-data:/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+        required: false
+
+  mysql:
+    image: mysql:8.4
+    container_name: gantry-mysql
+    profiles: ["mysql"]
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-gantry}
+      MYSQL_USER: ${MYSQL_USER:-gantry}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-gantry}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-gantry-root}
+    volumes:
+      - gantry-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  gantry-data:
+  gantry-mysql:

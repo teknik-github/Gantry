@@ -1,0 +1,45 @@
+"use server"
+
+import { z } from "zod"
+
+import { formatBytes } from "@/lib/format"
+import { runAction } from "@/lib/server/action"
+import { fieldErrors, type ActionState } from "@/lib/validation"
+
+const imageIdSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/, "Invalid image id")
+
+export async function pullImage(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = z
+    .object({
+      image: z
+        .string()
+        .trim()
+        .min(1, "Image is required")
+        .max(255)
+        .regex(/^[a-z0-9][a-z0-9._\-/:@]*$/i, "e.g. nginx:latest or ghcr.io/org/app:1.0"),
+    })
+    .safeParse({ image: formData.get("image") })
+  if (!parsed.success) return fieldErrors(parsed.error)
+
+  return runAction("admin", "image.pull", parsed.data.image, async ({ docker }) => {
+    await (await docker()).pullImage(parsed.data.image)
+    return `Pulled ${parsed.data.image}`
+  })
+}
+
+export async function removeImage(id: string, force = false): Promise<ActionState> {
+  const parsed = imageIdSchema.safeParse(id)
+  if (!parsed.success) return { error: "Invalid image id" }
+
+  return runAction("admin", "image.remove", id, async ({ docker }) => {
+    await (await docker()).removeImage(parsed.data, force === true)
+    return "Image removed"
+  })
+}
+
+export async function pruneImages(): Promise<ActionState> {
+  return runAction("admin", "image.prune", "dangling", async ({ docker }) => {
+    const res = await (await docker()).pruneImages()
+    return `Removed ${res.ImagesDeleted?.length ?? 0} image layer(s), reclaimed ${formatBytes(res.SpaceReclaimed)}`
+  })
+}
