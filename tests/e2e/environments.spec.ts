@@ -81,9 +81,10 @@ test("admin grants access and the user can use the environment", async ({ page, 
   await expect(page.getByTestId("env-access-local")).toHaveText(VIEWER.username)
 
   const { context, page: viewer } = await viewerPage(browser)
-  await expect(viewer.getByRole("heading", { name: "Environment: local" })).toBeVisible()
-  await expect(viewer.getByTestId("no-environment")).toHaveCount(0)
   await expect(viewer.locator('[data-sidebar="header"]')).toContainText("local")
+  // The dashboard body waits for several Docker calls, which can be slow on a busy host.
+  await expect(viewer.getByRole("heading", { name: "Environment: local" })).toBeVisible({ timeout: 60_000 })
+  await expect(viewer.getByTestId("no-environment")).toHaveCount(0)
   await context.close()
 })
 
