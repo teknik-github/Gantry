@@ -5,6 +5,7 @@ import { z } from "zod"
 import { runAction, UserError } from "@/lib/server/action"
 import { hashPassword } from "@/lib/server/auth/password"
 import { getDb } from "@/lib/server/db"
+import { setUserEnvironments } from "@/lib/server/environment-access"
 import {
   fieldErrors,
   passwordSchema,
@@ -84,5 +85,26 @@ export async function resetPassword(_prev: ActionState, formData: FormData): Pro
       .where("id", "=", parsed.data.id)
       .execute()
     return "Password updated"
+  })
+}
+
+/** Sets which environments a standard user may use (checkboxes named "env"). */
+export async function setUserAccess(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = z
+    .object({
+      id: z.coerce.number().int().positive(),
+      envs: z.array(z.coerce.number().int().positive()).max(10_000),
+    })
+    .safeParse({ id: formData.get("id"), envs: formData.getAll("env") })
+  if (!parsed.success) return { error: "Invalid request" }
+  const { id, envs } = parsed.data
+
+  return runAction("admin", "user.environments", `${id}: ${envs.join(",") || "none"}`, async () => {
+    const db = await getDb()
+    const target = await db.selectFrom("users").select(["username", "role"]).where("id", "=", id).executeTakeFirst()
+    if (!target) throw new UserError("User not found")
+    if (target.role === "admin") throw new UserError("Administrators can use every environment")
+    await setUserEnvironments(db, id, envs)
+    return `Environment access for ${target.username} updated`
   })
 }

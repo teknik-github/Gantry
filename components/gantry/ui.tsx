@@ -1,7 +1,8 @@
-import { CircleAlertIcon } from "lucide-react"
+import { CircleAlertIcon, ServerOffIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { NO_ENVIRONMENT_ASSIGNED } from "@/lib/messages"
 import { cn } from "@/lib/utils"
 
 export function PageHeader({
@@ -29,6 +30,7 @@ export function PageBody({ children }: { children: React.ReactNode }) {
 }
 
 export function DockerUnavailable({ message }: { message: string }) {
+  if (message === NO_ENVIRONMENT_ASSIGNED) return <NoEnvironment />
   return (
     <div className="px-4 lg:px-6">
       <Card className="border-destructive/40">
@@ -40,6 +42,25 @@ export function DockerUnavailable({ message }: { message: string }) {
           <CardDescription>
             {message}. Check that the Docker socket is mounted (or the TCP endpoint is reachable) and
             that Gantry has permission to access it, or switch to another environment.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    </div>
+  )
+}
+
+/** Empty state for a standard user who has not been given any environment. */
+export function NoEnvironment() {
+  return (
+    <div className="px-4 lg:px-6">
+      <Card data-testid="no-environment">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ServerOffIcon className="size-4 text-muted-foreground" />
+            {NO_ENVIRONMENT_ASSIGNED}
+          </CardTitle>
+          <CardDescription>
+            Your account has no access to a Docker environment yet. An administrator can grant it on the Users page.
           </CardDescription>
         </CardHeader>
       </Card>

@@ -18,6 +18,17 @@ export interface EnvironmentsTable {
   /** Socket path for "socket", host:port for "tcp" */
   url: string
   created_at: string
+  /** TLS material for "tcp", encrypted at rest (see lib/server/crypto.ts). Null = plain HTTP. */
+  tls_ca: string | null
+  tls_cert: string | null
+  tls_key: string | null
+}
+
+/** Environments a standard user may see and use. Admins can use all of them. */
+export interface EnvironmentAccessTable {
+  user_id: number
+  environment_id: number
+  created_at: string
 }
 
 export interface AuditLogsTable {
@@ -32,6 +43,7 @@ export interface AuditLogsTable {
 export interface Database {
   users: UsersTable
   environments: EnvironmentsTable
+  environment_access: EnvironmentAccessTable
   audit_logs: AuditLogsTable
 }
 

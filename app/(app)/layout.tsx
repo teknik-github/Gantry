@@ -56,12 +56,13 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
 }
 
 async function SidebarEnvironments() {
-  await requireUser()
+  const user = await requireUser()
   const [envs, current] = await Promise.all([listEnvironments(), getCurrentEnvironment()])
   return (
     <EnvSwitcher
       environments={envs.map(({ id, name, type, url }) => ({ id, name, type, url }))}
       currentId={current?.id ?? null}
+      isAdmin={user.role === "admin"}
     />
   )
 }

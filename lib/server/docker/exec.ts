@@ -1,13 +1,13 @@
 import "server-only"
 
 import crypto from "node:crypto"
-import http from "node:http"
 import type { Duplex } from "node:stream"
 
 import {
-  connectionOptions,
+  connectionError,
   dockerJson,
   dockerRaw,
+  dockerRequest,
   DockerError,
   type DockerTarget,
 } from "@/lib/server/docker/client"
@@ -65,12 +65,10 @@ export class ExecSessionError extends Error {
 function hijack(target: DockerTarget, path: string, body: unknown): Promise<Duplex> {
   const payload = Buffer.from(JSON.stringify(body))
   return new Promise((resolve, reject) => {
-    const req = http.request({
-      ...connectionOptions(target),
+    const req = dockerRequest(target, {
       method: "POST",
       path,
       headers: {
-        Host: "docker",
         "Content-Type": "application/json",
         "Content-Length": payload.length,
         Connection: "Upgrade",
@@ -101,7 +99,7 @@ function hijack(target: DockerTarget, path: string, body: unknown): Promise<Dupl
     })
     req.on("error", (err: NodeJS.ErrnoException) => {
       clearTimeout(timer)
-      reject(err instanceof DockerError ? err : new DockerError(`Cannot reach Docker (${err.code ?? err.message})`, 502))
+      reject(connectionError(err))
     })
     req.end(payload)
   })
