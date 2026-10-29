@@ -78,10 +78,26 @@ describe("which pages an event refreshes", () => {
   const start: LiveEvent = { type: "container", action: "start", id: "0123456789abcdef" }
   const pull: LiveEvent = { type: "image", action: "pull", id: "sha256:1" }
 
-  it("refreshes Docker pages", () => {
-    for (const path of ["/dashboard", "/containers", "/images", "/volumes", "/networks", "/stacks"]) {
+  it("refreshes the dashboard and unknown Docker pages for everything", () => {
+    for (const path of ["/dashboard", "/stacks", "/topology"]) {
       expect(eventAffectsPath(start, path), path).toBe(true)
+      expect(eventAffectsPath(pull, path), path).toBe(true)
     }
+  })
+
+  it("refreshes list pages only for what they show", () => {
+    const create: LiveEvent = { type: "container", action: "create", id: "c1" }
+    const volume: LiveEvent = { type: "volume", action: "create", id: "v1" }
+    const connect: LiveEvent = { type: "network", action: "connect", id: "n1", container: "c1" }
+    expect(eventAffectsPath(start, "/containers")).toBe(true)
+    expect(eventAffectsPath(pull, "/containers")).toBe(false)
+    expect(eventAffectsPath(pull, "/images")).toBe(true)
+    expect(eventAffectsPath(create, "/images")).toBe(true)
+    expect(eventAffectsPath(start, "/images")).toBe(false)
+    expect(eventAffectsPath(volume, "/volumes")).toBe(true)
+    expect(eventAffectsPath(start, "/volumes")).toBe(false)
+    expect(eventAffectsPath(connect, "/networks")).toBe(true)
+    expect(eventAffectsPath(volume, "/networks")).toBe(false)
   })
 
   it("leaves pages without Docker state alone", () => {

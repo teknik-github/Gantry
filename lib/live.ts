@@ -57,6 +57,18 @@ export function toLiveEvent(raw: unknown): LiveEvent | null {
 // Pages that show no Docker state, so Docker events never refresh them.
 const NON_DOCKER_PAGES = new Set(["users", "account", "activity", "environments"])
 
+// Containers being created or removed changes usage counts on the object lists.
+const containerAddedOrRemoved = (e: LiveEvent) =>
+  e.type === "container" && (e.action === "create" || e.action === "destroy" || e.action === "prune")
+
+// What each list page shows; pages not listed (dashboard, stacks, ...) take every event.
+const LIST_PAGES: Record<string, (e: LiveEvent) => boolean> = {
+  containers: (e) => e.type === "container",
+  images: (e) => e.type === "image" || containerAddedOrRemoved(e),
+  volumes: (e) => e.type === "volume" || containerAddedOrRemoved(e),
+  networks: (e) => e.type === "network" || containerAddedOrRemoved(e),
+}
+
 /** Whether an event can change what the page at `pathname` shows. */
 export function eventAffectsPath(event: LiveEvent, pathname: string): boolean {
   const segments = pathname.split("/").filter(Boolean)
@@ -70,5 +82,6 @@ export function eventAffectsPath(event: LiveEvent, pathname: string): boolean {
     if (event.type === "network") return matches(event.container)
     return false
   }
-  return true
+  const page = LIST_PAGES[segments[0] ?? ""]
+  return page ? page(event) : true
 }

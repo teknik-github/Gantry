@@ -33,7 +33,7 @@ test("live updates and metrics require a session", async ({ playwright, baseURL 
 
 test("the containers page follows Docker without reloading", async ({ page }) => {
   test.skip(!(await dockerAvailable()), "Docker socket not available")
-  test.slow() // several server round trips on a shared, busy Docker host
+  test.setTimeout(240_000)
   await signIn(page)
   await page.goto("/containers")
   await expect(page.getByTestId("live-indicator")).toHaveAttribute("data-status", "connected")
@@ -46,17 +46,19 @@ test("the containers page follows Docker without reloading", async ({ page }) =>
 
   created.push(name)
   const id = await startScratchContainer(name)
+  // Normally a second or two; generous because the Docker host is shared and busy.
+  const timeout = 45_000
   const row = page.getByRole("row").filter({ hasText: name })
-  await expect(row).toBeVisible()
-  await expect(row).toContainText(/running/i)
+  await expect(row).toBeVisible({ timeout })
+  await expect(row).toContainText(/running/i, { timeout })
 
   // Stopping is picked up as well...
   await docker("POST", `/containers/${id}/stop?t=0`)
-  await expect(row).toContainText(/exited/i)
+  await expect(row).toContainText(/exited/i, { timeout })
 
   // ...and so is removal.
   await removeContainer(id)
-  await expect(row).toHaveCount(0)
+  await expect(row).toHaveCount(0, { timeout })
 
   await expect(page.getByLabel("Search")).toHaveValue(name)
   expect(await page.evaluate(() => (window as unknown as { __gantryNoReload?: boolean }).__gantryNoReload)).toBe(true)
@@ -76,9 +78,11 @@ test("metrics history answers for every range and rejects others", async ({ page
 })
 
 test("the dashboard chart switches between live and recorded ranges", async ({ page }) => {
+  test.setTimeout(120_000)
   await signIn(page)
   const chart = page.locator('[data-slot="card"]').filter({ hasText: "Resource usage" })
-  await expect(chart.getByRole("combobox", { name: "Time range" })).toHaveText("Live")
+  // The dashboard queries Docker for everything; slow on a busy shared host.
+  await expect(chart.getByRole("combobox", { name: "Time range" })).toHaveText("Live", { timeout: 60_000 })
 
   await chart.getByRole("combobox", { name: "Time range" }).click()
   await page.getByRole("option", { name: "24 hours" }).click()

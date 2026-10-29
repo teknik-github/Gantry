@@ -10,6 +10,8 @@ const DEBOUNCE_MS = 750
 // Under a constant stream of events, still refresh at least this often.
 const MAX_WAIT_MS = 3_000
 const MAX_RETRY_MS = 30_000
+const STUCK_REFRESH_MS = 60_000
+const LOADING_POLL_MS = 500
 
 type LiveStatus = "idle" | "connecting" | "connected" | "reconnecting"
 
@@ -49,10 +51,46 @@ export function LiveUpdates({ environmentId }: { environmentId: number | null })
   const router = useRouter()
   const pathname = usePathname()
   const pathRef = React.useRef(pathname)
+  // Refreshes are throttled so a busy Docker host can't starve the page:
+  // - one at a time: a refresh runs as a transition, and requests made while
+  //   it is pending collapse into a single follow-up;
+  // - never while the route's loading fallback is on screen (first load or a
+  //   refresh still streaming in), or each refresh would restart the page's
+  //   dynamic render and it would never appear.
+  const [refreshing, startRefresh] = React.useTransition()
+  const refreshingRef = React.useRef(false)
+  const startedAtRef = React.useRef(0)
+  const owedRef = React.useRef(false)
+  const waitTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const requestRefresh = React.useCallback(
+    function request() {
+      clearTimeout(waitTimerRef.current)
+      // The age check is only a safety net in case a pending state is never reported.
+      const busy = refreshingRef.current && performance.now() - startedAtRef.current < STUCK_REFRESH_MS
+      if (busy || document.querySelector("[data-route-loading]")) {
+        owedRef.current = true
+        if (!busy) waitTimerRef.current = setTimeout(request, LOADING_POLL_MS)
+        return
+      }
+      owedRef.current = false
+      refreshingRef.current = true
+      startedAtRef.current = performance.now()
+      startRefresh(() => router.refresh())
+    },
+    [router]
+  )
 
   React.useEffect(() => {
     pathRef.current = pathname
   }, [pathname])
+
+  React.useEffect(() => {
+    refreshingRef.current = refreshing
+    if (!refreshing && owedRef.current) requestRefresh()
+  }, [refreshing, requestRefresh])
+
+  React.useEffect(() => () => clearTimeout(waitTimerRef.current), [])
 
   React.useEffect(() => {
     if (environmentId === null) return
@@ -74,7 +112,7 @@ export function LiveUpdates({ environmentId }: { environmentId: number | null })
       if (disposed) return
       // Background tabs catch up when they become visible again.
       if (document.hidden) refreshWhenVisible = true
-      else router.refresh()
+      else requestRefresh()
     }
 
     const scheduleRefresh = () => {
@@ -86,7 +124,7 @@ export function LiveUpdates({ environmentId }: { environmentId: number | null })
     const onVisibility = () => {
       if (!document.hidden && refreshWhenVisible) {
         refreshWhenVisible = false
-        router.refresh()
+        requestRefresh()
       }
     }
 
@@ -161,7 +199,7 @@ export function LiveUpdates({ environmentId }: { environmentId: number | null })
       document.removeEventListener("visibilitychange", onVisibility)
       setLiveStatus("idle")
     }
-  }, [environmentId, router])
+  }, [environmentId, router, requestRefresh])
 
   return null
 }
