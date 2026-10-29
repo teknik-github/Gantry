@@ -1,3 +1,5 @@
+import path from "node:path"
+
 import { defineConfig, devices } from "@playwright/test"
 
 const PORT = Number(process.env.E2E_PORT ?? 3100)
@@ -9,8 +11,11 @@ const baseURL = external ?? `http://127.0.0.1:${PORT}`
 // database. `next build` may run next to `next dev` (dev uses .next/dev), but
 // a second `next dev` must not: two dev servers rewrite next-env.d.ts for each
 // other and reload-loop. Set E2E_SKIP_BUILD=1 to reuse the last build.
+// Absolute: the standalone server chdirs into .next/standalone, so a relative
+// DATA_DIR would land (and survive between runs) there.
+const dataDir = path.resolve(".test-data/e2e")
 const serve = [
-  "rm -rf .test-data/e2e",
+  `rm -rf "${dataDir}"`,
   process.env.E2E_SKIP_BUILD ? "true" : "pnpm build",
   "cp -r .next/static .next/standalone/.next/",
   "cp -r public .next/standalone/",
@@ -55,7 +60,7 @@ export default defineConfig({
           HOSTNAME: "127.0.0.1",
           PORT: String(PORT),
           DB_DRIVER: "sqlite",
-          DATA_DIR: ".test-data/e2e",
+          DATA_DIR: dataDir,
           GANTRY_SECRET: "e2e-test-secret-e2e-test-secret-0123456789",
           COOKIE_SECURE: "false",
           GANTRY_SETUP_TOKEN: "e2e-setup-token-0123456789abcdef",
