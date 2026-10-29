@@ -3,11 +3,19 @@
 A Portainer-style web UI for Docker, built with Next.js 16 and shadcn/ui
 (`login-02` for authentication, `dashboard-01` for the app shell).
 
-- Dashboard with container/image/volume/network totals and live CPU and memory usage
+- Dashboard with container/image/volume/network totals, live CPU/memory usage
+  and history (1 h / 24 h / 7 d)
+- Pages update live from Docker events (no reload needed)
 - Containers: list, start/stop/restart/pause/kill, remove, create, inspect, live logs,
-  and an interactive console (`docker exec` shell in the browser, admins only)
+  interactive console (`docker exec` in the browser), **edit & recreate** and
+  **pull & recreate** (update to the latest image)
+- **Stacks**: create, edit and deploy docker compose projects; existing compose
+  projects are listed and can be imported
+- **Topology**: interactive map of compose projects, containers, networks,
+  volumes and `depends_on` relations
 - Images (pull, remove, prune), volumes and networks (create, remove)
-- Multiple Docker environments (local socket or TCP), switchable from the sidebar
+- Multiple Docker environments: local socket or TCP, optionally with mutual TLS;
+  standard users only see the environments they were given
 - Users with `admin` / `user` roles, plus an activity log
 - Database: **SQLite** (default) or **MySQL**, chosen with `DB_DRIVER`
 
@@ -49,18 +57,29 @@ Extra hosts that load the dev server are listed in `allowedDevOrigins` in
 ## Tests
 
 ```bash
-pnpm test        # unit tests (Vitest): passwords, session tokens, redirects, rate limit
-pnpm test:e2e    # E2E (Playwright): login flows and the container console
+pnpm test        # unit + integration tests (Vitest)
+pnpm test:e2e    # E2E (Playwright) against a production build
 ```
 
 `pnpm test:e2e` builds the app, starts the standalone server on port 3100 with
 a fresh SQLite database, and runs the login suite first (it creates the admin
-the other suites use). The console tests start a throwaway `alpine:3`
-container and remove it afterwards; they are skipped when Docker isn't
-reachable. Useful switches:
+the other suites use). The Docker-backed suites (console, stacks, recreate,
+topology, live updates, environments) create throwaway `gantry-test-*`
+containers/networks/volumes labelled `gantry.e2e=true` and remove them
+afterwards; they are skipped when Docker isn't reachable. Useful switches:
 
-- `E2E_SKIP_BUILD=1` reuses the last `pnpm build`
+- `E2E_SKIP_BUILD=1` reuses the last `pnpm build` (handy on a slow machine:
+  run `pnpm build` first, since the web server start times out after 5 minutes)
 - `E2E_BASE_URL=http://host:port` targets a running, not-yet-set-up Gantry instead
+- `E2E_PORT` changes the port (default 3100)
+
+Unit/integration extras:
+
+- The TLS tests need `openssl` and the Docker socket (they run a local mTLS
+  proxy in front of it).
+- `GANTRY_DOCKER_IT=1` also runs the recreate tests against real Docker.
+- `GANTRY_TEST_MYSQL_URL=mysql://…` also runs the migration/access tests on
+  MySQL. The database is wiped, so point it at a throwaway one.
 
 The first run needs a browser: `pnpm exec playwright install chromium`.
 
@@ -79,6 +98,70 @@ The first run needs a browser: `pnpm exec playwright install chromium`.
 | `GANTRY_ADMIN_USERNAME` / `GANTRY_ADMIN_PASSWORD` | | Create the first admin at startup instead of `/setup` |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` from your reverse proxy (per-client login limits) |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Socket of the default `local` environment |
+| `METRICS_INTERVAL_SECONDS` | `60` | How often the dashboard history is sampled (minimum 10) |
+| `METRICS_RETENTION_DAYS` | `7` | How long history is kept |
+
+## Features in more detail
+
+### Stacks
+
+- Stacks run the `docker compose` CLI (included in the image) against the
+  selected environment, over its socket or TCP (with TLS when configured).
+- Files live in `DATA_DIR/stacks/<envId>-<name>/`. **Relative paths in a
+  compose file (bind mounts, `build:`, `env_file:`) resolve inside Gantry's
+  container, not on the Docker host** — use absolute host paths or named volumes.
+- The stack's `.env` text is used for `${VAR}` substitution; add
+  `env_file: .env` to a service to pass the values into its containers.
+  Gantry's own environment (secrets, DB credentials) is never exposed to
+  compose files.
+- Private registries: mount a docker `config.json` and set `DOCKER_CONFIG`.
+- Stack names are compose project names (`^[a-z0-9][a-z0-9_-]{0,62}$`). A name
+  that matches an existing compose project is refused; use **Import** instead.
+- Changes are admin-only, since compose files can bind-mount anything on the host.
+
+### Edit / recreate containers
+
+- **Edit** changes image, name, command, env, ports, volumes, restart policy
+  and networks by recreating the container; everything else (labels,
+  healthcheck, devices, capabilities, mount options, network aliases, …) is
+  kept. **Pull & recreate** updates a container to the newest image with the
+  same configuration (or reports that it's already up to date).
+- The old container is parked as `<name>-gantry-old-<timestamp>` during the
+  swap and restored if anything fails.
+- Containers from a compose project get a warning: the next redeploy of the
+  project overwrites the changes.
+- Gantry refuses to recreate its own container; update it from the host with
+  `docker compose pull && docker compose up -d`.
+
+### Topology
+
+`/topology` is a read-only map of the current environment. Built-in networks
+(`bridge`/`host`/`none`) and bind mounts are hidden by default (toggles);
+unused networks and volumes are not drawn. Deep link to one project with
+`/topology?project=<name>`.
+
+### Environments: TLS and access
+
+- TCP environments can use mutual TLS like `docker --tlsverify`: switch on
+  "Use TLS" and paste or load `ca.pem`, `cert.pem` and `key.pem` (default port
+  2376). The certificates are stored AES-256-GCM-encrypted with a key derived
+  from `GANTRY_SECRET` (or `data/secret.key`); if that secret changes, enter
+  them again. The private key is never shown again after saving.
+- Administrators can use every environment. Standard users only see the
+  environments granted to them (Users page, or an environment's Access
+  dialog). New users and environments start without grants; existing standard
+  users kept access to all existing environments when this was introduced.
+
+### Live updates and history
+
+- Pages refresh themselves from Docker events, streamed as Server-Sent Events
+  from `/api/events` (one Docker events connection per environment, shared by
+  all tabs).
+- Behind a reverse proxy, don't buffer `/api/events` and `/api/exec/*`
+  (nginx: `proxy_buffering off`, or rely on the `X-Accel-Buffering: no`
+  header) and allow read timeouts above 25 seconds.
+- A background sampler records CPU, memory and running containers per
+  environment for the dashboard's 1 h / 24 h / 7 d views.
 
 ## Security model
 
