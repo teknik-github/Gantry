@@ -48,3 +48,6 @@ next-env.d.ts
 /.test-data/
 /test-results/
 /playwright-report/
+
+# local agent worktrees
+/.claude/worktrees/

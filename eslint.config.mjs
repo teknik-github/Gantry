@@ -12,7 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Test artifacts.
+    // Test artifacts and agent worktrees.
+    ".claude/**",
     ".test-data/**",
     "test-results/**",
     "playwright-report/**",

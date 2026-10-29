@@ -9,16 +9,18 @@ import { hasAnyUser } from "@/lib/server/auth/dal"
 
 export const metadata: Metadata = { title: "Setup" }
 
-export default function SetupPage() {
+export default function SetupPage({ searchParams }: PageProps<"/setup">) {
   return (
     <Suspense fallback={<Skeleton className="h-80 w-full" />}>
-      <SetupGate />
+      <SetupGate searchParams={searchParams} />
     </Suspense>
   )
 }
 
-async function SetupGate() {
+async function SetupGate({ searchParams }: Pick<PageProps<"/setup">, "searchParams">) {
   await connection()
   if (await hasAnyUser()) redirect("/login")
-  return <SetupForm />
+  // Optional ?token=… prefill, e.g. from a link built from the server log.
+  const { token } = await searchParams
+  return <SetupForm token={typeof token === "string" ? token.slice(0, 128) : undefined} />
 }

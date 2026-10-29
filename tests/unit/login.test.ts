@@ -169,3 +169,22 @@ describe("login rate-limit keys", () => {
     })
   })
 })
+
+describe("setup token", () => {
+  it("accepts only the configured token", async () => {
+    process.env.GANTRY_SETUP_TOKEN = "unit-setup-token-0123456789"
+    const { verifySetupToken } = await import("@/lib/server/setup-token")
+    expect(verifySetupToken("unit-setup-token-0123456789")).toBe(true)
+    expect(verifySetupToken("  unit-setup-token-0123456789 ")).toBe(true)
+    expect(verifySetupToken("unit-setup-token-012345678")).toBe(false)
+    expect(verifySetupToken("")).toBe(false)
+    delete process.env.GANTRY_SETUP_TOKEN
+  })
+
+  it("rejects a configured token that is too short", async () => {
+    process.env.GANTRY_SETUP_TOKEN = "short"
+    const { getSetupToken } = await import("@/lib/server/setup-token")
+    expect(() => getSetupToken()).toThrow(/at least 16/)
+    delete process.env.GANTRY_SETUP_TOKEN
+  })
+})

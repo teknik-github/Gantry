@@ -25,8 +25,16 @@ docker compose up -d --build
 DB_DRIVER=mysql COMPOSE_PROFILES=mysql docker compose up -d --build
 ```
 
-Open http://localhost:3000. On first visit you are asked to create the
-administrator account.
+Open http://localhost:3000. On first visit you create the administrator
+account; `/setup` asks for a one-time **setup token** that only someone with
+access to the server can read:
+
+```bash
+docker logs gantry 2>&1 | grep -A2 "setup token"
+```
+
+To skip `/setup` (e.g. for automated installs), set `GANTRY_ADMIN_USERNAME`
+and `GANTRY_ADMIN_PASSWORD`; the admin is created on startup.
 
 ## Development
 
@@ -67,6 +75,8 @@ The first run needs a browser: `pnpm exec playwright install chromium`.
 | `GANTRY_SECRET` | generated | Session signing key (≥ 32 characters) |
 | `COOKIE_SECURE` | `auto` | `true`, `false` or `auto` (Secure behind HTTPS) |
 | `SESSION_TTL_HOURS` | `12` | Session lifetime |
+| `GANTRY_SETUP_TOKEN` | generated | Token `/setup` asks for (≥ 16 chars); otherwise random, logged and kept in `$DATA_DIR/setup-token` |
+| `GANTRY_ADMIN_USERNAME` / `GANTRY_ADMIN_PASSWORD` | | Create the first admin at startup instead of `/setup` |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` from your reverse proxy (per-client login limits) |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Socket of the default `local` environment |
 
@@ -87,6 +97,7 @@ The first run needs a browser: `pnpm exec playwright install chromium`.
 - The console (`/api/exec/*`) is admin-only. Sessions are bound to the user
   who opened them, use unguessable ids, are audited, and close when the page
   is left or nobody reads them for 20 seconds.
+- A fresh instance can only be claimed with the setup token from the server
+  log / data directory; it is deleted once the admin exists.
 - Access to the Docker socket is equivalent to root on the host. Keep Gantry
-  on a trusted network or behind HTTPS, and finish the first-run setup right
-  after starting it.
+  on a trusted network or behind HTTPS.

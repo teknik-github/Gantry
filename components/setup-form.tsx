@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input"
 import type { ActionState } from "@/lib/validation"
 
-export function SetupForm() {
+export function SetupForm({ token }: { token?: string }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(setupAdmin, {})
   const errs = state.fieldErrors ?? {}
 
@@ -27,6 +27,27 @@ export function SetupForm() {
             Create the administrator account to finish setting up
           </p>
         </div>
+        <Field data-invalid={errs.token ? true : undefined}>
+          <FieldLabel htmlFor="token">Setup token</FieldLabel>
+          <Input
+            id="token"
+            name="token"
+            autoComplete="off"
+            spellCheck={false}
+            defaultValue={state.values?.token ?? token}
+            required
+            aria-invalid={errs.token ? true : undefined}
+            className="bg-background font-mono"
+          />
+          {errs.token ? (
+            <FieldError>{errs.token[0]}</FieldError>
+          ) : (
+            <FieldDescription>
+              Printed in the server log (<code>docker logs gantry</code>) and stored in{" "}
+              <code>DATA_DIR/setup-token</code>.
+            </FieldDescription>
+          )}
+        </Field>
         {(
           [
             ["username", "Username", "text", "username"],

@@ -13,6 +13,7 @@ import { checkRateLimit, clearFailures, recordFailure } from "@/lib/server/rate-
 import { clientAddress, LOGIN_WINDOW_MS, loginRateKeys } from "@/lib/server/login-limits"
 import { config } from "@/lib/server/config"
 import { safeNext } from "@/lib/safe-redirect"
+import { clearSetupToken, verifySetupToken } from "@/lib/server/setup-token"
 import {
   fieldErrors,
   passwordSchema,
@@ -20,6 +21,8 @@ import {
   type ActionState,
 } from "@/lib/validation"
 
+
+const SETUP_LIMIT = 20
 
 export async function login(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const values = { username: String(formData.get("username") ?? "").slice(0, 64) }
@@ -54,7 +57,11 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
 }
 
 export async function setupAdmin(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const values = { username: String(formData.get("username") ?? "").slice(0, 64) }
+  // Echo the token too, so a password typo doesn't mean digging it out again.
+  const values = {
+    username: String(formData.get("username") ?? "").slice(0, 64),
+    token: String(formData.get("token") ?? "").slice(0, 128),
+  }
   const parsed = z
     .object({ username: usernameSchema, password: passwordSchema, confirm: z.string() })
     .refine((d) => d.password === d.confirm, { path: ["confirm"], message: "Passwords do not match" })
@@ -65,8 +72,16 @@ export async function setupAdmin(_prev: ActionState, formData: FormData): Promis
     })
   if (!parsed.success) return { ...fieldErrors(parsed.error), values }
 
-  // The first account can only be created while no user exists.
+  // The first account can only be created while no user exists, and only by
+  // someone who can read the server log / data directory (the setup token).
   if (await hasAnyUser()) return { error: "Gantry is already set up. Please sign in." }
+  const wait = checkRateLimit("setup", SETUP_LIMIT)
+  if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.`, values }
+  if (!verifySetupToken(String(formData.get("token") ?? ""))) {
+    recordFailure("setup", LOGIN_WINDOW_MS)
+    await audit(null, "auth.setup_failed", "invalid setup token")
+    return { error: "Invalid setup token", fieldErrors: { token: ["Invalid setup token"] }, values }
+  }
 
   const db = await getDb()
   const result = await db
@@ -80,6 +95,7 @@ export async function setupAdmin(_prev: ActionState, formData: FormData): Promis
     .executeTakeFirstOrThrow()
 
   const id = Number(result.insertId)
+  clearSetupToken()
   await createSession({ uid: id, role: "admin" })
   await audit({ id, username: parsed.data.username, role: "admin" }, "auth.setup", parsed.data.username)
   redirect("/dashboard")

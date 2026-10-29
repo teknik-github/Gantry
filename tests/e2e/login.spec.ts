@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 
 import { ACCOUNT_LIMIT } from "../../lib/server/login-limits"
-import { ADMIN } from "./credentials"
+import { ADMIN, SETUP_TOKEN } from "./credentials"
 
 // The suite starts from an empty database (see playwright.config.ts), so the
 // tests run in order: first-run setup, then login/logout behaviour.
@@ -46,8 +46,22 @@ test("API is not reachable without a session", async ({ request }) => {
   expect((await request.get("/api/health")).status()).toBe(200)
 })
 
-test("setup validates input and keeps what was typed", async ({ page }) => {
+test("setup requires the token from the server log", async ({ page }) => {
   await page.goto("/setup")
+  await page.getByLabel("Setup token").fill("not-the-right-token")
+  await page.getByLabel("Username").fill("intruder")
+  await page.getByLabel("Password", { exact: true }).fill("intruder-password")
+  await page.getByLabel("Confirm password").fill("intruder-password")
+  await page.getByRole("button", { name: "Create administrator" }).click()
+
+  await expect(page.getByText("Invalid setup token")).toBeVisible()
+  await expect(page).toHaveURL(/\/setup$/)
+  expect((await page.context().cookies()).find((c) => c.name === SESSION_COOKIE)).toBeUndefined()
+})
+
+test("setup validates input and keeps what was typed", async ({ page }) => {
+  await page.goto(`/setup?token=${SETUP_TOKEN}`)
+  await expect(page.getByLabel("Setup token")).toHaveValue(SETUP_TOKEN)
   await page.getByLabel("Username").fill(ADMIN.username)
   await page.getByLabel("Password", { exact: true }).fill(ADMIN.password)
   await page.getByLabel("Confirm password").fill("something-else")
@@ -55,11 +69,13 @@ test("setup validates input and keeps what was typed", async ({ page }) => {
 
   await expect(page.getByText("Passwords do not match")).toBeVisible()
   await expect(page.getByLabel("Username")).toHaveValue(ADMIN.username)
-  await expect(page).toHaveURL(/\/setup$/)
+  await expect(page.getByLabel("Setup token")).toHaveValue(SETUP_TOKEN)
+  await expect(page).toHaveURL(/\/setup(\?|$)/)
 })
 
 test("setup creates the administrator and signs them in", async ({ page }) => {
   await page.goto("/setup")
+  await page.getByLabel("Setup token").fill(SETUP_TOKEN)
   await page.getByLabel("Username").fill(ADMIN.username)
   await page.getByLabel("Password", { exact: true }).fill(ADMIN.password)
   await page.getByLabel("Confirm password").fill(ADMIN.password)

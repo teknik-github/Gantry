@@ -29,6 +29,11 @@ services:
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
       # Only behind a reverse proxy you control that sets X-Forwarded-For.
       TRUST_PROXY: ${TRUST_PROXY:-false}
+      # First run: /setup needs the token printed in `docker logs gantry`.
+      GANTRY_SETUP_TOKEN: ${GANTRY_SETUP_TOKEN:-}
+      # Or create the first admin at startup instead of using /setup.
+      GANTRY_ADMIN_USERNAME: ${GANTRY_ADMIN_USERNAME:-}
+      GANTRY_ADMIN_PASSWORD: ${GANTRY_ADMIN_PASSWORD:-}
     # Group that owns /var/run/docker.sock on the host: stat -c '%g' /var/run/docker.sock
     group_add:
       - "${DOCKER_GID:-999}"
