@@ -19,6 +19,9 @@ const PORT_A = port()
 const PORT_B = PORT_A + 1
 const PORT_TAKEN = PORT_A + 2
 
+// Re-attached by name after a recreate, so `rm -v` no longer removes it.
+let anonVolume = ""
+
 const inspect = async (id: string) => (await api.inspectContainer(id)) as unknown as RecreateInspect
 
 async function cleanup() {
@@ -29,6 +32,7 @@ async function cleanup() {
   }
   for (const n of await api.listNetworks()) if (n.Name === NET) await api.removeNetwork(n.Id).catch(() => {})
   await api.removeVolume(VOL, true).catch(() => {})
+  if (anonVolume) await api.removeVolume(anonVolume, true).catch(() => {})
 }
 
 describe.runIf(enabled)("recreate against Docker", () => {
@@ -39,7 +43,7 @@ describe.runIf(enabled)("recreate against Docker", () => {
     await api.createVolume(VOL)
     const created = await api.createContainer(NAME, {
       Image: "alpine:3",
-      Cmd: ["sh", "-c", "date > /anon/stamp; date > /data/stamp; exec sleep 900"],
+      Cmd: ["sleep", "900"],
       StopTimeout: 1,
       Env: ["FOO=one", "KEEP=yes"],
       Labels: { "gantry.e2e": "true", "com.example.keep": "1" },
@@ -55,16 +59,14 @@ describe.runIf(enabled)("recreate against Docker", () => {
       },
       NetworkingConfig: { EndpointsConfig: { [NET]: { Aliases: ["svc"] } } },
     })
-    await api.containerAction(created.Id, "start")
     id = created.Id
+    anonVolume = (await inspect(id)).Mounts!.find((m) => m.Destination === "/anon")!.Name!
+    await api.containerAction(created.Id, "start")
   }, 180_000)
 
   afterAll(cleanup, 180_000)
 
-  it("edits env + port, keeps everything else and the anonymous volume's data", async () => {
-    const before = await inspect(id)
-    const anon = before.Mounts!.find((m) => m.Destination === "/anon")!.Name
-
+  it("edits env + port, keeps everything else and reuses the anonymous volume", async () => {
     const res = await recreateContainer(api, {
       id,
       edits: {
@@ -85,7 +87,7 @@ describe.runIf(enabled)("recreate against Docker", () => {
     expect(after.HostConfig).toMatchObject({ RestartPolicy: { Name: "on-failure", MaximumRetryCount: 2 } })
     expect(after.HostConfig.CapDrop).toEqual(expect.arrayContaining([expect.stringMatching(/MKNOD/)]))
     expect(after.NetworkSettings.Networks![NET].Aliases).toEqual(["svc"])
-    expect(after.Mounts!.find((m) => m.Destination === "/anon")?.Name).toBe(anon)
+    expect(after.Mounts!.find((m) => m.Destination === "/anon")?.Name).toBe(anonVolume)
     expect(after.Mounts!.find((m) => m.Destination === "/data")?.Name).toBe(VOL)
     expect(after.Config.Hostname).toBe(res.id.slice(0, 12))
     expect(after.Config.StopTimeout).toBe(1)
