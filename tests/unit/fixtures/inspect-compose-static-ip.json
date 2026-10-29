@@ -1,0 +1,270 @@
+{
+  "Id": "9c6fbc19f9dfc07f866e582856471a4bcb37546707a798a000bf2e98e2fabbae",
+  "Created": "2026-10-29T17:57:41.612318423Z",
+  "Path": "sh",
+  "Args": [
+    "-c",
+    "sleep 900"
+  ],
+  "State": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 996056,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-10-29T17:59:17.805353865Z",
+    "FinishedAt": "0001-01-01T00:00:00Z"
+  },
+  "Image": "sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a",
+  "ResolvConfPath": "/var/lib/docker/containers/9c6fbc19f9dfc07f866e582856471a4bcb37546707a798a000bf2e98e2fabbae/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/9c6fbc19f9dfc07f866e582856471a4bcb37546707a798a000bf2e98e2fabbae/hostname",
+  "HostsPath": "/var/lib/docker/containers/9c6fbc19f9dfc07f866e582856471a4bcb37546707a798a000bf2e98e2fabbae/hosts",
+  "LogPath": "/var/lib/docker/containers/9c6fbc19f9dfc07f866e582856471a4bcb37546707a798a000bf2e98e2fabbae/9c6fbc19f9dfc07f866e582856471a4bcb37546707a798a000bf2e98e2fabbae-json.log",
+  "Name": "/gantry-test-c-fixture2",
+  "RestartCount": 0,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "docker-default",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "json-file",
+      "Config": {}
+    },
+    "NetworkMode": "gantry-test-net-ip",
+    "PortBindings": {},
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": null,
+    "DnsSearch": null,
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 0,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": null,
+    "BlkioDeviceReadBps": null,
+    "BlkioDeviceWriteBps": null,
+    "BlkioDeviceReadIOps": null,
+    "BlkioDeviceWriteIOps": null,
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": null,
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 0,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Source": "gantry-test-vol-fix",
+        "Target": "/data",
+        "VolumeOptions": {
+          "NoCopy": true
+        }
+      },
+      {
+        "Type": "volume",
+        "Target": "/cache"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp",
+        "Target": "/mnt/tmp",
+        "ReadOnly": true
+      }
+    ],
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "gantry-test-vol-fix",
+      "Source": "/var/lib/docker/volumes/gantry-test-vol-fix/_data",
+      "Destination": "/data",
+      "Driver": "local",
+      "Mode": "z",
+      "RW": true,
+      "Propagation": ""
+    },
+    {
+      "Type": "volume",
+      "Name": "e1c4614fb6a840d8f699549c74c7987a10bd0d59e37d5c13a38275fd590b2c28",
+      "Source": "/var/lib/docker/volumes/e1c4614fb6a840d8f699549c74c7987a10bd0d59e37d5c13a38275fd590b2c28/_data",
+      "Destination": "/cache",
+      "Driver": "local",
+      "Mode": "z",
+      "RW": true,
+      "Propagation": ""
+    },
+    {
+      "Type": "bind",
+      "Source": "/tmp",
+      "Destination": "/mnt/tmp",
+      "Mode": "",
+      "RW": false,
+      "Propagation": "rprivate"
+    }
+  ],
+  "Config": {
+    "Hostname": "api-host",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": false,
+    "AttachStdout": false,
+    "AttachStderr": false,
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "A=1",
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ],
+    "Cmd": [
+      "-c",
+      "sleep 900"
+    ],
+    "Image": "alpine:3",
+    "Volumes": null,
+    "WorkingDir": "/",
+    "Entrypoint": [
+      "sh"
+    ],
+    "Labels": {
+      "com.docker.compose.project": "demo",
+      "com.docker.compose.service": "api",
+      "gantry.e2e": "true"
+    }
+  },
+  "NetworkSettings": {
+    "SandboxID": "5fcaf13c7fe3f81ceb56fae960b22d5c92c0f6cf22ef478d3237b96099b271b7",
+    "SandboxKey": "/var/run/docker/netns/5fcaf13c7fe3",
+    "Ports": {},
+    "Networks": {
+      "gantry-test-net-ip": {
+        "IPAMConfig": {
+          "IPv4Address": "10.251.77.10"
+        },
+        "Links": null,
+        "Aliases": [
+          "api"
+        ],
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "109a89e601e781bb4a2e8155033ae0c141e9da3f7b70f3548e791d86886eaa41",
+        "EndpointID": "9a2e3e464ad3933a961344967fd758165be71d4fde42fb52a5ae69651e0f2506",
+        "Gateway": "10.251.77.1",
+        "IPAddress": "10.251.77.10",
+        "MacAddress": "22:08:4e:f1:91:79",
+        "IPPrefixLen": 24,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": [
+          "gantry-test-c-fixture2",
+          "api",
+          "9c6fbc19f9df",
+          "api-host"
+        ]
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:c26612752c78b18faacd63c7d50f4592c2e7b0f25e0e20e82bd74e465c57ab0d",
+    "size": 1022,
+    "annotations": {
+      "com.docker.official-images.bashbrew.arch": "amd64",
+      "org.opencontainers.image.base.name": "scratch",
+      "org.opencontainers.image.created": "2026-10-21T22:37:09Z",
+      "org.opencontainers.image.revision": "5aec467fb81238bae9441eea2edb000655d7044f",
+      "org.opencontainers.image.source": "https://github.com/alpinelinux/docker-alpine.git#5aec467fb81238bae9441eea2edb000655d7044f:x86_64",
+      "org.opencontainers.image.url": "https://hub.docker.com/_/alpine",
+      "org.opencontainers.image.version": "3.24.3"
+    },
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+}

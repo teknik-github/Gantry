@@ -6,6 +6,7 @@ import { PauseIcon, PlayIcon, RefreshCwIcon, RotateCwIcon, SquareIcon, Trash2Ico
 
 import { containerAction, removeContainer } from "@/app/(app)/containers/actions"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
+import { EditContainerDialog, PullRecreateButton, type RecreateInfo } from "@/components/gantry/container-edit-dialog"
 import { useRunAction } from "@/components/gantry/use-action"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -25,11 +26,14 @@ export function ContainerActions({
   name,
   state,
   isAdmin,
+  recreate,
 }: {
   id: string
   name: string
   state: string
   isAdmin: boolean
+  /** Edit / pull & recreate (administrators only). */
+  recreate?: RecreateInfo
 }) {
   const router = useRouter()
   const [pending, run] = useRunAction()
@@ -72,6 +76,12 @@ export function ContainerActions({
           <ZapIcon data-icon="inline-start" />
           Kill
         </Button>
+      ) : null}
+      {isAdmin && recreate ? (
+        <>
+          <EditContainerDialog id={id} name={name} info={recreate} />
+          <PullRecreateButton id={id} name={name} image={recreate.values.image} info={recreate} />
+        </>
       ) : null}
       {isAdmin ? (
         <ConfirmAction

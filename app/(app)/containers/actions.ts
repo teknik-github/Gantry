@@ -2,6 +2,7 @@
 
 import { z } from "zod"
 
+import { containerNameField, imageField, parseEnv, parsePorts, parseVolumes, splitArgs } from "@/lib/container-form"
 import { runAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
 import { getCurrentUser } from "@/lib/server/auth/dal"
@@ -35,15 +36,9 @@ export async function removeContainer(id: string, opts: { force?: boolean; volum
   })
 }
 
-const portRe = /^(?:(\d{1,3}(?:\.\d{1,3}){3}):)?(\d{1,5}):(\d{1,5})(?:\/(tcp|udp))?$/
-
 const createSchema = z.object({
-  image: z.string().trim().min(1, "Image is required").max(255),
-  name: z
-    .string()
-    .trim()
-    .max(128)
-    .regex(/^([a-zA-Z0-9][a-zA-Z0-9_.-]*)?$/, "Letters, numbers, dot, dash or underscore"),
+  image: imageField,
+  name: containerNameField,
   ports: z.string().max(2000),
   env: z.string().max(20000),
   volumes: z.string().max(4000),
@@ -53,46 +48,22 @@ const createSchema = z.object({
   start: z.enum(["on"]).optional(),
 })
 
-function lines(value: string) {
-  return value
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("#"))
-}
-
-/** "a b 'c d'" -> ["a", "b", "c d"] */
-function splitArgs(value: string) {
-  return (value.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((a) => a.replace(/^(["'])(.*)\1$/, "$2"))
-}
-
 export async function createContainer(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = createSchema.safeParse(Object.fromEntries(formData))
   if (!parsed.success) return fieldErrors(parsed.error)
   const v = parsed.data
 
-  const exposed: Record<string, object> = {}
-  const bindings: Record<string, { HostIp: string; HostPort: string }[]> = {}
-  for (const spec of lines(v.ports)) {
-    const m = portRe.exec(spec)
-    if (!m) return { error: "Invalid port mapping", fieldErrors: { ports: [`"${spec}" — use host:container, e.g. 8080:80`] } }
-    const key = `${m[3]}/${m[4] ?? "tcp"}`
-    exposed[key] = {}
-    ;(bindings[key] ??= []).push({ HostIp: m[1] ?? "", HostPort: m[2] })
-  }
+  const ports = parsePorts(v.ports)
+  if (!ports.ok) return { error: ports.error, fieldErrors: { ports: [ports.fieldError] } }
+  const { exposed, bindings } = ports.value
 
-  const env = lines(v.env)
-  for (const e of env) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(e)) {
-      return { error: "Invalid environment variable", fieldErrors: { env: [`"${e}" — use KEY=value`] } }
-    }
-  }
+  const envResult = parseEnv(v.env)
+  if (!envResult.ok) return { error: envResult.error, fieldErrors: { env: [envResult.fieldError] } }
+  const env = envResult.value
 
-  const binds = lines(v.volumes)
-  for (const b of binds) {
-    if (!/^[^:]+:\/[^:]*(:(ro|rw))?$/.test(b)) {
-      return { error: "Invalid volume", fieldErrors: { volumes: [`"${b}" — use volume-or-path:/container/path[:ro]`] } }
-    }
-  }
+  const volumes = parseVolumes(v.volumes)
+  if (!volumes.ok) return { error: volumes.error, fieldErrors: { volumes: [volumes.fieldError] } }
+  const binds = volumes.value
 
   return runAction("admin", "container.create", v.name || v.image, async ({ docker }) => {
     const api = await docker()

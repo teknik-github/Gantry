@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import { ArrowLeftIcon, ScrollTextIcon, TerminalSquareIcon } from "lucide-react"
 
 import { ContainerActions, LogViewer } from "@/components/gantry/container-detail-client"
+import type { RecreateInfo } from "@/components/gantry/container-edit-dialog"
 import { ExecConsole } from "@/components/gantry/exec-console"
 import { DockerUnavailable, Mono, PageBody, StateBadge } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
@@ -10,6 +11,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatDate, shortId } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
+import {
+  composeProject,
+  fixedMountTargets,
+  formValuesFromInspect,
+  networksEditable,
+  recreateBlocker,
+  type RecreateInspect,
+} from "@/lib/server/docker/recreate"
+import { selfContainerIds } from "@/lib/server/docker/self"
 import { getDocker } from "@/lib/server/environments"
 import { tryDocker } from "@/lib/server/views"
 
@@ -32,6 +42,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
   const c = result.data
   const name = c.Name.replace(/^\//, "")
   const isAdmin = user.role === "admin"
+  const recreate = isAdmin ? await recreateInfo(c as unknown as RecreateInspect) : undefined
   const ports = Object.entries(c.HostConfig.PortBindings ?? {}).flatMap(([container, binds]) =>
     (binds ?? []).map((b) => `${b.HostIp ? `${b.HostIp}:` : ""}${b.HostPort} → ${container}`)
   )
@@ -52,7 +63,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
           </h2>
           <Mono className="text-muted-foreground">{shortId(c.Id)}</Mono>
         </div>
-        <ContainerActions id={c.Id} name={name} state={c.State.Status} isAdmin={isAdmin} />
+        <ContainerActions id={c.Id} name={name} state={c.State.Status} isAdmin={isAdmin} recreate={recreate} />
       </div>
 
       <div className="grid gap-4 px-4 lg:px-6 @4xl/main:grid-cols-2">
@@ -170,6 +181,24 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
       </div>
     </PageBody>
   )
+}
+
+/** Prefilled edit form and guards. Includes env values: administrators only. */
+async function recreateInfo(c: RecreateInspect): Promise<RecreateInfo> {
+  const editable = networksEditable(c)
+  const networks = editable ? await tryDocker(async () => (await getDocker()).listNetworks()) : null
+  return {
+    values: formValuesFromInspect(c),
+    availableNetworks: (networks?.data ?? [])
+      .filter((n) => n.Driver !== "host" && n.Driver !== "null" && n.Name !== "ingress")
+      .map((n) => n.Name),
+    networksEditable: editable,
+    networkMode: c.HostConfig.NetworkMode ?? "default",
+    composeProject: composeProject(c),
+    blocker: recreateBlocker(c, selfContainerIds()),
+    entrypoint: (c.Config.Entrypoint ?? []).join(" "),
+    fixedMounts: fixedMountTargets(c),
+  }
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

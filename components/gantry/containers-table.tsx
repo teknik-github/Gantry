@@ -3,6 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import {
+  CloudDownloadIcon,
   EllipsisVerticalIcon,
   PauseIcon,
   PlayIcon,
@@ -18,6 +19,7 @@ import {
 import { containerAction, createContainer, removeContainer } from "@/app/(app)/containers/actions"
 import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
+import { PullRecreateConfirm } from "@/components/gantry/container-edit-dialog"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono, StateBadge } from "@/components/gantry/ui"
 import { useRunAction } from "@/components/gantry/use-action"
@@ -138,6 +140,7 @@ export function ContainersTable({
 function RowActions({ row, isAdmin }: { row: ContainerRow; isAdmin: boolean }) {
   const [pending, run] = useRunAction()
   const [confirmRemove, setConfirmRemove] = React.useState(false)
+  const [confirmPull, setConfirmPull] = React.useState(false)
   const [force, setForce] = React.useState(false)
   const [volumes, setVolumes] = React.useState(false)
 
@@ -208,6 +211,10 @@ function RowActions({ row, isAdmin }: { row: ContainerRow; isAdmin: boolean }) {
           {isAdmin ? (
             <>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setConfirmPull(true)}>
+                <CloudDownloadIcon />
+                Pull & recreate
+              </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onSelect={() => setConfirmRemove(true)}>
                 <Trash2Icon />
                 Remove
@@ -216,6 +223,16 @@ function RowActions({ row, isAdmin }: { row: ContainerRow; isAdmin: boolean }) {
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+      {isAdmin ? (
+        <PullRecreateConfirm
+          open={confirmPull}
+          onOpenChange={setConfirmPull}
+          id={row.id}
+          name={row.name}
+          image={row.image}
+          composeProject={row.stack}
+        />
+      ) : null}
       <ConfirmAction
         open={confirmRemove}
         onOpenChange={setConfirmRemove}
