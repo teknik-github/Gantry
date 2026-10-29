@@ -74,6 +74,13 @@ export type ImageSummary = {
   Containers: number
 }
 
+export type ImageInspect = {
+  Id: string
+  RepoTags: string[] | null
+  RepoDigests: string[] | null
+  Config: Record<string, unknown> | null
+}
+
 export type Volume = {
   Name: string
   Driver: string
@@ -135,6 +142,14 @@ function seg(value: string) {
   return encodeURIComponent(value)
 }
 
+/** Image references may contain "/" (registry/namespace); encode each part. */
+function imageRefPath(reference: string) {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_./:@-]*$/.test(reference) || reference.includes("..") || reference.includes("//")) {
+    throw new DockerError("Invalid image reference", 400)
+  }
+  return reference.split("/").map(encodeURIComponent).join("/")
+}
+
 export function docker(target: DockerTarget) {
   return {
     ping: () => dockerRaw(target, "GET", "/_ping", { timeoutMs: 5_000 }).then(() => true),
@@ -169,7 +184,13 @@ export function docker(target: DockerTarget) {
         body: spec,
       }),
 
+    renameContainer: (id: string, name: string) =>
+      dockerRaw(target, "POST", `/containers/${seg(id)}/rename`, { query: { name } }),
+
     // Images
+    /** By id or by reference ("nginx:latest", "ghcr.io/org/app:1"). */
+    inspectImage: (reference: string) =>
+      dockerJson<ImageInspect>(target, "GET", `/images/${imageRefPath(reference)}/json`),
     listImages: () => dockerJson<ImageSummary[]>(target, "GET", "/images/json"),
     removeImage: (id: string, force = false) =>
       dockerRaw(target, "DELETE", `/images/${seg(id)}`, { query: { force } }),
@@ -213,6 +234,10 @@ export function docker(target: DockerTarget) {
         body: { Name: name, Driver: driver, CheckDuplicate: true },
       }),
     removeNetwork: (id: string) => dockerRaw(target, "DELETE", `/networks/${seg(id)}`),
+    connectNetwork: (network: string, container: string, endpoint?: Record<string, unknown>) =>
+      dockerRaw(target, "POST", `/networks/${seg(network)}/connect`, {
+        body: { Container: container, EndpointConfig: endpoint ?? {} },
+      }),
   }
 }
 
