@@ -105,9 +105,9 @@ export function stackDir(environmentId: number, name: string) {
 
 export async function writeStackFiles(dir: string, compose: string, env: string) {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 })
-  await fs.writeFile(path.join(dir, COMPOSE_FILE), compose, { mode: 0o600 })
+  await fs.writeFile(path.join(/* turbopackIgnore: true */ dir, COMPOSE_FILE), compose, { mode: 0o600 })
   // .env may hold secrets.
-  await fs.writeFile(path.join(dir, ENV_FILE), env, { mode: 0o600 })
+  await fs.writeFile(path.join(/* turbopackIgnore: true */ dir, ENV_FILE), env, { mode: 0o600 })
 }
 
 export async function removeStackDir(dir: string) {
@@ -205,8 +205,10 @@ function spawnCompose(
   return new Promise((resolve) => {
     let timedOut = false
     let settled = false
-    const child = spawn(process.env.DOCKER_CLI || "docker", args, {
-      cwd,
+    // turbopackIgnore: these are runtime paths, not files to trace into the
+    // standalone build (otherwise the whole project gets copied into it).
+    const child = spawn(/* turbopackIgnore: true */ process.env.DOCKER_CLI || "docker", args, {
+      cwd: /* turbopackIgnore: true */ cwd,
       // Replaces (not extends) the parent environment; see composeEnv().
       env: env as unknown as NodeJS.ProcessEnv,
       shell: false,

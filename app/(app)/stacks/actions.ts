@@ -269,10 +269,10 @@ export async function importProject(project: string): Promise<ActionState> {
 
     let compose: string
     try {
-      const stat = await fs.stat(file)
+      const stat = await fs.stat(/* turbopackIgnore: true */ file)
       if (!stat.isFile()) throw new Error("not a file")
       if (stat.size > MAX_COMPOSE_BYTES) throw new UserError("The compose file is too large to import")
-      compose = normalizeText(await fs.readFile(file, "utf8"))
+      compose = normalizeText(await fs.readFile(/* turbopackIgnore: true */ file, "utf8"))
     } catch (err) {
       if (err instanceof UserError) throw err
       throw new UserError(
@@ -286,7 +286,7 @@ export async function importProject(project: string): Promise<ActionState> {
     let env = ""
     const workingDir = labels[WORKING_DIR_LABEL]
     if (workingDir && path.isAbsolute(workingDir)) {
-      const text = await fs.readFile(path.join(workingDir, ".env"), "utf8").catch(() => "")
+      const text = await fs.readFile(path.join(/* turbopackIgnore: true */ workingDir, ".env"), "utf8").catch(() => "")
       if (text && !validateDotenv(normalizeText(text))) env = normalizeText(text)
     }
 
