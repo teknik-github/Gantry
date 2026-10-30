@@ -17,6 +17,9 @@ export default defineConfig({
       GANTRY_SECRET: "unit-test-secret-unit-test-secret-0123456789",
       DATA_DIR: ".test-data/unit",
       SESSION_TTL_HOURS: "12",
+      // Test databases are MySQL with GANTRY_TEST_MYSQL_URL (tests/helpers/mysql.ts);
+      // migrations 002/007 pick their column types from DB_DRIVER.
+      ...(process.env.GANTRY_TEST_MYSQL_URL ? { DB_DRIVER: "mysql" } : {}),
     },
   },
 })

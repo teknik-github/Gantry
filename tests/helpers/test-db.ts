@@ -7,11 +7,25 @@ import { Migrator } from "kysely/migration"
 import { migrationProvider } from "@/lib/server/db/migrations"
 import type { Database, Role } from "@/lib/server/db/schema"
 import { openSqlite } from "@/lib/server/db/sqlite"
+import { openMysqlTestDb, testMysqlUrl } from "./mysql"
 
-/** A throwaway SQLite database with every migration applied. */
-export async function openTestDb() {
+async function openEmpty(): Promise<{ db: Kysely<Database>; cleanup: () => Promise<void> }> {
+  // With GANTRY_TEST_MYSQL_URL every test database is a fresh MySQL one.
+  if (testMysqlUrl) return openMysqlTestDb()
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gantry-test-k-db-"))
   const db = new Kysely<Database>({ dialect: new SqliteDialect({ database: openSqlite(path.join(dir, "t.db")) }) })
+  return {
+    db,
+    async cleanup() {
+      await db.destroy()
+      fs.rmSync(dir, { recursive: true, force: true })
+    },
+  }
+}
+
+/** A throwaway database (SQLite, or MySQL with GANTRY_TEST_MYSQL_URL) with every migration applied. */
+export async function openTestDb() {
+  const { db, cleanup } = await openEmpty()
   const { error } = await new Migrator({ db, provider: migrationProvider, allowUnorderedMigrations: true }).migrateToLatest()
   if (error) throw error
   return {
@@ -23,9 +37,6 @@ export async function openTestDb() {
         .executeTakeFirstOrThrow()
       return Number(r.insertId)
     },
-    async cleanup() {
-      await db.destroy()
-      fs.rmSync(dir, { recursive: true, force: true })
-    },
+    cleanup,
   }
 }

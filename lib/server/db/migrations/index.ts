@@ -14,6 +14,7 @@ import { kubernetes } from "@/lib/server/db/migrations/009_kubernetes"
 import { proxy } from "@/lib/server/db/migrations/010_proxy"
 import { auth } from "@/lib/server/db/migrations/011_auth"
 import { gitStacks } from "@/lib/server/db/migrations/013_git_stacks"
+import { mysqlColumns } from "@/lib/server/db/migrations/014_mysql_columns"
 
 // One file per migration, written with Kysely's schema builder only so the
 // same migrations run on SQLite and MySQL. Never edit a migration that has
@@ -32,6 +33,7 @@ const migrations: Record<string, Migration> = {
   "011_auth": auth,
   // 012 was reserved for Kubernetes and not needed.
   "013_git_stacks": gitStacks,
+  "014_mysql_columns": mysqlColumns,
 }
 
 export const migrationProvider: MigrationProvider = {

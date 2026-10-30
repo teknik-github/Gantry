@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { Kysely, MysqlDialect, SqliteDialect, sql } from "kysely"
+import { Kysely, SqliteDialect } from "kysely"
 import { Migrator } from "kysely/migration"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
@@ -16,9 +16,10 @@ import {
   setEnvironmentUsers,
   setUserEnvironments,
 } from "@/lib/server/environment-access"
+import { openMysqlTestDb, testMysqlUrl } from "../helpers/mysql"
 
 // Runs the real migrations on SQLite, and on MySQL too when
-// GANTRY_TEST_MYSQL_URL points at a throwaway database (it is wiped).
+// GANTRY_TEST_MYSQL_URL points at a throwaway server (tests/helpers/mysql.ts).
 
 type Setup = { name: string; open: () => Promise<{ db: Kysely<Database>; cleanup: () => Promise<void> }> }
 
@@ -39,39 +40,7 @@ const setups: Setup[] = [
   },
 ]
 
-const mysqlUrl = process.env.GANTRY_TEST_MYSQL_URL
-if (mysqlUrl) {
-  setups.push({
-    name: "mysql",
-    async open() {
-      const { createPool } = await import("mysql2")
-      const db = new Kysely<Database>({ dialect: new MysqlDialect({ pool: createPool({ uri: mysqlUrl, connectionLimit: 4 }) }) })
-      for (const t of [
-        "environment_access",
-        "recovery_codes",
-        "api_tokens",
-        "audit_logs",
-        "stacks",
-        "metrics",
-        "auto_update_rules",
-        "alerts",
-        "proxy_settings",
-        "proxy_hosts",
-        "registries",
-        "templates",
-        "notification_channels",
-        "settings",
-        "environments",
-        "users",
-        "kysely_migration",
-        "kysely_migration_lock",
-      ]) {
-        await sql`drop table if exists ${sql.table(t)}`.execute(db)
-      }
-      return { db, cleanup: () => db.destroy() }
-    },
-  })
-}
+if (testMysqlUrl) setups.push({ name: "mysql", open: openMysqlTestDb })
 
 describe.each(setups)("environment access ($name)", { timeout: 300_000 }, ({ open }) => {
   let db: Kysely<Database>

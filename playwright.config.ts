@@ -16,8 +16,14 @@ const baseURL = external ?? `http://127.0.0.1:${PORT}`
 // Absolute: the standalone server chdirs into .next/standalone, so a relative
 // DATA_DIR would land (and survive between runs) there.
 const dataDir = path.resolve(".test-data/e2e")
+// E2E_DB=mysql runs the server on MySQL instead: E2E_MYSQL_URL names a
+// throwaway database, emptied before the server starts (all tables dropped).
+const mysql = process.env.E2E_DB === "mysql"
+const mysqlUrl = process.env.E2E_MYSQL_URL
+if (mysql && !mysqlUrl && !external) throw new Error("E2E_DB=mysql needs E2E_MYSQL_URL (mysql://user:pass@host:port/db, wiped)")
 const serve = [
   `rm -rf "${dataDir}"`,
+  ...(mysql ? ["node tests/helpers/reset-e2e-mysql.mjs"] : []),
   process.env.E2E_SKIP_BUILD ? "true" : "pnpm build",
   "cp -r .next/static .next/standalone/.next/",
   "cp -r public .next/standalone/",
@@ -62,7 +68,7 @@ export default defineConfig({
         env: {
           HOSTNAME: "127.0.0.1",
           PORT: String(PORT),
-          DB_DRIVER: "sqlite",
+          ...(mysql ? { DB_DRIVER: "mysql", DATABASE_URL: mysqlUrl!, E2E_MYSQL_URL: mysqlUrl! } : { DB_DRIVER: "sqlite" }),
           DATA_DIR: dataDir,
           GANTRY_SECRET: "e2e-test-secret-e2e-test-secret-0123456789",
           COOKIE_SECURE: "false",

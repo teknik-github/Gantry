@@ -113,8 +113,17 @@ Unit/integration extras:
 - The TLS tests need `openssl` and the Docker socket (they run a local mTLS
   proxy in front of it).
 - `GANTRY_DOCKER_IT=1` also runs the recreate tests against real Docker.
-- `GANTRY_TEST_MYSQL_URL=mysql://…` also runs the migration/access tests on
-  MySQL. The database is wiped, so point it at a throwaway one.
+- `GANTRY_TEST_MYSQL_URL=mysql://root:…@127.0.0.1:3307/x` runs the database
+  tests on MySQL (`tests/integration/mysql.test.ts`: fresh install, upgrades
+  from 005 and 013, column sizes and collations; and the user, 2FA, OIDC, API
+  token and environment access tests). Each test creates and drops its own
+  `gantry_test_*` database, so the user needs `CREATE`/`DROP DATABASE`; use a
+  throwaway server, e.g.
+  `docker run -d --name gantry-test-mysql -p 127.0.0.1:3307:3306 -e MYSQL_ROOT_PASSWORD=pw --tmpfs /var/lib/mysql mysql:8.4`.
+
+E2E against MySQL: `E2E_DB=mysql E2E_MYSQL_URL=mysql://user:pass@host:port/db pnpm test:e2e`
+starts the server with `DB_DRIVER=mysql` on that database. **Every table in it
+is dropped first**, so point it at a throwaway database.
 
 The first run needs a browser: `pnpm exec playwright install chromium`.
 
@@ -166,6 +175,32 @@ against the same throwaway cluster.
 | `OIDC_GROUPS_CLAIM` | `groups` | Claim holding the groups (ID token, or userinfo if absent there) |
 | `OIDC_USERNAME_CLAIM` | `preferred_username` | Claim used for new usernames (then the email's local part, then the name) |
 | `PASSWORD_LOGIN` | `all` | `admins`: with SSO configured, only administrators may use the password form (break-glass access) |
+
+### MySQL
+
+- **Version**: MySQL 8.0 or newer (tested with 8.4, the version in
+  `docker-compose.yml`), InnoDB tables, a database whose default character set
+  is `utf8mb4` (MySQL 8's default). Strict SQL mode (the default) is fine.
+- **Privileges**: migrations run at startup, so the user needs `CREATE`,
+  `ALTER`, `INDEX` and `REFERENCES` on Gantry's database besides
+  `SELECT`/`INSERT`/`UPDATE`/`DELETE`. The compose `mysql` service's
+  `MYSQL_USER` has all privileges on `MYSQL_DATABASE`.
+- **Upgrading**: migration `014_mysql_columns` (MySQL only; nothing changes on
+  SQLite) widens columns that were too small for what the forms accept (TLS
+  and Kubernetes credentials, the auto-update history, proxy hosts with many
+  domains) and makes OIDC identities, auto-update container names and webhook
+  ids case-sensitive. It rebuilds a few small tables when Gantry starts; back
+  up the database before upgrading, as with any migration.
+- **Case-insensitive names**: MySQL's default collation
+  (`utf8mb4_0900_ai_ci`) ignores case, so on MySQL **usernames** and **custom
+  template titles** are case-insensitive: `Alice` and `alice` are the same
+  account (either spelling signs in, and a second one can't be created), and
+  two templates can't differ only in case. On SQLite they are distinct. Login
+  rate limits treat usernames case-insensitively on both. Lists sorted by name
+  ignore case on MySQL and put uppercase first on SQLite. Registry addresses,
+  stack names and proxy domains are stored in lowercase, so they behave the
+  same on both. OIDC subjects, container names and webhook ids are always
+  compared exactly.
 
 ## Features in more detail
 

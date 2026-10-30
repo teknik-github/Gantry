@@ -98,6 +98,9 @@ test("revoking the token locks it out", async ({ page, playwright, baseURL }) =>
   await expect(row).not.toContainText("never") // last used is recorded
   await row.getByRole("button", { name: `Revoke ${NAME}` }).click()
   await page.getByRole("alertdialog").getByRole("button", { name: "Revoke" }).click()
+  // The dialog closes once the action has returned. Until then it hides the
+  // page from the accessibility tree, so the row "disappears" early.
+  await expect(page.getByRole("alertdialog")).toHaveCount(0)
   await expect(row).toHaveCount(0)
 
   const api = await playwright.request.newContext({ baseURL })
