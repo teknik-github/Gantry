@@ -9,6 +9,8 @@ import { environmentAccess } from "@/lib/server/db/migrations/004_environment_ac
 import { metrics } from "@/lib/server/db/migrations/005_metrics"
 import { registries } from "@/lib/server/db/migrations/006_registries"
 import { templates } from "@/lib/server/db/migrations/007_templates"
+import { notifications } from "@/lib/server/db/migrations/008_notifications"
+import { proxy } from "@/lib/server/db/migrations/010_proxy"
 
 // One file per migration, written with Kysely's schema builder only so the
 // same migrations run on SQLite and MySQL. Never edit a migration that has
@@ -21,6 +23,9 @@ const migrations: Record<string, Migration> = {
   "005_metrics": metrics,
   "006_registries": registries,
   "007_templates": templates,
+  "008_notifications": notifications,
+  // 009 is taken by Kubernetes environments (separate branch).
+  "010_proxy": proxy,
 }
 
 export const migrationProvider: MigrationProvider = {

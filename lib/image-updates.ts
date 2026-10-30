@@ -10,6 +10,8 @@ export type ContainerUpdate = {
   reference: string
   /** Why the status is unknown (registry error, local-only image, ...). */
   reason?: string
+  /** Digest the registry served at the last check. */
+  remoteDigest?: string
   checkedAt: number
 }
 

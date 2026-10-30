@@ -3,6 +3,7 @@ import "server-only"
 import type { Environment } from "@/lib/server/db/schema"
 import { dockerEventSource } from "@/lib/server/docker/events"
 import { EventHub, type HubListener } from "@/lib/server/event-hub"
+import { environmentTarget } from "@/lib/server/environment-target"
 
 // One hub per server process; kept on globalThis so dev hot reloads reuse
 // the open Docker connections instead of leaking new ones.
@@ -26,7 +27,10 @@ function hub() {
 }
 
 /** Subscribes to the live Docker events of an environment (shared upstream connection). */
-export function subscribeToEnvironment(env: Pick<Environment, "id" | "type" | "url">, listener: HubListener) {
-  const key = `${env.id}:${env.type}:${env.url}`
-  return hub().subscribe(key, dockerEventSource({ type: env.type, url: env.url }), listener)
+export function subscribeToEnvironment(env: Environment, listener: HubListener) {
+  // Includes the TLS material, so tcp environments with mutual TLS work too. The
+  // ciphertext tail changes whenever certificates are saved again (fresh IV),
+  // which opens a new upstream with them.
+  const key = `${env.id}:${env.type}:${env.url}:${env.tls_cert?.slice(-16) ?? "plain"}`
+  return hub().subscribe(key, dockerEventSource(environmentTarget(env)), listener)
 }

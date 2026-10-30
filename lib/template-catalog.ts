@@ -531,6 +531,473 @@ volumes:
   data:
 `,
   },
+  {
+    slug: "caddy",
+    title: "Caddy",
+    description: "Web server with automatic HTTPS; edit the Caddyfile in the config volume.",
+    category: "Web",
+    stackName: "caddy",
+    website: "https://caddyserver.com",
+    variables: [port("HTTP_PORT", "HTTP port", "8087"), port("HTTPS_PORT", "HTTPS port", "8447")],
+    compose: `services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:80"
+      - "\${HTTPS_PORT}:443"
+    volumes:
+      - site:/usr/share/caddy
+      - data:/data
+      - config:/config
+
+volumes:
+  site:
+  data:
+  config:
+`,
+  },
+  {
+    slug: "traefik",
+    title: "Traefik",
+    description: "Reverse proxy that routes to containers by their labels. Reads the Docker socket (read-only).",
+    category: "Web",
+    stackName: "traefik",
+    website: "https://traefik.io",
+    variables: [port("HTTP_PORT", "HTTP port", "8088"), port("DASHBOARD_PORT", "Dashboard port", "8089")],
+    compose: `services:
+  traefik:
+    image: traefik:v3
+    restart: unless-stopped
+    command:
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+    ports:
+      - "\${HTTP_PORT}:80"
+      - "\${DASHBOARD_PORT}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+`,
+  },
+  {
+    slug: "nextcloud",
+    title: "Nextcloud",
+    description: "Files, calendar and contacts in your own cloud, with MariaDB.",
+    category: "Productivity",
+    stackName: "nextcloud",
+    website: "https://nextcloud.com",
+    variables: [
+      port("HTTP_PORT", "HTTP port", "8090"),
+      text("ADMIN_USER", "Admin user", "admin"),
+      password("ADMIN_PASSWORD", "Admin password"),
+      password("DB_PASSWORD", "Database password"),
+      password("DB_ROOT_PASSWORD", "Database root password"),
+    ],
+    compose: `services:
+  nextcloud:
+    image: nextcloud:apache
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "\${HTTP_PORT}:80"
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: \${DB_PASSWORD}
+      NEXTCLOUD_ADMIN_USER: \${ADMIN_USER}
+      NEXTCLOUD_ADMIN_PASSWORD: \${ADMIN_PASSWORD}
+    volumes:
+      - nextcloud:/var/www/html
+
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    command: ["--transaction-isolation=READ-COMMITTED", "--log-bin=binlog", "--binlog-format=ROW"]
+    environment:
+      MARIADB_DATABASE: nextcloud
+      MARIADB_USER: nextcloud
+      MARIADB_PASSWORD: \${DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: \${DB_ROOT_PASSWORD}
+    volumes:
+      - db:/var/lib/mysql
+
+volumes:
+  nextcloud:
+  db:
+`,
+  },
+  {
+    slug: "vaultwarden",
+    title: "Vaultwarden",
+    description: "Bitwarden-compatible password manager. Serve it over HTTPS (the web vault needs it).",
+    category: "Productivity",
+    stackName: "vaultwarden",
+    website: "https://github.com/dani-garcia/vaultwarden",
+    variables: [
+      port("HTTP_PORT", "HTTP port", "8091"),
+      password("ADMIN_TOKEN", "Admin token", "For /admin. Leave empty to generate one"),
+      text("SIGNUPS_ALLOWED", "Allow sign-ups", "true", "true or false"),
+    ],
+    compose: `services:
+  vaultwarden:
+    image: vaultwarden/server:latest
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:80"
+    environment:
+      ADMIN_TOKEN: \${ADMIN_TOKEN}
+      SIGNUPS_ALLOWED: \${SIGNUPS_ALLOWED}
+    volumes:
+      - data:/data
+
+volumes:
+  data:
+`,
+  },
+  {
+    slug: "excalidraw",
+    title: "Excalidraw",
+    description: "Hand-drawn style whiteboard for diagrams and sketches.",
+    category: "Productivity",
+    stackName: "excalidraw",
+    website: "https://excalidraw.com",
+    variables: [port("HTTP_PORT", "HTTP port", "8092")],
+    compose: `services:
+  excalidraw:
+    image: excalidraw/excalidraw:latest
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:80"
+`,
+  },
+  {
+    slug: "jellyfin",
+    title: "Jellyfin",
+    description: "Media server for movies, shows and music.",
+    category: "Media",
+    stackName: "jellyfin",
+    website: "https://jellyfin.org",
+    variables: [
+      port("HTTP_PORT", "HTTP port", "8096"),
+      text("MEDIA_PATH", "Media folder on the host", "/srv/media", "Absolute path; mounted read-only at /media"),
+    ],
+    compose: `services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:8096"
+    volumes:
+      - config:/config
+      - cache:/cache
+      - \${MEDIA_PATH}:/media:ro
+
+volumes:
+  config:
+  cache:
+`,
+  },
+  {
+    slug: "pihole",
+    title: "Pi-hole",
+    description: "Network-wide ad blocking DNS server with a web dashboard.",
+    category: "Network",
+    stackName: "pihole",
+    website: "https://pi-hole.net",
+    variables: [
+      port("HTTP_PORT", "Web UI port", "8093"),
+      port("DNS_PORT", "DNS port", "53"),
+      password("WEB_PASSWORD", "Web UI password"),
+      text("TIMEZONE", "Time zone", "Asia/Jakarta"),
+    ],
+    compose: `services:
+  pihole:
+    image: pihole/pihole:latest
+    restart: unless-stopped
+    ports:
+      - "\${DNS_PORT}:53/tcp"
+      - "\${DNS_PORT}:53/udp"
+      - "\${HTTP_PORT}:80"
+    environment:
+      TZ: \${TIMEZONE}
+      FTLCONF_webserver_api_password: \${WEB_PASSWORD}
+      FTLCONF_dns_listeningMode: all
+    volumes:
+      - etc:/etc/pihole
+
+volumes:
+  etc:
+`,
+  },
+  {
+    slug: "home-assistant",
+    title: "Home Assistant",
+    description: "Home automation hub. Device discovery works best with host networking (edit after deploying).",
+    category: "IoT",
+    stackName: "home-assistant",
+    website: "https://www.home-assistant.io",
+    variables: [port("HTTP_PORT", "HTTP port", "8123"), text("TIMEZONE", "Time zone", "Asia/Jakarta")],
+    compose: `services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:8123"
+    environment:
+      TZ: \${TIMEZONE}
+    volumes:
+      - config:/config
+
+volumes:
+  config:
+`,
+  },
+  {
+    slug: "mosquitto",
+    title: "Mosquitto",
+    description: "MQTT broker (anonymous access; add a password file for production).",
+    category: "IoT",
+    stackName: "mosquitto",
+    website: "https://mosquitto.org",
+    variables: [port("MQTT_PORT", "MQTT port", "1883")],
+    compose: `services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
+    ports:
+      - "\${MQTT_PORT}:1883"
+    volumes:
+      - data:/mosquitto/data
+
+volumes:
+  data:
+`,
+  },
+  {
+    slug: "umami",
+    title: "Umami",
+    description: "Privacy-friendly web analytics with PostgreSQL. Default login admin / umami: change it.",
+    category: "Analytics",
+    stackName: "umami",
+    website: "https://umami.is",
+    variables: [port("HTTP_PORT", "HTTP port", "3004"), password("DB_PASSWORD", "Database password"), password("APP_SECRET", "App secret")],
+    compose: `services:
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "\${HTTP_PORT}:3000"
+    environment:
+      DATABASE_URL: postgresql://umami:\${DB_PASSWORD}@db:5432/umami
+      APP_SECRET: \${APP_SECRET}
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: \${DB_PASSWORD}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umami -d umami"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db:
+`,
+  },
+  {
+    slug: "metabase",
+    title: "Metabase",
+    description: "Dashboards and questions on top of your databases.",
+    category: "Analytics",
+    stackName: "metabase",
+    website: "https://www.metabase.com",
+    variables: [port("HTTP_PORT", "HTTP port", "3003")],
+    compose: `services:
+  metabase:
+    image: metabase/metabase:latest
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:3000"
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    volumes:
+      - data:/metabase-data
+
+volumes:
+  data:
+`,
+  },
+  {
+    slug: "keycloak",
+    title: "Keycloak",
+    description: "Identity and access management (SSO, OIDC, SAML) with PostgreSQL, in development mode.",
+    category: "Security",
+    stackName: "keycloak",
+    website: "https://www.keycloak.org",
+    variables: [
+      port("HTTP_PORT", "HTTP port", "8084"),
+      text("ADMIN_USER", "Admin user", "admin"),
+      password("ADMIN_PASSWORD", "Admin password"),
+      password("DB_PASSWORD", "Database password"),
+    ],
+    compose: `services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    restart: unless-stopped
+    command: ["start-dev"]
+    depends_on:
+      - db
+    ports:
+      - "\${HTTP_PORT}:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: \${ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: \${ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: \${DB_PASSWORD}
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: \${DB_PASSWORD}
+    volumes:
+      - db:/var/lib/postgresql/data
+
+volumes:
+  db:
+`,
+  },
+  {
+    slug: "meilisearch",
+    title: "Meilisearch",
+    description: "Fast, typo-tolerant search engine with a REST API.",
+    category: "Search",
+    stackName: "meilisearch",
+    website: "https://www.meilisearch.com",
+    variables: [port("HTTP_PORT", "HTTP port", "7700"), password("MASTER_KEY", "Master key", "At least 16 characters. Leave empty to generate one")],
+    compose: `services:
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:7700"
+    environment:
+      MEILI_MASTER_KEY: \${MASTER_KEY}
+      MEILI_ENV: production
+    volumes:
+      - data:/meili_data
+
+volumes:
+  data:
+`,
+  },
+  {
+    slug: "open-webui",
+    title: "Ollama + Open WebUI",
+    description: "Run local LLMs with Ollama and chat with them in a ChatGPT-like web UI (CPU; add GPU access for speed).",
+    category: "AI",
+    stackName: "ollama",
+    website: "https://openwebui.com",
+    variables: [port("HTTP_PORT", "Web UI port", "3005")],
+    compose: `services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    ports:
+      - "\${HTTP_PORT}:8080"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+    volumes:
+      - webui:/app/backend/data
+
+volumes:
+  ollama:
+  webui:
+`,
+  },
+  {
+    slug: "jenkins",
+    title: "Jenkins",
+    description: "Automation server for CI/CD pipelines. The first admin password is in the container logs.",
+    category: "Development",
+    stackName: "jenkins",
+    website: "https://www.jenkins.io",
+    variables: [port("HTTP_PORT", "HTTP port", "8085"), port("AGENT_PORT", "Agent port", "50000")],
+    compose: `services:
+  jenkins:
+    image: jenkins/jenkins:lts-jdk21
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:8080"
+      - "\${AGENT_PORT}:50000"
+    volumes:
+      - home:/var/jenkins_home
+
+volumes:
+  home:
+`,
+  },
+  {
+    slug: "it-tools",
+    title: "IT-Tools",
+    description: "Handy developer utilities in the browser: encoders, converters, generators and more.",
+    category: "Development",
+    stackName: "it-tools",
+    website: "https://it-tools.tech",
+    variables: [port("HTTP_PORT", "HTTP port", "8094")],
+    compose: `services:
+  it-tools:
+    image: corentinth/it-tools:latest
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:80"
+`,
+  },
+  {
+    slug: "dozzle",
+    title: "Dozzle",
+    description: "Live container log viewer. Reads the Docker socket (read-only); anyone who can open it sees all logs.",
+    category: "Monitoring",
+    stackName: "dozzle",
+    website: "https://dozzle.dev",
+    variables: [port("HTTP_PORT", "HTTP port", "8095")],
+    compose: `services:
+  dozzle:
+    image: amir20/dozzle:latest
+    restart: unless-stopped
+    ports:
+      - "\${HTTP_PORT}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+`,
+  },
 ]
 
 export const BUILTIN_TEMPLATES: Template[] = BUILTIN.map(({ slug, ...t }) => ({ ...t, key: slug, source: "builtin" }))

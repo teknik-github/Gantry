@@ -207,6 +207,24 @@ export function docker(target: DockerTarget, options: DockerOptions = {}) {
         body: spec,
       }),
 
+    /** Extracts a tar archive into `path` inside the container. */
+    putArchive: (id: string, path: string, tar: Buffer) =>
+      dockerRaw(target, "PUT", `/containers/${seg(id)}/archive`, {
+        query: { path },
+        rawBody: { data: tar, contentType: "application/x-tar" },
+      }),
+    /** Runs a command in a running container and waits for it (no TTY); output is stdout+stderr. */
+    async execRun(id: string, cmd: string[], timeoutMs = 60_000) {
+      const { Id } = await dockerJson<{ Id: string }>(target, "POST", `/containers/${seg(id)}/exec`, {
+        body: { Cmd: cmd, AttachStdout: true, AttachStderr: true, Tty: false },
+      })
+      const { body } = await dockerRaw(target, "POST", `/exec/${seg(Id)}/start`, {
+        body: { Detach: false, Tty: false },
+        timeoutMs,
+      })
+      const info = await dockerJson<{ ExitCode: number | null; Running: boolean }>(target, "GET", `/exec/${seg(Id)}/json`)
+      return { exitCode: info.ExitCode ?? -1, output: demuxLogs(body) }
+    },
     renameContainer: (id: string, name: string) =>
       dockerRaw(target, "POST", `/containers/${seg(id)}/rename`, { query: { name } }),
 
@@ -214,7 +232,8 @@ export function docker(target: DockerTarget, options: DockerOptions = {}) {
     /** By id or by reference ("nginx:latest", "ghcr.io/org/app:1"). */
     inspectImage: (reference: string) =>
       dockerJson<ImageInspect>(target, "GET", `/images/${imageRefPath(reference)}/json`),
-    listImages: () => dockerJson<ImageSummary[]>(target, "GET", "/images/json"),
+    // Slow with the containerd image store on a busy host (tens of seconds).
+    listImages: () => dockerJson<ImageSummary[]>(target, "GET", "/images/json", { timeoutMs: 120_000 }),
     removeImage: (id: string, force = false) =>
       dockerRaw(target, "DELETE", `/images/${seg(id)}`, { query: { force } }),
     async pullImage(reference: string) {

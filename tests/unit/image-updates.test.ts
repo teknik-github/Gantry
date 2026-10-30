@@ -84,3 +84,30 @@ describe("containerReferences", () => {
     expect(referencesOf(refs)).toEqual(["ghcr.io/org/app:1", "nginx:1.27", "nginx:latest"])
   })
 })
+
+describe("localImagesFor", () => {
+  it("inspects only images of containers whose tag was checked, by id and by tag", async () => {
+    const { checkReferences, localImagesFor, containerUpdates } = await import("@/lib/server/image-updates")
+    type Api = Parameters<typeof checkReferences>[1]
+    const api = {
+      distributionInspect: async () => ({ Descriptor: { digest: "sha256:new" } }),
+      inspectImage: async (ref: string) => {
+        inspected.push(ref)
+        return ref === "app:1"
+          ? { Id: "sha256:new", RepoTags: ["app:1"], RepoDigests: ["app@sha256:new"], Config: null }
+          : { Id: ref, RepoTags: [], RepoDigests: [], Config: null }
+      },
+    }
+    const inspected: string[] = []
+    await checkReferences(4242, api as unknown as Api, ["app:1"])
+    const containers = [
+      { Id: "a", Image: "app:1", ImageID: "sha256:old" },
+      { Id: "b", Image: "other:2", ImageID: "sha256:x" },
+    ]
+    const refs = new Map([["a", "app:1"], ["b", "other:2"]])
+    const local = await localImagesFor(api, 4242, containers, refs)
+    expect(inspected.sort()).toEqual(["app:1", "sha256:old"])
+    expect(containerUpdates(4242, containers, local, refs).get("a")).toMatchObject({ status: "update", remoteDigest: "sha256:new" })
+    expect(containerUpdates(4242, containers, local, refs).has("b")).toBe(false)
+  })
+})

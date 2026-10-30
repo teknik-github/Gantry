@@ -26,6 +26,8 @@ export class DockerError extends Error {
 type RequestOptions = {
   query?: Record<string, string | number | boolean | undefined>
   body?: unknown
+  /** Sent as is (e.g. a tar archive) instead of JSON. */
+  rawBody?: { data: Buffer; contentType: string }
   timeoutMs?: number
   headers?: Record<string, string>
 }
@@ -106,7 +108,8 @@ export function dockerRaw(
   path: string,
   opts: RequestOptions = {}
 ): Promise<{ status: number; body: Buffer }> {
-  const payload = opts.body === undefined ? undefined : Buffer.from(JSON.stringify(opts.body))
+  const payload = opts.rawBody?.data ?? (opts.body === undefined ? undefined : Buffer.from(JSON.stringify(opts.body)))
+  const contentType = opts.rawBody?.contentType ?? "application/json"
 
   return new Promise((resolve, reject) => {
     const req = dockerRequest(
@@ -117,7 +120,7 @@ export function dockerRaw(
         headers: {
           ...opts.headers,
           ...(payload
-            ? { "Content-Type": "application/json", "Content-Length": payload.length }
+            ? { "Content-Type": contentType, "Content-Length": payload.length }
             : {}),
         },
         timeout: opts.timeoutMs ?? 30_000,

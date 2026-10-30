@@ -11,7 +11,10 @@ import {
   WaypointsIcon,
   ServerIcon,
   UsersIcon,
+  BellIcon,
+  GlobeIcon,
   HistoryIcon,
+  RefreshCwIcon,
   KeyRoundIcon,
   LayoutTemplateIcon,
 } from "lucide-react"
@@ -38,6 +41,9 @@ const navMain = [
 const navAdmin = [
   { title: "Environments", url: "/environments", icon: <ServerIcon /> },
   { title: "Registries", url: "/registries", icon: <KeyRoundIcon /> },
+  { title: "Notifications", url: "/notifications", icon: <BellIcon /> },
+  { title: "Auto-update", url: "/auto-update", icon: <RefreshCwIcon /> },
+  { title: "Proxy", url: "/proxy", icon: <GlobeIcon /> },
   { title: "Users", url: "/users", icon: <UsersIcon /> },
   { title: "Activity", url: "/activity", icon: <HistoryIcon /> },
 ]

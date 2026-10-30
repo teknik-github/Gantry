@@ -3,7 +3,12 @@ import "server-only"
 import { getDb } from "@/lib/server/db"
 import type { CurrentUser } from "@/lib/server/auth/dal"
 
-export async function audit(user: CurrentUser | null, action: string, target: string) {
+/** Who did it: a signed-in user, or a background task such as the auto-updater. */
+export type Actor = Pick<CurrentUser, "username"> & { id: number | null; role?: CurrentUser["role"] }
+
+export const SYSTEM_ACTOR = (task: string): Actor => ({ id: null, username: task })
+
+export async function audit(user: Actor | null, action: string, target: string) {
   try {
     const db = await getDb()
     await db

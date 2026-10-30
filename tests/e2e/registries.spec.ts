@@ -241,6 +241,44 @@ test("an image update is detected and applied from the containers list", async (
   await expect(row.getByTestId("update-badge")).toHaveCount(0, { timeout })
 })
 
+test("auto-update recreates opted-in containers when their tag has a newer image", async ({ page }) => {
+  test.setTimeout(TIMEOUT)
+  // Version 3 lands in the registry.
+  cli("run", "--name", `${APP}-v2`, IMAGE, "sh", "-c", "echo v3 > /version")
+  cli("commit", `${APP}-v2`, IMAGE)
+  cli("push", IMAGE)
+  await removeContainer(`${APP}-v2`)
+  const before = await docker<{ Id: string }>("GET", `/containers/${APP}/json`)
+
+  await signIn(page)
+  await page.goto("/auto-update")
+  await page.getByRole("textbox", { name: "Search" }).fill(APP)
+  const toggle = page.getByRole("switch", { name: `Auto-update ${APP}` })
+  await expect(toggle).not.toBeChecked()
+  await toggle.click()
+  await expect(page.getByText(`${APP}: auto-update on`)).toBeVisible()
+  await expect(toggle).toBeChecked()
+
+  // The schedule can be saved (validated as HH:MM).
+  await page.getByRole("checkbox", { name: "Run every day" }).click()
+  await page.getByLabel("At", { exact: true }).fill("04:30")
+  await page.getByRole("button", { name: "Save schedule" }).click()
+  await expect(page.getByText("Auto-update runs daily at 04:30")).toBeVisible()
+
+  await page.getByRole("button", { name: "Run now" }).click()
+  await expect(page.getByText(/Auto-update finished: 1 updated/)).toBeVisible({ timeout: 180_000 })
+  const result = page.getByRole("row").filter({ hasText: APP }).filter({ hasText: "updated" })
+  await expect(result).toBeVisible()
+
+  const after = await docker<{ Id: string; State: { Running: boolean } }>("GET", `/containers/${APP}/json`)
+  expect(after.Id).not.toBe(before.Id)
+  expect(after.State.Running).toBe(true)
+
+  // Nothing new: a second run leaves it alone.
+  await page.getByRole("button", { name: "Run now" }).click()
+  await expect(page.getByText(/Auto-update finished: 0 updated, 1 up to date/)).toBeVisible({ timeout: 120_000 })
+})
+
 test("registry logins can be edited without retyping the password, and removed", async ({ page }) => {
   await signIn(page)
   await page.goto("/registries")

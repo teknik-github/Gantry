@@ -18,7 +18,7 @@ import {
 } from "@/lib/server/docker/recreate"
 import { selfContainerIds } from "@/lib/server/docker/self"
 import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
-import { checkReferences, containerReferences, containerUpdates, referencesOf } from "@/lib/server/image-updates"
+import { checkReferences, containerReferences, referencesOf, updatesFor } from "@/lib/server/image-updates"
 import { tryDocker } from "@/lib/server/views"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
@@ -156,12 +156,12 @@ export async function checkForUpdates(): Promise<ActionState> {
     const env = await getCurrentEnvironment()
     if (!env) throw new UserError("No Docker environment configured")
     const api = await docker()
-    const [containers, images] = await Promise.all([api.listContainers(true), api.listImages()])
+    const containers = await api.listContainers(true)
     const byContainer = await containerReferences(api, containers)
     const refs = referencesOf(byContainer)
     if (!refs.length) return "No containers use an image tag that can be checked"
     const { checked, failed } = await checkReferences(env.id, api, refs)
-    const updates = [...containerUpdates(env.id, containers, images, byContainer).values()].filter(
+    const updates = [...(await updatesFor(api, env.id, containers, byContainer)).updates.values()].filter(
       (u) => u.status === "update"
     ).length
     const summary = updates ? `${updates} container(s) can be updated` : "everything is up to date"

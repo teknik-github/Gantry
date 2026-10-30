@@ -18,8 +18,16 @@ A Portainer-style web UI for Docker, built with Next.js 16 and shadcn/ui
   or your own registry; used for pulls, recreate, update checks and stacks
 - **Image updates**: containers whose tag has a newer image in the registry
   get an "update" badge; update them one by one or in bulk
-- **Templates**: 18 ready-made stacks (databases, WordPress, monitoring, Gitea,
-  n8n, MinIO, ...) plus your own templates from any compose file
+- **Templates**: 35 ready-made stacks (databases, WordPress, Nextcloud,
+  monitoring, Gitea, n8n, Keycloak, Ollama + Open WebUI, ...) plus your own
+  templates from any compose file
+- **Notifications**: alerts to Telegram, Discord, Slack, ntfy or any webhook
+  when containers crash, run out of memory, turn unhealthy or restart-loop,
+  when an environment is unreachable, and for image updates
+- **Auto-update**: scheduled daily updates for the containers you choose
+  (or label `gantry.auto-update=true`), rolled back on failure
+- **Reverse proxy**: serve containers under domain names with automatic HTTPS,
+  through a built-in Caddy proxy or the proxy you already run
 - **Bulk actions**: tick several containers, images, volumes or networks and
   start/stop/restart/pause/resume/kill or remove them at once
 - Multiple Docker environments: local socket or TCP, optionally with mutual TLS;
@@ -189,7 +197,7 @@ project's next `docker compose up` uses its compose file again.
 
 ### Templates
 
-**Templates** lists 18 built-in stacks and your own. Deploying one asks for a
+**Templates** lists 35 built-in stacks and your own. Deploying one asks for a
 stack name and the template's variables (ports, users, passwords: empty
 password fields are generated), writes them to the stack's `.env` and runs
 `docker compose up -d`; the result is a normal stack you can edit later.
@@ -202,6 +210,63 @@ deployed stack can be turned into a template with **Save as template** on its
 page (secret-looking values are left empty). Variables such as `TZ`, `HOME` or
 `PATH` are refused because `docker compose` would read them from Gantry's own
 environment instead of `.env`.
+
+### Notifications
+
+Administrators add channels under **Notifications**: Telegram (bot token +
+chat id), Discord or Slack (incoming webhook URL), ntfy (server + topic,
+optional token) or a generic webhook that receives a JSON POST per alert. Each
+channel picks which alerts it gets; "Send a test" checks the settings. Tokens
+and webhook URLs are encrypted and never shown again (leave them empty when
+editing to keep them).
+
+Gantry keeps one Docker event stream open per environment and raises:
+
+| Alert | When |
+| --- | --- |
+| Container crashed | A container exits with a non-zero code without anyone stopping it (`docker stop`, compose down and Gantry's own actions don't count) |
+| Out of memory | The kernel OOM killer hits a container |
+| Unhealthy | A container's healthcheck turns unhealthy |
+| Restart loop | A container dies 3 times within 10 minutes |
+| Environment unreachable | Docker can't be reached for 2 minutes (and again when it's back) |
+| Image update available | The periodic update check finds newer images (each update is announced once) |
+| Auto-update result | A scheduled or manual auto-update run updated or failed to update something |
+
+The same alert for the same container is sent at most every 10 minutes. Every
+alert is listed under "Recent alerts" with its delivery result, for 30 days.
+
+### Auto-update
+
+**Auto-update** turns updates on per container (by name, so it survives
+recreation) or via the label `gantry.auto-update=true`. Once a day at the set
+time (server time zone; set `TZ` on the Gantry container), every environment's
+opted-in running containers are checked against their registries and those
+with a newer image are pulled and recreated with the same settings, one at a
+time, with rollback on failure; containers pinned to a digest, built locally or
+running Gantry itself are skipped. "Run now" does the same immediately. The
+last run's results stay on the page, are recorded in the activity log (as
+`auto-update`) and are sent to channels subscribed to auto-update results.
+
+### Reverse proxy
+
+**Proxy** (administrators) maps domains to container ports, per environment.
+
+- **Built-in (Caddy)**: Gantry runs `caddy:2-alpine` as the container
+  `gantry-proxy` (host ports 80/443 by default, configurable) on the
+  `gantry-proxy` network, with certificates kept in the `gantry-proxy-data`
+  volume. Each proxy host lists its domains, the target container and port, and
+  a TLS mode: *Let's Encrypt* (public domain, DNS pointing at the host, ports
+  80/443 reachable from the internet), *Self-signed* (Caddy's local CA, for LAN
+  names) or *HTTP only*. Saving uploads a generated Caddyfile through the Docker
+  API and runs `caddy reload`, so it also works for remote environments; Caddy
+  rejects an invalid configuration and keeps serving the previous one (the
+  error is shown on the page). Target containers are attached to the
+  `gantry-proxy` network automatically and reached by name.
+- **External proxy**: for Traefik, Nginx Proxy Manager or your own Caddy.
+  Gantry attaches target containers to your proxy's Docker network and shows
+  ready-to-paste config per host (Traefik labels, a Caddyfile block, an nginx
+  `server`).
+- **Off** removes the built-in proxy container (its certificate volumes stay).
 
 ### Environments: TLS and access
 

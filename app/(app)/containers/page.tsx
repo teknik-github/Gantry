@@ -4,7 +4,7 @@ import { ContainersTable } from "@/components/gantry/containers-table"
 import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
-import { containerReferences, containerUpdates, lastChecked } from "@/lib/server/image-updates"
+import { lastChecked, updatesFor } from "@/lib/server/image-updates"
 import { toContainerRows, tryDocker } from "@/lib/server/views"
 
 export const metadata: Metadata = { title: "Containers" }
@@ -14,9 +14,8 @@ export default async function ContainersPage() {
   const env = await getCurrentEnvironment()
   const result = await tryDocker(async () => {
     const api = await getDocker()
-    const [containers, images] = await Promise.all([api.listContainers(true), api.listImages()])
-    const refs = await containerReferences(api, containers)
-    return { containers, refs, updates: env ? containerUpdates(env.id, containers, images, refs) : undefined }
+    const containers = await api.listContainers(true)
+    return { containers, ...(env ? await updatesFor(api, env.id, containers) : {}) }
   })
 
   return (

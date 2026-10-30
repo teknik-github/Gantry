@@ -10,10 +10,12 @@ import {
   type LocalImage,
 } from "@/lib/image-updates"
 import { getDb } from "@/lib/server/db"
-import type { ContainerSummary, DockerApi, ImageSummary } from "@/lib/server/docker/api"
+import type { ContainerSummary, DockerApi } from "@/lib/server/docker/api"
 import { docker } from "@/lib/server/docker/api"
 import { environmentTarget } from "@/lib/server/environment-target"
 import { skipIfBusy } from "@/lib/server/metrics-sampler"
+import type { Environment } from "@/lib/server/db/schema"
+import { notify } from "@/lib/server/notifications"
 import { credentialsForImage } from "@/lib/server/registries"
 
 /**
@@ -103,28 +105,86 @@ export async function checkReferences(environmentId: number, api: DockerApi, ref
   return { checked: due.length, failed: result.failed.length }
 }
 
+export type LocalImages = { byId: Map<string, LocalImage>; byTag: Map<string, LocalImage> }
+
+const MAX_IMAGE_INSPECTS = 200
+
+/**
+ * The local images update statuses compare with: each container's image and
+ * the image its tag points at now. Inspected one by one (fast) rather than
+ * GET /images/json, which can take tens of seconds with the containerd image
+ * store; and only for containers whose tag has been checked.
+ */
+export async function localImagesFor(
+  api: Pick<DockerApi, "inspectImage">,
+  environmentId: number,
+  containers: Pick<ContainerSummary, "Id" | "ImageID">[],
+  refs: Map<string, string>
+): Promise<LocalImages> {
+  const local: LocalImages = { byId: new Map(), byTag: new Map() }
+  const known = cache.get(environmentId)
+  if (!known?.size) return local
+  const ids = new Set<string>()
+  const tags = new Set<string>()
+  for (const c of containers) {
+    const ref = checkableReference(refs.get(c.Id) ?? "")
+    if (!ref || !known.has(ref)) continue
+    ids.add(c.ImageID)
+    tags.add(ref)
+  }
+  const jobs = [...[...ids].map((id) => ({ id })), ...[...tags].map((tag) => ({ tag }))].slice(0, MAX_IMAGE_INSPECTS)
+  await runBulk(
+    jobs,
+    async (job) => {
+      const image = await api.inspectImage("id" in job ? job.id : job.tag)
+      if ("id" in job) local.byId.set(job.id, image)
+      else local.byTag.set(shortReference(job.tag), image)
+    },
+    { concurrency: 8 }
+  )
+  return local
+}
+
 /** Per-container update status from the last check (containers not checked yet are absent). */
 export function containerUpdates(
   environmentId: number,
   containers: Pick<ContainerSummary, "Id" | "ImageID">[],
-  images: Pick<ImageSummary, "Id" | "RepoTags" | "RepoDigests">[],
+  /** From localImagesFor(). */
+  local: LocalImages,
   /** From containerReferences(). */
   refs: Map<string, string>
 ): Map<string, ContainerUpdate> {
   const known = cache.get(environmentId)
   const out = new Map<string, ContainerUpdate>()
   if (!known) return out
-  const byId = new Map<string, LocalImage>(images.map((i) => [i.Id, i]))
-  const byTag = new Map<string, LocalImage>()
-  for (const i of images) for (const t of i.RepoTags ?? []) byTag.set(shortReference(t), i)
   for (const c of containers) {
     const ref = checkableReference(refs.get(c.Id) ?? "")
     const remote = ref ? known.get(ref) : undefined
     if (!ref || !remote) continue
-    const local = { tagged: byTag.get(shortReference(ref)) ?? null, running: byId.get(c.ImageID) ?? null }
-    out.set(c.Id, { reference: ref, checkedAt: remote.checkedAt, ...containerUpdateStatus(c.ImageID, local, remote) })
+    const images = { tagged: local.byTag.get(shortReference(ref)) ?? null, running: local.byId.get(c.ImageID) ?? null }
+    out.set(c.Id, {
+      reference: ref,
+      checkedAt: remote.checkedAt,
+      remoteDigest: remote.digest ?? undefined,
+      ...containerUpdateStatus(c.ImageID, images, remote),
+    })
   }
   return out
+}
+
+/**
+ * Update statuses for an environment's containers: references, the local
+ * images to compare with, then the comparison.
+ */
+export async function updatesFor(
+  api: Pick<DockerApi, "inspectContainer" | "inspectImage">,
+  environmentId: number,
+  containers: Pick<ContainerSummary, "Id" | "Image" | "ImageID">[],
+  refs?: Map<string, string>
+) {
+  const references = refs ?? (await containerReferences(api, containers))
+  const local = await localImagesFor(api, environmentId, containers, references)
+  return { refs: references, updates: containerUpdates(environmentId, containers, local, references) }
 }
 
 /** When the environment was last checked (newest entry), or null. */
@@ -136,14 +196,49 @@ export function lastChecked(environmentId: number): number | null {
 
 const lastErrors = new Map<number, string>()
 
+// Updates already announced: container name + the digest it can update to.
+const announced = new Set<string>()
+
+/** Raises one "image_update" alert per environment for updates not announced before. */
+async function announceUpdates(
+  env: Pick<Environment, "id" | "name">,
+  containers: Pick<ContainerSummary, "Id" | "Names">[],
+  updates: Map<string, ContainerUpdate>
+) {
+  const fresh: string[] = []
+  for (const c of containers) {
+    const u = updates.get(c.Id)
+    if (u?.status !== "update") continue
+    const name = c.Names?.[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12)
+    const key = `${env.id}|${name}|${u.remoteDigest ?? u.reference}`
+    if (announced.has(key)) continue
+    announced.add(key)
+    fresh.push(`${name} (${u.reference})`)
+  }
+  if (announced.size > 10_000) announced.clear()
+  if (!fresh.length) return
+  await notify(
+    {
+      kind: "image_update",
+      environment: env.name,
+      subject: `${fresh.length} container${fresh.length === 1 ? "" : "s"} can be updated`,
+      message: fresh.join("\n"),
+    },
+    env.id
+  )
+}
+
 async function checkAllEnvironments(maxAgeMs: number) {
   const db = await getDb()
-  const envs = await db.selectFrom("environments").selectAll().execute()
+  // Docker environments only (Kubernetes ones have no images to check here).
+  const envs = (await db.selectFrom("environments").selectAll().execute()).filter((e) => e.type === "socket" || e.type === "tcp")
   for (const env of envs) {
     try {
       const api = docker(environmentTarget(env), { credentials: credentialsForImage })
       const containers = await api.listContainers(true)
-      await checkReferences(env.id, api, referencesOf(await containerReferences(api, containers)), maxAgeMs)
+      const refs = await containerReferences(api, containers)
+      await checkReferences(env.id, api, referencesOf(refs), maxAgeMs)
+      await announceUpdates(env, containers, (await updatesFor(api, env.id, containers, refs)).updates)
       lastErrors.delete(env.id)
     } catch (err) {
       const message = (err as Error).message

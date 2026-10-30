@@ -105,6 +105,73 @@ export interface TemplatesTable {
   updated_at: string
 }
 
+export interface NotificationChannelsTable {
+  id: Generated<number>
+  name: string
+  /** lib/notifications.ts CHANNEL_TYPES */
+  type: string
+  /** JSON settings, encrypted at rest (lib/server/crypto.ts) */
+  config: string
+  /** JSON array of alert kinds */
+  events: string
+  /** 1 or 0 (portable boolean) */
+  enabled: number
+  created_at: string
+  updated_at: string
+}
+
+/** Alerts that were raised, with how their delivery went. */
+export interface AlertsTable {
+  id: Generated<number>
+  environment_id: number | null
+  environment_name: string
+  kind: string
+  subject: string
+  message: string
+  delivery: string
+  created_at: string
+}
+
+/** Containers (by name) updated automatically on schedule. */
+export interface AutoUpdateRulesTable {
+  environment_id: number
+  container_name: string
+  created_at: string
+}
+
+export interface SettingsTable {
+  key: string
+  value: string
+}
+
+export interface ProxySettingsTable {
+  environment_id: number
+  /** lib/proxy.ts PROXY_MODES */
+  mode: string
+  http_port: number
+  https_port: number
+  email: string
+  external_network: string
+  last_error: string | null
+  applied_at: string | null
+  updated_at: string
+}
+
+export interface ProxyHostsTable {
+  id: Generated<number>
+  environment_id: number
+  /** Comma-separated domains */
+  domains: string
+  /** Container name */
+  target: string
+  port: number
+  /** lib/proxy.ts TLS_MODES */
+  tls: string
+  enabled: number
+  created_at: string
+  updated_at: string
+}
+
 export interface Database {
   users: UsersTable
   environments: EnvironmentsTable
@@ -114,6 +181,12 @@ export interface Database {
   metrics: MetricsTable
   registries: RegistriesTable
   templates: TemplatesTable
+  notification_channels: NotificationChannelsTable
+  alerts: AlertsTable
+  auto_update_rules: AutoUpdateRulesTable
+  settings: SettingsTable
+  proxy_settings: ProxySettingsTable
+  proxy_hosts: ProxyHostsTable
 }
 
 export type User = Selectable<UsersTable>
