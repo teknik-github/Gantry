@@ -1,8 +1,10 @@
-import { CircleAlertIcon, ServerOffIcon } from "lucide-react"
+import Link from "next/link"
+import { CircleAlertIcon, ServerIcon, ServerOffIcon, ShipWheelIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { NO_ENVIRONMENT_ASSIGNED } from "@/lib/messages"
+import { Button } from "@/components/ui/button"
+import { Card, CardAction, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { DOCKER_ENVIRONMENT, KUBERNETES_ENVIRONMENT, NO_ENVIRONMENT_ASSIGNED } from "@/lib/messages"
 import { cn } from "@/lib/utils"
 
 export function PageHeader({
@@ -31,6 +33,7 @@ export function PageBody({ children }: { children: React.ReactNode }) {
 
 export function DockerUnavailable({ message }: { message: string }) {
   if (message === NO_ENVIRONMENT_ASSIGNED) return <NoEnvironment />
+  if (message === KUBERNETES_ENVIRONMENT) return <WrongEnvironmentKind kind="kubernetes" />
   return (
     <div className="px-4 lg:px-6">
       <Card className="border-destructive/40">
@@ -62,6 +65,42 @@ export function NoEnvironment() {
           <CardDescription>
             Your account has no access to a Docker environment yet. An administrator can grant it on the Users page.
           </CardDescription>
+        </CardHeader>
+      </Card>
+    </div>
+  )
+}
+
+/**
+ * Shown by Docker pages while a Kubernetes environment is selected
+ * (kind="kubernetes"), and by Kubernetes pages for a Docker one.
+ */
+export function WrongEnvironmentKind({ kind }: { kind: "kubernetes" | "docker" }) {
+  const kubernetes = kind === "kubernetes"
+  return (
+    <div className="px-4 lg:px-6">
+      <Card data-testid="wrong-environment-kind">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            {kubernetes ? (
+              <ShipWheelIcon className="size-4 text-muted-foreground" />
+            ) : (
+              <ServerIcon className="size-4 text-muted-foreground" />
+            )}
+            {kubernetes ? KUBERNETES_ENVIRONMENT : DOCKER_ENVIRONMENT}
+          </CardTitle>
+          <CardDescription>
+            {kubernetes
+              ? "This page manages Docker resources. The selected environment is a Kubernetes cluster: use the Kubernetes pages, or switch to a Docker environment."
+              : "This page manages Kubernetes resources. Switch to a Kubernetes environment to use it."}
+          </CardDescription>
+          <CardAction>
+            <Button size="sm" variant="outline" asChild>
+              <Link href={kubernetes ? "/kubernetes" : "/dashboard"}>
+                {kubernetes ? "Kubernetes overview" : "Dashboard"}
+              </Link>
+            </Button>
+          </CardAction>
         </CardHeader>
       </Card>
     </div>

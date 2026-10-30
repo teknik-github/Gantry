@@ -138,7 +138,8 @@ const lastErrors = new Map<number, string>()
 
 async function checkAllEnvironments(maxAgeMs: number) {
   const db = await getDb()
-  const envs = await db.selectFrom("environments").selectAll().execute()
+  // Only Docker environments run containers we can check.
+  const envs = await db.selectFrom("environments").selectAll().where("type", "!=", "kubernetes").execute()
   for (const env of envs) {
     try {
       const api = docker(environmentTarget(env), { credentials: credentialsForImage })

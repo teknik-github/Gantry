@@ -14,6 +14,7 @@ import { groupByProject, listStacks } from "@/lib/server/stacks"
 import { summarizeProject } from "@/lib/server/stacks/views"
 import { tryDocker } from "@/lib/server/views"
 import { STACK_NAME_RE, validateCompose } from "@/lib/stacks"
+import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
 
 export const metadata: Metadata = { title: "Stacks" }
 
@@ -26,6 +27,15 @@ export default async function StacksPage() {
       <PageBody>
         <PageHeader title="Stacks" />
         <DockerUnavailable message="No Docker environment configured" />
+      </PageBody>
+    )
+  }
+  // Stacks are Docker Compose projects.
+  if (env.type === "kubernetes") {
+    return (
+      <PageBody>
+        <PageHeader title="Stacks" />
+        <DockerUnavailable message={KUBERNETES_ENVIRONMENT} />
       </PageBody>
     )
   }

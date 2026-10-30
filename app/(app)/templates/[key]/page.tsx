@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { requireUser } from "@/lib/server/auth/dal"
+import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
 import { getCurrentEnvironment } from "@/lib/server/environments"
 import { getTemplate } from "@/lib/server/templates"
 
@@ -63,7 +64,7 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
 
       <div className="grid gap-4 px-4 lg:px-6 @5xl/main:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         {isAdmin ? (
-          env ? (
+          env && env.type !== "kubernetes" ? (
             <Card>
               <CardHeader>
                 <CardTitle>Deploy</CardTitle>
@@ -77,7 +78,7 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
               </CardContent>
             </Card>
           ) : (
-            <DockerUnavailable message="No Docker environment configured" />
+            <DockerUnavailable message={env ? KUBERNETES_ENVIRONMENT : "No Docker environment configured"} />
           )
         ) : (
           <Card>

@@ -1,6 +1,6 @@
 import "server-only"
 
-import type { Environment } from "@/lib/server/db/schema"
+import type { DockerEnvironmentType, Environment } from "@/lib/server/db/schema"
 import { dockerEventSource } from "@/lib/server/docker/events"
 import { EventHub, type HubListener } from "@/lib/server/event-hub"
 
@@ -26,7 +26,10 @@ function hub() {
 }
 
 /** Subscribes to the live Docker events of an environment (shared upstream connection). */
-export function subscribeToEnvironment(env: Pick<Environment, "id" | "type" | "url">, listener: HubListener) {
+export function subscribeToEnvironment(
+  env: Pick<Environment, "id" | "url"> & { type: DockerEnvironmentType },
+  listener: HubListener
+) {
   const key = `${env.id}:${env.type}:${env.url}`
   return hub().subscribe(key, dockerEventSource({ type: env.type, url: env.url }), listener)
 }

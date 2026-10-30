@@ -2,6 +2,7 @@ import "server-only"
 
 import crypto from "node:crypto"
 
+import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
 import { decryptSecret, encryptSecret, SecretDecryptError } from "@/lib/server/crypto"
 import type { Environment } from "@/lib/server/db/schema"
 import { DockerError, type DockerTarget, type DockerTls } from "@/lib/server/docker/client"
@@ -43,6 +44,8 @@ export function decryptTls(env: Pick<Environment, "type" | "tls_ca" | "tls_cert"
  * send it to the browser.
  */
 export function environmentTarget(env: EnvironmentConnection): DockerTarget {
+  // Kubernetes clusters have no Docker API; Docker pages show a notice instead.
+  if (env.type === "kubernetes") throw new DockerError(KUBERNETES_ENVIRONMENT, 409)
   return { type: env.type, url: env.url, tls: decryptTls(env) }
 }
 

@@ -3,9 +3,10 @@ import Link from "next/link"
 import { PlusIcon } from "lucide-react"
 
 import { TemplatesGallery } from "@/components/gantry/templates-gallery"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody, PageHeader, WrongEnvironmentKind } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { requireUser } from "@/lib/server/auth/dal"
+import { getCurrentEnvironment } from "@/lib/server/environments"
 import { listTemplates } from "@/lib/server/templates"
 import { validateCompose } from "@/lib/stacks"
 
@@ -13,7 +14,7 @@ export const metadata: Metadata = { title: "Templates" }
 
 export default async function TemplatesPage() {
   const user = await requireUser()
-  const templates = await listTemplates()
+  const [templates, env] = await Promise.all([listTemplates(), getCurrentEnvironment()])
 
   return (
     <PageBody>
@@ -35,6 +36,8 @@ export default async function TemplatesPage() {
           ) : null
         }
       />
+      {/* Templates deploy Docker Compose stacks; they can still be browsed and edited. */}
+      {env?.type === "kubernetes" ? <WrongEnvironmentKind kind="kubernetes" /> : null}
       <TemplatesGallery
         templates={templates.map((t) => {
           const check = validateCompose(t.compose)

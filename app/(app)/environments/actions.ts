@@ -13,6 +13,11 @@ import type { DockerTarget, DockerTls } from "@/lib/server/docker/client"
 import { setEnvironmentUsers } from "@/lib/server/environment-access"
 import { decryptTls, encryptTls, parseTls } from "@/lib/server/environment-target"
 import { listEnvironments } from "@/lib/server/environments"
+import { kube } from "@/lib/server/kubernetes/api"
+import { KubeError, type KubeTarget } from "@/lib/server/kubernetes/client"
+import { parseKubeconfig, parseTokenConnection, type KubeConnection } from "@/lib/server/kubernetes/connection"
+import { encryptKubeCredentials, kubeTarget } from "@/lib/server/kubernetes/target"
+import { namespaceSchema } from "@/lib/kubernetes/names"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const idSchema = z.number().int().positive()
@@ -42,8 +47,9 @@ const PEM_MAX = 64 * 1024
 const envSchema = z
   .object({
     name: z.string().trim().min(1, "Name is required").max(100),
-    type: z.enum(["socket", "tcp"]),
-    url: z.string().trim().min(1, "Address is required").max(255),
+    type: z.enum(["socket", "tcp", "kubernetes"]),
+    // Docker only; Kubernetes uses kube_server or the kubeconfig.
+    url: z.string().trim().max(255).default(""),
     // "on" when the TLS switch is enabled (tcp only).
     tls: z.enum(["on"]).optional(),
     // Edit form: "on" when new PEM material is supplied for an environment that already has TLS.
@@ -51,8 +57,23 @@ const envSchema = z
     tls_ca: z.string().max(PEM_MAX, "Too long").default(""),
     tls_cert: z.string().max(PEM_MAX, "Too long").default(""),
     tls_key: z.string().max(PEM_MAX, "Too long").default(""),
+    // Kubernetes: "token" (server + token + CA) or "kubeconfig".
+    kube_mode: z.enum(["token", "kubeconfig"]).default("token"),
+    // Edit form: "on" when the connection (server, credentials) is entered again.
+    kube_replace: z.enum(["on"]).optional(),
+    kube_server: z.string().max(1024).default(""),
+    kube_token: z.string().max(PEM_MAX, "Too long").default(""),
+    kube_ca: z.string().max(PEM_MAX, "Too long").default(""),
+    kube_insecure: z.enum(["on"]).optional(),
+    kube_namespace: z.string().max(253).default(""),
+    kubeconfig: z.string().max(256 * 1024, "The kubeconfig is too large").default(""),
+    kube_context: z.string().max(253).default(""),
   })
   .superRefine((v, ctx) => {
+    if (v.type !== "kubernetes" && !v.url) {
+      ctx.addIssue({ code: "custom", path: ["url"], message: "Address is required" })
+      return
+    }
     if (v.type === "socket" && !v.url.startsWith("/")) {
       ctx.addIssue({ code: "custom", path: ["url"], message: "Use an absolute socket path, e.g. /var/run/docker.sock" })
     }
@@ -80,6 +101,48 @@ function tlsFromForm(v: EnvInput): { tls: DockerTls } | { state: ActionState } {
   return { tls: parsed.tls }
 }
 
+/** The Kubernetes connection entered in the form (token fields or a kubeconfig), or field errors. */
+function kubeFromForm(v: EnvInput): { connection: KubeConnection } | { state: ActionState } {
+  const res =
+    v.kube_mode === "kubeconfig"
+      ? parseKubeconfig(v.kubeconfig, v.kube_context, v.kube_namespace)
+      : parseTokenConnection({
+          server: v.kube_server,
+          token: v.kube_token,
+          ca: v.kube_ca,
+          insecure: Boolean(v.kube_insecure),
+          namespace: v.kube_namespace,
+        })
+  if (res.errors) return { state: { error: "Please fix the highlighted fields", fieldErrors: res.errors } }
+  return { connection: res.connection }
+}
+
+/** Refuse to save a cluster we cannot talk to: checks the version and that the credentials are accepted. */
+async function verifyKube(target: KubeTarget) {
+  const api = kube(target)
+  try {
+    const version = await api.version()
+    await api.checkAccess()
+    return version.gitVersion
+  } catch (err) {
+    if (err instanceof KubeError) throw new UserError(`Could not connect: ${err.message}`)
+    throw err
+  }
+}
+
+function connectionTarget(connection: KubeConnection): KubeTarget {
+  return { server: connection.server, ...connection.credentials, insecure: connection.insecure }
+}
+
+function kubeColumns(connection: KubeConnection) {
+  return {
+    url: connection.server,
+    kube_credentials: encryptKubeCredentials(connection.credentials),
+    kube_insecure: connection.insecure ? 1 : 0,
+    kube_namespace: connection.namespace,
+  }
+}
+
 /** Refuse to save an endpoint we cannot talk to. */
 async function ping(target: DockerTarget) {
   try {
@@ -94,20 +157,38 @@ export async function createEnvironment(_prev: ActionState, formData: FormData):
   if (!parsed.success) return fieldErrors(parsed.error)
   const v = parsed.data
 
+  if (v.type === "kubernetes") {
+    const res = kubeFromForm(v)
+    if ("state" in res) return res.state
+    const { connection } = res
+    const how = connection.credentials.token ? "token" : "client certificate"
+    return runAction("admin", "environment.create", `${v.name} (kubernetes, ${how})`, async () => {
+      await verifyKube(connectionTarget(connection))
+      const db = await getDb()
+      // No grants: only administrators can use a new environment until access is given.
+      await db
+        .insertInto("environments")
+        .values({ name: v.name, type: "kubernetes", ...kubeColumns(connection), created_at: new Date().toISOString() })
+        .execute()
+      return `Environment "${v.name}" added`
+    })
+  }
+
+  const type = v.type
   let tls: DockerTls | null = null
-  if (v.type === "tcp" && v.tls) {
+  if (type === "tcp" && v.tls) {
     const res = tlsFromForm(v)
     if ("state" in res) return res.state
     tls = res.tls
   }
 
   return runAction("admin", "environment.create", `${v.name}${tls ? " (tls)" : ""}`, async () => {
-    await ping({ type: v.type, url: v.url, tls })
+    await ping({ type, url: v.url, tls })
     const db = await getDb()
     // No grants: only administrators can use a new environment until access is given.
     await db
       .insertInto("environments")
-      .values({ name: v.name, type: v.type, url: v.url, ...encryptTls(tls), created_at: new Date().toISOString() })
+      .values({ name: v.name, type, url: v.url, ...encryptTls(tls), created_at: new Date().toISOString() })
       .execute()
     return `Environment "${v.name}" added`
   })
@@ -119,6 +200,9 @@ export async function updateEnvironment(_prev: ActionState, formData: FormData):
   const parsed = parseForm(formData)
   if (!parsed.success) return fieldErrors(parsed.error)
   const v = parsed.data
+
+  if (v.type === "kubernetes") return updateKubeEnvironment(id.data, v)
+  const type = v.type
 
   // TLS: "keep" the stored certificates, "set" new ones, or "off" (sockets,
   // or the switch turned off).
@@ -134,6 +218,7 @@ export async function updateEnvironment(_prev: ActionState, formData: FormData):
     const db = await getDb()
     const existing = await db.selectFrom("environments").selectAll().where("id", "=", id.data).executeTakeFirst()
     if (!existing) throw new UserError("Environment not found")
+    if (existing.type === "kubernetes") throw new UserError("A Kubernetes environment can't become a Docker one. Add a new environment instead.")
 
     let tls: DockerTls | null = null
     if (useTls) {
@@ -141,13 +226,47 @@ export async function updateEnvironment(_prev: ActionState, formData: FormData):
       if (!tls) throw new UserError("Paste the TLS certificates to enable TLS")
     }
 
-    await ping({ type: v.type, url: v.url, tls })
+    await ping({ type, url: v.url, tls })
     const tlsChanged = replacement !== null || (!useTls && existing.tls_key !== null)
     await db
       .updateTable("environments")
-      .set({ name: v.name, type: v.type, url: v.url, ...(tlsChanged ? encryptTls(tls) : {}) })
+      .set({ name: v.name, type, url: v.url, ...(tlsChanged ? encryptTls(tls) : {}) })
       .where("id", "=", id.data)
       .execute()
+    return `Environment "${v.name}" saved`
+  })
+}
+
+/**
+ * Kubernetes edit: name and default namespace, plus the connection when
+ * "Replace" was used; otherwise the stored server and credentials are kept.
+ */
+async function updateKubeEnvironment(id: number, v: EnvInput): Promise<ActionState> {
+  let replacement: KubeConnection | null = null
+  let namespace: string | null = null
+  if (v.kube_replace) {
+    const res = kubeFromForm(v)
+    if ("state" in res) return res.state
+    replacement = res.connection
+  } else if (v.kube_namespace.trim()) {
+    const ns = namespaceSchema.safeParse(v.kube_namespace)
+    if (!ns.success) return { error: "Please fix the highlighted fields", fieldErrors: { kube_namespace: [ns.error.issues[0].message] } }
+    namespace = ns.data
+  }
+
+  return runAction("admin", "environment.update", `${id}:${v.name}${replacement ? " (new connection)" : ""}`, async () => {
+    const db = await getDb()
+    const existing = await db.selectFrom("environments").selectAll().where("id", "=", id).executeTakeFirst()
+    if (!existing) throw new UserError("Environment not found")
+    if (existing.type !== "kubernetes") throw new UserError("A Docker environment can't become a Kubernetes one. Add a new environment instead.")
+
+    if (replacement) {
+      await verifyKube(connectionTarget(replacement))
+      await db.updateTable("environments").set({ name: v.name, ...kubeColumns(replacement) }).where("id", "=", id).execute()
+    } else {
+      await verifyKube(kubeTarget(existing))
+      await db.updateTable("environments").set({ name: v.name, kube_namespace: namespace }).where("id", "=", id).execute()
+    }
     return `Environment "${v.name}" saved`
   })
 }

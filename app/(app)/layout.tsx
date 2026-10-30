@@ -1,6 +1,6 @@
 import { Suspense } from "react"
 
-import { AdminNav, AppSidebar } from "@/components/app-sidebar"
+import { AdminNav, AppSidebar, DockerNav, KubernetesNav } from "@/components/app-sidebar"
 import { EnvSwitcher } from "@/components/env-switcher"
 import { LiveUpdates } from "@/components/live-updates"
 import { NavUser } from "@/components/nav-user"
@@ -31,6 +31,11 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
         header={
           <Suspense fallback={<MenuSkeleton />}>
             <SidebarEnvironments />
+          </Suspense>
+        }
+        nav={
+          <Suspense fallback={<NavSkeleton />}>
+            <SidebarNav />
           </Suspense>
         }
         showAdmin={
@@ -71,11 +76,19 @@ async function SidebarEnvironments() {
   )
 }
 
-// Keyed to the current environment so switching it reconnects the event stream.
+// The Docker or the Kubernetes section, following the current environment.
+async function SidebarNav() {
+  await requireUser()
+  const env = await getCurrentEnvironment()
+  return env?.type === "kubernetes" ? <KubernetesNav /> : <DockerNav />
+}
+
+// Keyed to the current environment so switching it reconnects the event
+// stream. Live updates follow Docker events; Kubernetes environments have none.
 async function LiveUpdatesForEnvironment() {
   await requireUser()
   const env = await getCurrentEnvironment()
-  return <LiveUpdates environmentId={env?.id ?? null} />
+  return <LiveUpdates environmentId={env && env.type !== "kubernetes" ? env.id : null} />
 }
 
 async function SidebarAdmin() {
@@ -86,6 +99,16 @@ async function SidebarAdmin() {
 async function SidebarUser() {
   const user = await requireUser()
   return <NavUser user={{ username: user.username, role: user.role }} />
+}
+
+function NavSkeleton() {
+  return (
+    <div className="flex flex-col gap-2 p-4">
+      {Array.from({ length: 6 }, (_, i) => (
+        <Skeleton key={i} className="h-4 w-3/5" />
+      ))}
+    </div>
+  )
 }
 
 // SidebarMenuSkeleton uses Math.random(), which can't be part of the static shell.
