@@ -41,7 +41,8 @@ export const MAX_BACKUP_BYTES = 512 * 1024 * 1024
 type AnyDb = Kysely<Record<string, Record<string, unknown>>>
 
 export function backupDir() {
-  return path.resolve(process.env.BACKUP_DIR || path.join(config.dataDir, "backups"))
+  // turbopackIgnore: a runtime directory, not files to trace into the standalone build.
+  return path.resolve(/* turbopackIgnore: true */ process.env.BACKUP_DIR || path.join(config.dataDir, "backups"))
 }
 
 function secretInfo(): BackupPayload["secret"] {
@@ -165,7 +166,7 @@ export type StoredBackup = { name: string; size: number; createdAt: string }
 
 export async function listStoredBackups(): Promise<StoredBackup[]> {
   const dir = backupDir()
-  const names = await fs.readdir(dir).catch(() => [] as string[])
+  const names = await fs.readdir(/* turbopackIgnore: true */ dir).catch(() => [] as string[])
   const out: StoredBackup[] = []
   for (const name of names.filter((n) => BACKUP_FILE_RE.test(n))) {
     const st = await fs.stat(path.join(dir, name)).catch(() => null)
