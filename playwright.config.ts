@@ -55,7 +55,8 @@ export default defineConfig({
         command: serve,
         url: `${baseURL}/api/health`,
         reuseExistingServer: false,
-        timeout: 300_000,
+        // Includes `next build`, which takes several minutes on a busy host.
+        timeout: 900_000,
         env: {
           HOSTNAME: "127.0.0.1",
           PORT: String(PORT),
