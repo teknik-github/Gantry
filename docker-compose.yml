@@ -37,6 +37,8 @@ services:
       # Dashboard history: sampling interval (seconds) and retention (days).
       METRICS_INTERVAL_SECONDS: ${METRICS_INTERVAL_SECONDS:-60}
       METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-7}
+      # Image update checks against the registries (hours; 0 = on demand only).
+      UPDATE_CHECK_INTERVAL_HOURS: ${UPDATE_CHECK_INTERVAL_HOURS:-6}
     # Group that owns /var/run/docker.sock on the host: stat -c '%g' /var/run/docker.sock
     group_add:
       - "${DOCKER_GID:-999}"

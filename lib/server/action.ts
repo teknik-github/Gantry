@@ -64,7 +64,14 @@ export async function runBulkAction<T>(
   permission: Permission,
   auditAction: string,
   items: T[],
-  opts: { verb: string; noun: string; label: (item: T) => string; auditTarget?: (item: T) => string },
+  opts: {
+    verb: string
+    noun: string
+    label: (item: T) => string
+    auditTarget?: (item: T) => string
+    /** Objects handled at once (default 4). */
+    concurrency?: number
+  },
   fn: (item: T, docker: DockerApi) => Promise<void>
 ): Promise<ActionState> {
   const auth = await authorize(permission)
@@ -83,6 +90,7 @@ export async function runBulkAction<T>(
   }
 
   const result = await runBulk(items, (item) => fn(item, docker), {
+    concurrency: opts.concurrency,
     errorMessage: (err) => {
       if (err instanceof DockerError || err instanceof UserError) return err.message
       console.error(`[gantry] action ${auditAction} failed`, err)

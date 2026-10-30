@@ -14,6 +14,12 @@ A Portainer-style web UI for Docker, built with Next.js 16 and shadcn/ui
 - **Topology**: interactive map of compose projects, containers, networks,
   volumes and `depends_on` relations
 - Images (pull, remove, prune), volumes and networks (create, remove)
+- **Private registries**: store logins (encrypted) for GHCR, GitLab, Docker Hub
+  or your own registry; used for pulls, recreate, update checks and stacks
+- **Image updates**: containers whose tag has a newer image in the registry
+  get an "update" badge; update them one by one or in bulk
+- **Templates**: 18 ready-made stacks (databases, WordPress, monitoring, Gitea,
+  n8n, MinIO, ...) plus your own templates from any compose file
 - **Bulk actions**: tick several containers, images, volumes or networks and
   start/stop/restart/pause/resume/kill or remove them at once
 - Multiple Docker environments: local socket or TCP, optionally with mutual TLS;
@@ -102,6 +108,7 @@ The first run needs a browser: `pnpm exec playwright install chromium`.
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Socket of the default `local` environment |
 | `METRICS_INTERVAL_SECONDS` | `60` | How often the dashboard history is sampled (minimum 10) |
 | `METRICS_RETENTION_DAYS` | `7` | How long history is kept |
+| `UPDATE_CHECK_INTERVAL_HOURS` | `6` | How often registries are asked about newer images (`0` = only on demand) |
 
 ## Features in more detail
 
@@ -153,6 +160,48 @@ use, running without force) are reported by name and stay selected; the rest
 are still done. Standard users get the start/stop actions only; built-in
 networks can't be selected; the container Gantry runs in is skipped for
 stop/restart/pause/kill/remove. At most 200 objects per request.
+
+### Registries
+
+Administrators add logins under **Registries** (address such as `ghcr.io`,
+`registry.gitlab.com`, `registry.example.com:5000` or `docker.io`, plus a
+username and password or token). Gantry checks the login before saving (can be
+switched off). Passwords are encrypted like TLS keys and never sent to the
+browser; leave the field empty when editing to keep the stored one.
+
+The login for an image's registry is used automatically for every pull through
+the Engine API (Images, create, recreate, update) and for `docker compose`:
+each stack run gets a private, temporary `DOCKER_CONFIG` with the logins
+(merged over a mounted `DOCKER_CONFIG`, whose `cli-plugins` stay available).
+
+### Image updates
+
+Gantry asks the registry which digest a tag currently points to (`GET
+/distribution`, no pull) and compares it with the image each container runs.
+Containers with a newer image get an **update** badge on the Containers page and
+dashboard; search for "update" to list only them. "Check updates" asks right
+away; otherwise every environment is checked every `UPDATE_CHECK_INTERVAL_HOURS`
+(results are kept in memory). To update, select the containers and choose
+**Update** (pull & recreate, two at a time, rolled back on failure). Containers
+pinned to a digest or an image id, and images built locally, are not checked.
+Containers from a compose project are recreated with the same settings, but the
+project's next `docker compose up` uses its compose file again.
+
+### Templates
+
+**Templates** lists 18 built-in stacks and your own. Deploying one asks for a
+stack name and the template's variables (ports, users, passwords: empty
+password fields are generated), writes them to the stack's `.env` and runs
+`docker compose up -d`; the result is a normal stack you can edit later.
+
+Custom templates are any compose file: `${NAME}` becomes a field on the deploy
+form, `${NAME:-default}` gets a default, `${NAME:?}` is required, and the
+"Default values" box can set more defaults. Names containing `PASSWORD`,
+`SECRET`, `TOKEN` or ending in `KEY` become generated password fields. A
+deployed stack can be turned into a template with **Save as template** on its
+page (secret-looking values are left empty). Variables such as `TZ`, `HOME` or
+`PATH` are refused because `docker compose` would read them from Gantry's own
+environment instead of `.env`.
 
 ### Environments: TLS and access
 

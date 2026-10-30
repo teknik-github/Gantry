@@ -25,6 +25,7 @@ import {
   updateStackContent,
   WORKING_DIR_LABEL,
 } from "@/lib/server/stacks"
+import { createStackInCurrentEnvironment } from "@/lib/server/stacks/create"
 import { removeStackDir, STACK_OPERATIONS, stackDir, type StackOperation } from "@/lib/server/stacks/compose"
 import { MAX_COMPOSE_BYTES, normalizeText, stackNameSchema, validateCompose, validateDotenv } from "@/lib/stacks"
 import type { ActionState } from "@/lib/validation"
@@ -118,32 +119,7 @@ export async function createStack(_prev: ActionState, formData: FormData): Promi
 
   let createdId = 0
   const res = await runAction("admin", "stack.create", name.data, async (ctx) => {
-    const environmentId = await currentEnvironmentId()
-    if (await findStackByName(environmentId, name.data)) {
-      throw new UserError(`A stack named "${name.data}" already exists in this environment`)
-    }
-    const api = await ctx.docker()
-    // Deploying would take over a project that Gantry doesn't manage.
-    const containers = await api.listContainers(true).catch(() => [])
-    if (containers.some((c) => c.Labels?.[PROJECT_LABEL] === name.data)) {
-      throw new UserError(
-        `A compose project named "${name.data}" already exists on this environment. Use Import on the Stacks page, or pick another name.`
-      )
-    }
-
-    createdId = await insertStack({
-      environment_id: environmentId,
-      name: name.data,
-      compose,
-      env,
-      created_by: ctx.user.username,
-    })
-    if (!deploy) return `Stack ${name.data} created`
-
-    const stack = await getStack(createdId)
-    if (!stack) throw new Error("Stack vanished after insert")
-    const run = await runStackOperation(stack, api.target, "deploy", ctx.user.username)
-    await audit(ctx.user, run.code === 0 ? "stack.deploy" : "stack.deploy.failed", name.data)
+    createdId = await createStackInCurrentEnvironment(ctx, { name: name.data, compose, env, deploy })
     return `Stack ${name.data} created`
   })
 

@@ -12,6 +12,8 @@ import {
   ServerIcon,
   UsersIcon,
   HistoryIcon,
+  KeyRoundIcon,
+  LayoutTemplateIcon,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -29,11 +31,13 @@ const navMain = [
   { title: "Volumes", url: "/volumes", icon: <HardDriveIcon /> },
   { title: "Networks", url: "/networks", icon: <NetworkIcon /> },
   { title: "Stacks", url: "/stacks", icon: <LayersPlusIcon /> },
+  { title: "Templates", url: "/templates", icon: <LayoutTemplateIcon /> },
   { title: "Topology", url: "/topology", icon: <WaypointsIcon /> },
 ]
 
 const navAdmin = [
   { title: "Environments", url: "/environments", icon: <ServerIcon /> },
+  { title: "Registries", url: "/registries", icon: <KeyRoundIcon /> },
   { title: "Users", url: "/users", icon: <UsersIcon /> },
   { title: "Activity", url: "/activity", icon: <HistoryIcon /> },
 ]

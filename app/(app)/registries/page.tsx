@@ -1,0 +1,26 @@
+import type { Metadata } from "next"
+
+import { RegistriesTable } from "@/components/gantry/registries-table"
+import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { timeAgo } from "@/lib/format"
+import { requireAdmin } from "@/lib/server/auth/dal"
+import { listRegistries } from "@/lib/server/registries"
+
+export const metadata: Metadata = { title: "Registries" }
+
+export default async function RegistriesPage() {
+  await requireAdmin()
+  const registries = await listRegistries()
+
+  return (
+    <PageBody>
+      <PageHeader
+        title="Registries"
+        description="Logins for private registries. Gantry uses them for pulls, update checks, recreate and stacks on every environment."
+      />
+      <RegistriesTable
+        data={registries.map((r) => ({ ...r, updatedLabel: timeAgo(r.updatedAt) }))}
+      />
+    </PageBody>
+  )
+}

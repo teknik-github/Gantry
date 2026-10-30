@@ -7,6 +7,7 @@ import path from "node:path"
 
 import { config } from "@/lib/server/config"
 import type { DockerTarget } from "@/lib/server/docker/client"
+import { dockerConfigJson, type RegistryCredentials } from "@/lib/registry"
 import { STACK_NAME_RE } from "@/lib/stacks"
 
 // Runs the `docker compose` CLI against a Gantry environment. Always spawned
@@ -73,7 +74,9 @@ export function dockerHost(target: DockerTarget): string {
 export function composeEnv(
   target: DockerTarget,
   certDir: string | null,
-  base: NodeJS.ProcessEnv = process.env
+  base: NodeJS.ProcessEnv = process.env,
+  /** Private config dir with Gantry's registry logins; replaces DOCKER_CONFIG. */
+  configDir: string | null = null
 ): Record<string, string> {
   const env: Record<string, string> = {
     PATH: base.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -82,7 +85,8 @@ export function composeEnv(
     DOCKER_HOST: dockerHost(target),
   }
   // Registry credentials (config.json) for private images.
-  if (base.DOCKER_CONFIG) env.DOCKER_CONFIG = base.DOCKER_CONFIG
+  if (configDir) env.DOCKER_CONFIG = configDir
+  else if (base.DOCKER_CONFIG) env.DOCKER_CONFIG = base.DOCKER_CONFIG
   for (const k of ["TZ", "LANG", "LC_ALL"]) if (base[k]) env[k] = base[k]!
   if (certDir) {
     env.DOCKER_TLS_VERIFY = "1"
@@ -170,13 +174,17 @@ export async function runCompose(opts: {
   cwd: string
   commands: string[][]
   timeoutMs: number
+  /** Registry logins for pulls (written to a private config.json for the run). */
+  registries?: RegistryCredentials[]
 }): Promise<ComposeRun> {
   const out = new OutputBuffer()
   const certDir = opts.target.tls ? await writeCerts(opts.target.tls) : null
+  let configDir: string | null = null
   const deadline = Date.now() + opts.timeoutMs
 
   try {
-    const env = composeEnv(opts.target, certDir)
+    if (opts.registries?.length) configDir = await writeDockerConfig(opts.registries)
+    const env = composeEnv(opts.target, certDir, process.env, configDir)
     for (const command of opts.commands) {
       out.append(`$ docker compose ${command.join(" ")}\n`)
       const res = await spawnCompose(composeArgs(opts.project, command), opts.cwd, env, deadline - Date.now(), out)
@@ -192,7 +200,40 @@ export async function runCompose(opts: {
     return { code: 0, output: out.toString(), timedOut: false }
   } finally {
     if (certDir) await fs.rm(certDir, { recursive: true, force: true }).catch(() => {})
+    if (configDir) await fs.rm(configDir, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+/**
+ * A private DOCKER_CONFIG dir for one compose run: Gantry's registry logins
+ * on top of the `auths` of a mounted DOCKER_CONFIG (Gantry's win), plus a
+ * link to its cli-plugins. The caller removes the dir.
+ */
+export async function writeDockerConfig(creds: RegistryCredentials[], base: NodeJS.ProcessEnv = process.env) {
+  const merged = JSON.parse(dockerConfigJson(creds)) as { auths: Record<string, unknown> }
+  if (base.DOCKER_CONFIG) {
+    try {
+      const existing = JSON.parse(
+        await fs.readFile(path.join(/* turbopackIgnore: true */ base.DOCKER_CONFIG, "config.json"), "utf8")
+      ) as { auths?: Record<string, unknown> }
+      merged.auths = { ...existing.auths, ...merged.auths }
+    } catch {
+      // No readable config.json there; Gantry's logins only.
+    }
+  }
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gantry-docker-config-"))
+  try {
+    await fs.writeFile(path.join(dir, "config.json"), `${JSON.stringify(merged, null, 2)}\n`, { mode: 0o600 })
+    // The CLI also looks for plugins (compose) in $DOCKER_CONFIG/cli-plugins.
+    if (base.DOCKER_CONFIG) {
+      const plugins = path.join(/* turbopackIgnore: true */ base.DOCKER_CONFIG, "cli-plugins")
+      if (await fs.stat(plugins).then((st) => st.isDirectory(), () => false)) await fs.symlink(plugins, path.join(dir, "cli-plugins"))
+    }
+  } catch (err) {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    throw err
+  }
+  return dir
 }
 
 function spawnCompose(

@@ -11,6 +11,7 @@ import type { Environment } from "@/lib/server/db/schema"
 import { docker } from "@/lib/server/docker/api"
 import { DockerError } from "@/lib/server/docker/client"
 import { environmentsForUser } from "@/lib/server/environment-access"
+import { credentialsForImage } from "@/lib/server/registries"
 import { environmentTarget } from "@/lib/server/environment-target"
 
 export { environmentTarget, type EnvironmentConnection } from "@/lib/server/environment-target"
@@ -54,5 +55,5 @@ export async function getDocker() {
     const user = await getCurrentUser()
     throw new NoEnvironmentError(user?.role === "admin" ? "No Docker environment configured" : NO_ENVIRONMENT_ASSIGNED)
   }
-  return docker(environmentTarget(env))
+  return docker(environmentTarget(env), { credentials: credentialsForImage })
 }

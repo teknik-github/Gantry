@@ -27,6 +27,7 @@ type RequestOptions = {
   query?: Record<string, string | number | boolean | undefined>
   body?: unknown
   timeoutMs?: number
+  headers?: Record<string, string>
 }
 
 export type DockerTls = NonNullable<DockerTarget["tls"]>
@@ -114,6 +115,7 @@ export function dockerRaw(
         method,
         path: buildPath(path, opts.query),
         headers: {
+          ...opts.headers,
           ...(payload
             ? { "Content-Type": "application/json", "Content-Length": payload.length }
             : {}),

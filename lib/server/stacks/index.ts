@@ -4,6 +4,7 @@ import { getDb } from "@/lib/server/db"
 import type { Stack, StackRunStatus } from "@/lib/server/db/schema"
 import type { ContainerSummary } from "@/lib/server/docker/api"
 import type { DockerTarget } from "@/lib/server/docker/client"
+import { allRegistryCredentials } from "@/lib/server/registries"
 import {
   operationCommands,
   runCompose,
@@ -125,6 +126,7 @@ export async function runStackOperation(
       cwd: dir,
       commands: operationCommands(op, opts),
       timeoutMs: TIMEOUTS[op],
+      registries: await allRegistryCredentials(),
     })
     await recordRun(stack.id, op, run.code === 0 ? "success" : "error", run.output, username)
     return run

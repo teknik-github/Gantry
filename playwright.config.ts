@@ -64,6 +64,8 @@ export default defineConfig({
           GANTRY_SECRET: "e2e-test-secret-e2e-test-secret-0123456789",
           COOKIE_SECURE: "false",
           GANTRY_SETUP_TOKEN: "e2e-setup-token-0123456789abcdef",
+          // Tests trigger update checks themselves.
+          UPDATE_CHECK_INTERVAL_HOURS: "0",
         },
       },
 })

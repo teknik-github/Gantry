@@ -3,14 +3,21 @@ import type { Metadata } from "next"
 import { ContainersTable } from "@/components/gantry/containers-table"
 import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getDocker } from "@/lib/server/environments"
+import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { containerReferences, containerUpdates, lastChecked } from "@/lib/server/image-updates"
 import { toContainerRows, tryDocker } from "@/lib/server/views"
 
 export const metadata: Metadata = { title: "Containers" }
 
 export default async function ContainersPage() {
   const user = await requireUser()
-  const result = await tryDocker(async () => (await getDocker()).listContainers(true))
+  const env = await getCurrentEnvironment()
+  const result = await tryDocker(async () => {
+    const api = await getDocker()
+    const [containers, images] = await Promise.all([api.listContainers(true), api.listImages()])
+    const refs = await containerReferences(api, containers)
+    return { containers, refs, updates: env ? containerUpdates(env.id, containers, images, refs) : undefined }
+  })
 
   return (
     <PageBody>
@@ -18,7 +25,12 @@ export default async function ContainersPage() {
       {result.error !== undefined ? (
         <DockerUnavailable message={result.error} />
       ) : (
-        <ContainersTable data={toContainerRows(result.data)} isAdmin={user.role === "admin"} pageSize={20} />
+        <ContainersTable
+          data={toContainerRows(result.data.containers, { updates: result.data.updates, refs: result.data.refs })}
+          isAdmin={user.role === "admin"}
+          pageSize={20}
+          lastUpdateCheck={env ? lastChecked(env.id) : null}
+        />
       )}
     </PageBody>
   )

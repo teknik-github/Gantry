@@ -3,7 +3,8 @@
 import { z } from "zod"
 
 import { containerNameField, imageField, RESTART_POLICIES } from "@/lib/container-form"
-import { runAction, UserError } from "@/lib/server/action"
+import { BULK_LIMIT, uniqueBy } from "@/lib/bulk"
+import { runAction, runBulkAction, UserError } from "@/lib/server/action"
 import { getCurrentUser } from "@/lib/server/auth/dal"
 import {
   editsFromForm,
@@ -16,7 +17,8 @@ import {
   type RecreateInspect,
 } from "@/lib/server/docker/recreate"
 import { selfContainerIds } from "@/lib/server/docker/self"
-import { getDocker } from "@/lib/server/environments"
+import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { checkReferences, containerReferences, containerUpdates, referencesOf } from "@/lib/server/image-updates"
 import { tryDocker } from "@/lib/server/views"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
@@ -123,4 +125,46 @@ export async function pullAndRecreateContainer(id: string): Promise<RecreateStat
     })
   )
   return { ...res, containerId }
+}
+
+/**
+ * "Pull & recreate" for several containers. Two at a time: each one pulls and
+ * swaps containers, which is slow and heavy on the daemon.
+ */
+export async function bulkPullAndRecreate(targets: { id: string; name: string }[]): Promise<ActionState> {
+  const parsed = z
+    .array(z.object({ id: idSchema, name: z.string().max(255) }))
+    .min(1)
+    .max(BULK_LIMIT)
+    .safeParse(targets)
+  if (!parsed.success) return { error: "Invalid request" }
+
+  return runBulkAction(
+    "admin",
+    "container.pull-recreate",
+    uniqueBy(parsed.data, (t) => t.id),
+    { verb: "Updated", noun: "container", label: (t) => t.name || t.id.slice(0, 12), auditTarget: (t) => t.id.slice(0, 12), concurrency: 2 },
+    async (t, api) => {
+      await asUserError(() => pullAndRecreate(api, { id: t.id, self: selfContainerIds() }))
+    }
+  )
+}
+
+/** Asks the registries which containers run an outdated image (no pull). */
+export async function checkForUpdates(): Promise<ActionState> {
+  return runAction("operate", "image.check-updates", "all", async ({ docker }) => {
+    const env = await getCurrentEnvironment()
+    if (!env) throw new UserError("No Docker environment configured")
+    const api = await docker()
+    const [containers, images] = await Promise.all([api.listContainers(true), api.listImages()])
+    const byContainer = await containerReferences(api, containers)
+    const refs = referencesOf(byContainer)
+    if (!refs.length) return "No containers use an image tag that can be checked"
+    const { checked, failed } = await checkReferences(env.id, api, refs)
+    const updates = [...containerUpdates(env.id, containers, images, byContainer).values()].filter(
+      (u) => u.status === "update"
+    ).length
+    const summary = updates ? `${updates} container(s) can be updated` : "everything is up to date"
+    return `Checked ${checked} image tag(s): ${summary}${failed ? `. ${failed} tag(s) could not be checked` : ""}`
+  })
 }

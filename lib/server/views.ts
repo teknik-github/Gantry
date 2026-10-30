@@ -4,8 +4,12 @@ import { timeAgo } from "@/lib/format"
 import { DockerError } from "@/lib/server/docker/client"
 import type { ContainerSummary } from "@/lib/server/docker/api"
 import type { ContainerRow } from "@/components/gantry/containers-table"
+import type { ContainerUpdate } from "@/lib/image-updates"
 
-export function toContainerRows(list: ContainerSummary[]): ContainerRow[] {
+export function toContainerRows(
+  list: ContainerSummary[],
+  extra: { updates?: Map<string, ContainerUpdate>; refs?: Map<string, string> } = {}
+): ContainerRow[] {
   return list.map((c) => {
     const ports = new Set<string>()
     for (const p of c.Ports) {
@@ -15,13 +19,15 @@ export function toContainerRows(list: ContainerSummary[]): ContainerRow[] {
     return {
       id: c.Id,
       name: c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12),
-      image: c.Image,
+      // The list shows an image id once the tag moved on; prefer the original reference.
+      image: extra.refs?.get(c.Id) ?? c.Image,
       state: c.State,
       status: c.Status,
       created: c.Created,
       createdLabel: timeAgo(c.Created),
       ports: [...ports].sort(),
       stack: c.Labels["com.docker.compose.project"] ?? null,
+      update: extra.updates?.get(c.Id) ?? null,
     }
   })
 }

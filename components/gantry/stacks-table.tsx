@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { ImportIcon, PlusIcon } from "lucide-react"
+import { ImportIcon, LayoutTemplateIcon, PlusIcon } from "lucide-react"
 
 import { importProject } from "@/app/(app)/stacks/actions"
 import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
@@ -129,12 +129,20 @@ export function StacksTable({ data, isAdmin }: { data: StackRow[]; isAdmin: bool
       pageSize={20}
       toolbar={
         isAdmin ? (
-          <Button size="sm" asChild>
-            <Link href="/stacks/new">
-              <PlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">Add stack</span>
-            </Link>
-          </Button>
+          <>
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/templates">
+                <LayoutTemplateIcon data-icon="inline-start" />
+                <span className="hidden lg:inline">From template</span>
+              </Link>
+            </Button>
+            <Button size="sm" asChild>
+              <Link href="/stacks/new">
+                <PlusIcon data-icon="inline-start" />
+                <span className="hidden lg:inline">Add stack</span>
+              </Link>
+            </Button>
+          </>
         ) : null
       }
     />

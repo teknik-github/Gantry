@@ -1,6 +1,7 @@
 import "server-only"
 
 import { bootstrapFirstRun } from "@/lib/server/bootstrap"
+import { startUpdateChecker } from "@/lib/server/image-updates"
 import { startMetricsSampler } from "@/lib/server/metrics-sampler"
 
 /**
@@ -11,6 +12,7 @@ export async function runStartupTasks() {
   const tasks: [string, () => Promise<void>][] = [
     ["first-run setup", bootstrapFirstRun],
     ["metrics sampler", startMetricsSampler],
+    ["image update checker", startUpdateChecker],
   ]
 
   for (const [name, task] of tasks) {

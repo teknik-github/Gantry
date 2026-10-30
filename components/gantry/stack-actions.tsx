@@ -4,6 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
   CloudDownloadIcon,
+  LayoutTemplateIcon,
   PlayIcon,
   PowerOffIcon,
   RocketIcon,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react"
 
 import { deleteStack, stackOperation } from "@/app/(app)/stacks/actions"
+import { saveStackAsTemplate } from "@/app/(app)/templates/actions"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { useRunAction } from "@/components/gantry/use-action"
 import { Button } from "@/components/ui/button"
@@ -81,6 +83,21 @@ export function StackActions({
           Restart
         </Button>
       ) : null}
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        onClick={() =>
+          run(async () => {
+            const res = await saveStackAsTemplate(id)
+            if (res.href) router.push(res.href)
+            return res
+          })
+        }
+      >
+        <LayoutTemplateIcon data-icon="inline-start" />
+        Save as template
+      </Button>
       {total > 0 ? (
         <ConfirmAction
           title={`Take ${name} down?`}

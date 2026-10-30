@@ -4,7 +4,12 @@ import http from "node:http"
 
 const SOCKET = process.env.DOCKER_SOCKET ?? "/var/run/docker.sock"
 
-export function docker<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+export function docker<T = unknown>(
+  method: string,
+  path: string,
+  body?: unknown,
+  extraHeaders: Record<string, string> = {}
+): Promise<T> {
   const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body))
   return new Promise((resolve, reject) => {
     const req = http.request(
@@ -12,7 +17,10 @@ export function docker<T = unknown>(method: string, path: string, body?: unknown
         socketPath: SOCKET,
         method,
         path,
-        headers: payload ? { "Content-Type": "application/json", "Content-Length": payload.length } : {},
+        headers: {
+          ...extraHeaders,
+          ...(payload ? { "Content-Type": "application/json", "Content-Length": payload.length } : {}),
+        },
       },
       (res) => {
         const chunks: Buffer[] = []

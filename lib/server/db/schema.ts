@@ -76,6 +76,35 @@ export interface MetricsTable {
   mem_total: number
 }
 
+/** Login for a private container registry. */
+export interface RegistriesTable {
+  id: Generated<number>
+  name: string
+  /** host[:port], normalised; "docker.io" for Docker Hub */
+  address: string
+  username: string
+  /** Password or access token, encrypted at rest (lib/server/crypto.ts) */
+  password: string
+  created_at: string
+  updated_at: string
+}
+
+/** Custom stack template; built-in ones are in lib/template-catalog.ts. */
+export interface TemplatesTable {
+  id: Generated<number>
+  title: string
+  description: string
+  category: string
+  /** Suggested stack name when deploying */
+  stack_name: string
+  compose: string
+  /** dotenv with default values for the compose file's ${VARIABLES} */
+  env: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
 export interface Database {
   users: UsersTable
   environments: EnvironmentsTable
@@ -83,6 +112,8 @@ export interface Database {
   audit_logs: AuditLogsTable
   stacks: StacksTable
   metrics: MetricsTable
+  registries: RegistriesTable
+  templates: TemplatesTable
 }
 
 export type User = Selectable<UsersTable>
@@ -92,3 +123,5 @@ export type AuditLog = Selectable<AuditLogsTable>
 export type Stack = Selectable<StacksTable>
 export type Metric = Selectable<MetricsTable>
 export type NewMetric = Insertable<MetricsTable>
+export type Registry = Selectable<RegistriesTable>
+export type CustomTemplate = Selectable<TemplatesTable>

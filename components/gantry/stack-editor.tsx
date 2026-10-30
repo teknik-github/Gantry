@@ -41,6 +41,8 @@ export function StackEditor({
   }, [state])
   const errs = state.fieldErrors ?? {}
   const values = state.values ?? {}
+  // Unique ids: Next keeps recently visited pages hidden in the DOM.
+  const uid = React.useId()
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
@@ -48,9 +50,9 @@ export function StackEditor({
       <FieldGroup>
         {isNew ? (
           <Field data-invalid={errs.name ? true : undefined} className="max-w-sm">
-            <FieldLabel htmlFor="stack-name">Name</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-stack-name`}>Name</FieldLabel>
             <Input
-              id="stack-name"
+              id={`${uid}-stack-name`}
               name="name"
               placeholder="my-app"
               defaultValue={values.name ?? ""}
@@ -65,9 +67,9 @@ export function StackEditor({
         ) : null}
 
         <Field data-invalid={errs.compose ? true : undefined}>
-          <FieldLabel htmlFor="stack-compose">Compose file</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-stack-compose`}>Compose file</FieldLabel>
           <Textarea
-            id="stack-compose"
+            id={`${uid}-stack-compose`}
             name="compose"
             defaultValue={values.compose ?? stack?.compose ?? EXAMPLE_COMPOSE}
             className="max-h-[70vh] min-h-80 font-mono text-xs leading-relaxed md:text-xs"
@@ -85,9 +87,9 @@ export function StackEditor({
         </Field>
 
         <Field data-invalid={errs.env ? true : undefined}>
-          <FieldLabel htmlFor="stack-env">Environment variables</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-stack-env`}>Environment variables</FieldLabel>
           <Textarea
-            id="stack-env"
+            id={`${uid}-stack-env`}
             name="env"
             defaultValue={values.env ?? stack?.env ?? ""}
             placeholder={"# .env, used for ${VARIABLE} substitution\nTAG=latest"}

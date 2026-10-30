@@ -3,7 +3,9 @@
 import * as React from "react"
 import Link from "next/link"
 import {
+  ArrowUpCircleIcon,
   CloudDownloadIcon,
+  RefreshCwIcon,
   EllipsisVerticalIcon,
   PauseIcon,
   PlayIcon,
@@ -23,12 +25,14 @@ import {
   removeContainer,
   removeContainers,
 } from "@/app/(app)/containers/actions"
+import { bulkPullAndRecreate, checkForUpdates } from "@/app/(app)/containers/recreate-actions"
 import { columnHelperFor, DataTable, SortHeader, type TableSelection } from "@/components/data-table"
 import { BulkButton, BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { PullRecreateConfirm } from "@/components/gantry/container-edit-dialog"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono, StateBadge } from "@/components/gantry/ui"
+import { Badge } from "@/components/ui/badge"
 import { useRunAction } from "@/components/gantry/use-action"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -50,6 +54,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { timeAgo } from "@/lib/format"
+import type { ContainerUpdate } from "@/lib/image-updates"
 import type { ContainerAction } from "@/lib/server/docker/api"
 
 export type ContainerRow = {
@@ -62,6 +68,8 @@ export type ContainerRow = {
   createdLabel: string
   ports: string[]
   stack: string | null
+  /** Result of the last image update check; null when not checked. */
+  update: ContainerUpdate | null
 }
 
 const helper = columnHelperFor<ContainerRow>()
@@ -86,7 +94,12 @@ function buildColumns(isAdmin: boolean) {
     }),
     helper.accessor("image", {
       header: ({ column }) => <SortHeader column={column} title="Image" />,
-      cell: ({ row }) => <Mono className="block max-w-64 truncate">{row.original.image}</Mono>,
+      cell: ({ row }) => (
+        <div className="flex max-w-72 items-center gap-1.5">
+          <Mono className="truncate">{row.original.image}</Mono>
+          <UpdateBadge update={row.original.update} />
+        </div>
+      ),
     }),
     helper.accessor("stack", {
       header: "Stack",
@@ -120,14 +133,58 @@ function buildColumns(isAdmin: boolean) {
   ])
 }
 
+function UpdateBadge({ update }: { update: ContainerRow["update"] }) {
+  if (update?.status === "update") {
+    return (
+      <Badge
+        variant="outline"
+        className="shrink-0 gap-1 border-amber-500/50 px-1.5 text-amber-700 dark:text-amber-400"
+        title={`A newer image is available for ${update.reference}`}
+        data-testid="update-badge"
+      >
+        <ArrowUpCircleIcon />
+        update
+      </Badge>
+    )
+  }
+  // Registry errors only; locally built images simply have nothing to compare.
+  if (update?.status === "unknown" && update.reason && !update.reason.startsWith("Built or loaded locally")) {
+    return (
+      <Badge variant="outline" className="shrink-0 px-1.5 text-muted-foreground" title={update.reason}>
+        unchecked
+      </Badge>
+    )
+  }
+  return null
+}
+
+function CheckUpdatesButton({ lastChecked }: { lastChecked: number | null }) {
+  const [pending, run] = useRunAction()
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={pending}
+      onClick={() => run(checkForUpdates)}
+      title={lastChecked ? `Last checked ${timeAgo(new Date(lastChecked))}` : "Not checked yet"}
+    >
+      <RefreshCwIcon data-icon="inline-start" className={pending ? "animate-spin" : undefined} />
+      <span className="hidden lg:inline">{pending ? "Checking…" : "Check updates"}</span>
+    </Button>
+  )
+}
+
 export function ContainersTable({
   data,
   isAdmin,
   pageSize,
+  lastUpdateCheck,
 }: {
   data: ContainerRow[]
   isAdmin: boolean
   pageSize?: number
+  /** Shows the "Check updates" button (undefined hides it). */
+  lastUpdateCheck?: number | null
 }) {
   const columns = React.useMemo(() => buildColumns(isAdmin), [isAdmin])
   const selection: TableSelection<ContainerRow> = {
@@ -140,11 +197,16 @@ export function ContainersTable({
       columns={columns}
       getRowId={(r) => r.id}
       selection={selection}
-      searchText={(r) => `${r.name} ${r.image} ${r.state} ${r.stack ?? ""}`}
+      searchText={(r) => `${r.name} ${r.image} ${r.state} ${r.stack ?? ""} ${r.update?.status === "update" ? "update available" : ""}`}
       searchPlaceholder="Search containers…"
       emptyMessage="No containers."
       pageSize={pageSize}
-      toolbar={isAdmin ? <CreateContainerDialog /> : null}
+      toolbar={
+        <>
+          {lastUpdateCheck !== undefined ? <CheckUpdatesButton lastChecked={lastUpdateCheck} /> : null}
+          {isAdmin ? <CreateContainerDialog /> : null}
+        </>
+      }
     />
   )
 }
@@ -190,6 +252,7 @@ function BulkActions({ selected, clear, isAdmin }: { selected: ContainerRow[]; c
           />
         )
       })}
+      {isAdmin ? <BulkUpdate selected={selected} clear={clear} /> : null}
       {isAdmin ? (
         <BulkConfirm
           label="Remove"
@@ -215,6 +278,28 @@ function BulkActions({ selected, clear, isAdmin }: { selected: ContainerRow[]; c
         />
       ) : null}
     </>
+  )
+}
+
+function BulkUpdate({ selected, clear }: { selected: ContainerRow[]; clear: () => void }) {
+  const targets = selected.filter((r) => r.update?.status === "update")
+  const compose = targets.filter((r) => r.stack).length
+  return (
+    <BulkConfirm
+      label="Update"
+      icon={<ArrowUpCircleIcon data-icon="inline-start" />}
+      title={`Update ${targets.length} container(s)?`}
+      description="Each one pulls its image tag and is recreated with the same settings. If anything fails, the old container is put back."
+      names={targets.map((r) => `${r.name} (${r.image})`)}
+      warning={
+        compose
+          ? `${compose} belong to a compose project; its next "docker compose up" uses the compose file again.`
+          : null
+      }
+      destructive={false}
+      onConfirm={() => bulkPullAndRecreate(targets.map(toTarget))}
+      onDone={clear}
+    />
   )
 }
 

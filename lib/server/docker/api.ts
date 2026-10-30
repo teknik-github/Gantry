@@ -7,6 +7,7 @@ import {
   DockerError,
   type DockerTarget,
 } from "@/lib/server/docker/client"
+import { registryAuthHeader, registryServerAddress, type RegistryCredentials } from "@/lib/registry"
 
 // Minimal shapes of the Docker Engine API responses Gantry uses.
 
@@ -160,7 +161,17 @@ function imageRefPath(reference: string) {
   return reference.split("/").map(encodeURIComponent).join("/")
 }
 
-export function docker(target: DockerTarget) {
+export type DockerOptions = {
+  /** Login for the registry of an image reference (private pulls, update checks). */
+  credentials?: (reference: string) => Promise<RegistryCredentials | null>
+}
+
+export function docker(target: DockerTarget, options: DockerOptions = {}) {
+  async function authHeaders(reference: string): Promise<Record<string, string>> {
+    const cred = await options.credentials?.(reference)
+    return cred ? { "X-Registry-Auth": registryAuthHeader(cred) } : {}
+  }
+
   return {
     /** The endpoint this client talks to (used to point the docker CLI at it, e.g. for stacks). */
     target,
@@ -210,6 +221,7 @@ export function docker(target: DockerTarget) {
       const { image, tag } = splitImageRef(reference)
       const { body } = await dockerRaw(target, "POST", "/images/create", {
         query: { fromImage: image, tag },
+        headers: await authHeaders(reference),
         timeoutMs: 15 * 60_000,
       })
       // Pull progress is streamed as JSON lines; failures arrive as {"error": ...}.
@@ -223,6 +235,25 @@ export function docker(target: DockerTarget) {
         }
       }
     },
+    /** Digest the registry currently serves for a reference (no pull). */
+    async distributionInspect(reference: string) {
+      return dockerJson<{ Descriptor: { digest: string; mediaType?: string } }>(
+        target,
+        "GET",
+        `/distribution/${imageRefPath(reference)}/json`,
+        { headers: await authHeaders(reference), timeoutMs: 30_000 }
+      )
+    },
+    /** Checks a registry login through the daemon (POST /auth); throws on bad credentials. */
+    registryLogin: (cred: RegistryCredentials) =>
+      dockerJson<{ Status?: string }>(target, "POST", "/auth", {
+        body: {
+          username: cred.username,
+          password: cred.password,
+          serveraddress: registryServerAddress(cred.address),
+        },
+        timeoutMs: 30_000,
+      }),
     pruneImages: () =>
       dockerJson<{ SpaceReclaimed: number; ImagesDeleted: unknown[] | null }>(
         target,

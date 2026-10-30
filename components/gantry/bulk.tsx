@@ -41,7 +41,7 @@ export function BulkButton({
 
 const MAX_NAMES = 10
 
-/** A destructive bulk action behind a confirmation that lists what it touches. */
+/** A bulk action behind a confirmation that lists what it touches (destructive by default). */
 export function BulkConfirm({
   label,
   icon,
@@ -50,6 +50,7 @@ export function BulkConfirm({
   names,
   warning,
   extra,
+  destructive = true,
   onConfirm,
   onDone,
 }: {
@@ -61,6 +62,7 @@ export function BulkConfirm({
   /** e.g. "2 of them are in use and will fail". */
   warning?: string | null
   extra?: React.ReactNode
+  destructive?: boolean
   onConfirm: () => Promise<ActionState>
   onDone: () => void
 }) {
@@ -68,6 +70,7 @@ export function BulkConfirm({
     <ConfirmAction
       title={title}
       confirmLabel={label}
+      destructive={destructive}
       description={
         <span className="flex flex-col gap-2">
           <span>{description}</span>
@@ -91,7 +94,7 @@ export function BulkConfirm({
         return res
       }}
     >
-      <Button size="sm" variant="outline" className="text-destructive" disabled={names.length === 0}>
+      <Button size="sm" variant="outline" className={destructive ? "text-destructive" : undefined} disabled={names.length === 0}>
         {icon}
         {label}
         <span className="tabular-nums opacity-70">{names.length}</span>

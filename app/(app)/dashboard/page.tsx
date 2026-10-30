@@ -7,6 +7,7 @@ import { SectionCards } from "@/components/section-cards"
 import { formatBytes } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { containerReferences, containerUpdates } from "@/lib/server/image-updates"
 import { toContainerRows, tryDocker } from "@/lib/server/views"
 
 export const metadata: Metadata = { title: "Dashboard" }
@@ -24,7 +25,8 @@ export default async function DashboardPage() {
       api.listVolumes(),
       api.listNetworks(),
     ])
-    return { info, containers, images, volumes, networks }
+    const refs = await containerReferences(api, containers)
+    return { info, containers, images, volumes, networks, refs }
   })
 
   const header = (
@@ -47,7 +49,7 @@ export default async function DashboardPage() {
     )
   }
 
-  const { containers, images, volumes, networks } = result.data
+  const { containers, images, volumes, networks, refs } = result.data
   const running = containers.filter((c) => c.State === "running").length
   const paused = containers.filter((c) => c.State === "paused").length
 
@@ -72,7 +74,10 @@ export default async function DashboardPage() {
       <div className="px-4 lg:px-6">
         <ChartAreaInteractive />
       </div>
-      <ContainersTable data={toContainerRows(containers)} isAdmin={user.role === "admin"} />
+      <ContainersTable
+        data={toContainerRows(containers, { refs, updates: env ? containerUpdates(env.id, containers, images, refs) : undefined })}
+        isAdmin={user.role === "admin"}
+      />
     </PageBody>
   )
 }
