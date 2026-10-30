@@ -2,8 +2,11 @@ import "server-only"
 
 import { decryptSecret, encryptSecret, SecretDecryptError } from "@/lib/server/crypto"
 import { getDb } from "@/lib/server/db"
+import nodemailer from "nodemailer"
+
 import {
   ALERT_KIND_KEYS,
+  buildEmail,
   buildRequest,
   CHANNEL_TYPE_KEYS,
   type Alert,
@@ -107,6 +110,7 @@ export async function deleteChannel(id: number) {
 
 /** Sends one alert to one channel; resolves to an error message or null. */
 export async function deliver(channel: Pick<ChannelInfo, "type" | "config">, alert: Alert): Promise<string | null> {
+  if (channel.type === "email") return sendEmail(channel.config, alert)
   try {
     const req = buildRequest(channel.type, channel.config, alert)
     const res = await fetch(req.url, {
@@ -122,6 +126,28 @@ export async function deliver(channel: Pick<ChannelInfo, "type" | "config">, ale
   } catch (err) {
     const e = err as Error & { cause?: { code?: string } }
     return e.name === "TimeoutError" ? "timed out" : (e.cause?.code ?? e.message ?? "failed")
+  }
+}
+
+async function sendEmail(config: ChannelConfig, alert: Alert): Promise<string | null> {
+  try {
+    const transport = nodemailer.createTransport({
+      host: config.host,
+      port: Number(config.port || 587),
+      secure: config.security === "tls",
+      requireTLS: config.security === "starttls",
+      ignoreTLS: config.security === "none",
+      auth: config.username ? { user: config.username, pass: config.password ?? "" } : undefined,
+      connectionTimeout: SEND_TIMEOUT_MS,
+      greetingTimeout: SEND_TIMEOUT_MS,
+      socketTimeout: SEND_TIMEOUT_MS,
+    })
+    await transport.sendMail(buildEmail(config, alert))
+    transport.close()
+    return null
+  } catch (err) {
+    const e = err as Error & { code?: string; responseCode?: number }
+    return [e.responseCode, e.code, e.message].filter(Boolean).join(" ").slice(0, 300) || "failed"
   }
 }
 

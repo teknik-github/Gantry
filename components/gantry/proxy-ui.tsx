@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useActionState } from "react"
-import { CodeIcon, CopyIcon, PencilIcon, PlusIcon, RefreshCwIcon, SaveIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react"
+import { CodeIcon, CopyIcon, GlobeIcon, PencilIcon, PlusIcon, RefreshCwIcon, SaveIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { deleteHost, reapplyProxy, saveHost, saveSettings, setHostEnabled } from "@/app/(app)/proxy/actions"
@@ -470,5 +470,36 @@ function SnippetsDialog({ row }: { row: ProxyHostRow }) {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** "Expose via proxy" for one container (container page). */
+export function ExposeContainerDialog({ target, ports, proxyOff }: { target: string; ports: number[]; proxyOff: boolean }) {
+  return (
+    <FormDialog
+      trigger={
+        <Button size="sm" variant="outline">
+          <GlobeIcon data-icon="inline-start" />
+          Expose via proxy
+        </Button>
+      }
+      title={`Expose ${target}`}
+      description={
+        proxyOff
+          ? "The proxy is off on this environment: the host is saved and served once you turn it on (Proxy page)."
+          : "Serve this container under a domain through the proxy. Point the domain's DNS at this Docker host."
+      }
+      submitLabel="Save"
+      action={saveHost}
+      className="sm:max-w-lg"
+    >
+      {(errors) => (
+        <HostFields
+          errors={errors}
+          containers={[{ name: target, state: "running", ports }]}
+          initial={{ id: 0, domains: [], target, targetState: "running", port: ports[0] ?? 80, tls: "auto", enabled: true, snippets: { traefik: "", caddy: "", nginx: "" } }}
+        />
+      )}
+    </FormDialog>
   )
 }

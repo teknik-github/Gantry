@@ -37,6 +37,13 @@ type Field = {
   optional?: boolean
   /** "url" fields must be http(s). */
   kind?: "url" | "text"
+  /** Pick one of these (rendered as a select); the first is the default. */
+  options?: readonly string[]
+  /**
+   * Where the secrets are sent. Changing it requires re-entering them, so a
+   * stored token can't be redirected to a new server without knowing it.
+   */
+  destination?: boolean
 }
 
 export const CHANNEL_TYPES = {
@@ -58,9 +65,26 @@ export const CHANNEL_TYPES = {
   ntfy: {
     label: "ntfy",
     fields: [
-      { name: "server", label: "Server", kind: "url", placeholder: "https://ntfy.sh" },
+      { name: "server", label: "Server", kind: "url", placeholder: "https://ntfy.sh", destination: true },
       { name: "topic", label: "Topic", placeholder: "gantry-alerts" },
       { name: "token", label: "Access token", secret: true, optional: true, description: "Only for protected topics" },
+    ],
+  },
+  email: {
+    label: "Email (SMTP)",
+    fields: [
+      { name: "host", label: "SMTP server", placeholder: "smtp.example.com", destination: true },
+      { name: "port", label: "Port", placeholder: "587" },
+      {
+        name: "security",
+        label: "Security",
+        options: ["starttls", "tls", "none"],
+        description: "STARTTLS (usually port 587), TLS (465) or none (local relays only)",
+      },
+      { name: "username", label: "Username", optional: true },
+      { name: "password", label: "Password", secret: true, optional: true },
+      { name: "from", label: "From", placeholder: "Gantry <gantry@example.com>" },
+      { name: "to", label: "To", placeholder: "ops@example.com, oncall@example.com", description: "Comma-separated" },
     ],
   },
   webhook: {
@@ -92,24 +116,59 @@ export function checkChannelConfig(
 ): { config: ChannelConfig; errors: Record<string, string> } {
   const config: ChannelConfig = {}
   const errors: Record<string, string> = {}
-  for (const f of channelFields(type) as readonly Field[]) {
+  const fields = channelFields(type) as readonly Field[]
+  // Stored secrets only stay when every destination field is unchanged.
+  const sameDestination = fields.every((f) => !f.destination || (submitted[f.name] ?? "").trim() === (previous?.[f.name] ?? ""))
+  for (const f of fields) {
     let value = (submitted[f.name] ?? "").trim()
-    if (!value && f.secret && previous?.[f.name]) value = previous[f.name]
+    if (!value && f.options) value = f.options[0]
+    if (!value && f.secret && previous?.[f.name]) {
+      if (sameDestination) value = previous[f.name]
+      else if (!f.optional) {
+        errors[f.name] = "Enter it again: the destination changed"
+        continue
+      }
+    }
     if (!value) {
       if (!f.optional) errors[f.name] = "Required"
       continue
     }
     if (value.length > 2000) errors[f.name] = "Too long"
     else if (f.kind === "url" && !isHttpUrl(value)) errors[f.name] = "Use an http(s) URL"
+    else if (f.options && !f.options.includes(value)) errors[f.name] = "Pick one of the options"
     config[f.name] = value
   }
   if (type === "ntfy" && config.topic && !/^[A-Za-z0-9_-]{1,64}$/.test(config.topic)) {
     errors.topic = "Letters, digits, - and _ (max 64)"
   }
+  if (type === "email") {
+    if (config.host && !/^[a-zA-Z0-9.-]{1,253}$/.test(config.host)) errors.host = "A host name or IP address"
+    const port = Number(config.port || "587")
+    if (!/^\d{1,5}$/.test(config.port || "587") || port < 1 || port > 65535) errors.port = "1-65535"
+    else config.port = String(port)
+    if (config.from && !emailAddresses(config.from)) errors.from = "An email address, optionally with a name"
+    const to = config.to ? emailAddresses(config.to, true) : null
+    if (config.to && !to) errors.to = "Comma-separated email addresses"
+    if (config.username && !config.password && !previous?.password) errors.password = "Required with a username"
+  }
   if (type === "telegram" && config.chatId && !/^(-?\d{1,20}|@[A-Za-z0-9_]{5,32})$/.test(config.chatId)) {
     errors.chatId = "A numeric id or @channelname"
   }
   return { config, errors }
+}
+
+const ADDRESS_RE = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/
+
+/** "a@x.com", "Name <a@x.com>" (or a comma list when `many`); null if invalid. */
+export function emailAddresses(value: string, many = false): string[] | null {
+  const parts = many ? value.split(",").map((p) => p.trim()).filter(Boolean) : [value.trim()]
+  if (!parts.length || parts.length > 20) return null
+  for (const p of parts) {
+    const m = /^(?:[^<>\r\n"]{0,100}<([^<>]+)>|([^<>]+))$/.exec(p)
+    const address = (m?.[1] ?? m?.[2] ?? "").trim()
+    if (!ADDRESS_RE.test(address)) return null
+  }
+  return parts
 }
 
 function isHttpUrl(value: string) {
@@ -129,8 +188,18 @@ export function alertText(alert: Alert) {
 
 export type HttpRequest = { url: string; method: "POST"; headers: Record<string, string>; body: string }
 
-/** The request that delivers `alert` to a channel. */
-export function buildRequest(type: ChannelType, config: ChannelConfig, alert: Alert): HttpRequest {
+/** The email that delivers `alert` (email channels). */
+export function buildEmail(config: ChannelConfig, alert: Alert) {
+  return {
+    from: config.from,
+    to: emailAddresses(config.to, true) ?? [],
+    subject: `[Gantry · ${alert.environment}] ${alert.subject}`.replace(/[\r\n]+/g, " ").slice(0, 250),
+    text: `${alertText(alert)}\n\n${alert.time}\n`,
+  }
+}
+
+/** The request that delivers `alert` to an HTTP channel (every type but email). */
+export function buildRequest(type: Exclude<ChannelType, "email">, config: ChannelConfig, alert: Alert): HttpRequest {
   const json = (url: string, body: unknown): HttpRequest => ({
     url,
     method: "POST",
@@ -170,6 +239,8 @@ export function channelTarget(type: ChannelType, config: ChannelConfig) {
   switch (type) {
     case "telegram":
       return `chat ${config.chatId ?? "?"}`
+    case "email":
+      return `${config.to ?? "?"} via ${config.host ?? "?"}`
     case "ntfy":
       return `${config.server?.replace(/^https?:\/\//, "") ?? "?"}/${config.topic ?? "?"}`
     default: {

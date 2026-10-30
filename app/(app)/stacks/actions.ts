@@ -222,7 +222,13 @@ export async function importProject(project: string): Promise<ActionState> {
   if (!name.success) return { error: "This project name can't be used for a Gantry stack" }
 
   return runAction("admin", "stack.import", name.data, async (ctx) => {
-    const environmentId = await currentEnvironmentId()
+    // The labels naming the compose file come from the daemon; only trust them
+    // for the local socket, whose files are the ones Gantry can see.
+    const environment = await getCurrentEnvironment()
+    if (environment?.type !== "socket") {
+      throw new UserError("Import only works for the local Docker socket environment. Create the stack by pasting its compose file.")
+    }
+    const environmentId = environment.id
     if (await findStackByName(environmentId, name.data)) {
       throw new UserError(`A stack named "${name.data}" already exists in this environment`)
     }

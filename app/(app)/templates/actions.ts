@@ -5,7 +5,12 @@ import { redirect } from "next/navigation"
 import { z } from "zod"
 
 import { customTemplateId, customTemplateKey, checkVariables, generatePassword, mergeVariables, renderDotenv, templateDefaultsFromEnv } from "@/lib/templates"
+import { composeContainerName, composeServicePorts } from "@/lib/compose-ports"
+import { checkHost, type ProxyHost } from "@/lib/proxy"
 import { runAction, UserError } from "@/lib/server/action"
+import { audit } from "@/lib/server/audit"
+import { getCurrentUser } from "@/lib/server/auth/dal"
+import { applyProxy, getProxySettings, listProxyHosts, saveProxyHost } from "@/lib/server/proxy"
 import { getStack } from "@/lib/server/stacks"
 import { createStackInCurrentEnvironment } from "@/lib/server/stacks/create"
 import {
@@ -49,6 +54,29 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
   if (!name.success) fieldErrors.name = [name.error.issues[0]?.message ?? "Invalid name"]
   const check = checkVariables(template.variables, submitted, () => generatePassword(randomBytes))
   for (const [k, msg] of Object.entries(check.errors)) fieldErrors[`var:${k}`] = [msg]
+
+  // Optional: serve one of the template's services under a domain through the proxy.
+  for (const k of ["domains", "expose", "tls"]) values[k] = String(formData.get(k) ?? "")
+  let expose: Omit<ProxyHost, "enabled"> | null = null
+  let environmentId: number | null = null
+  if (values.domains.trim() && name.success) {
+    // Checking the domains reads the stored proxy hosts: authorize first.
+    if ((await getCurrentUser())?.role !== "admin") return { error: "Only administrators can do this." }
+    const environment = await getCurrentEnvironment()
+    if (!environment) return { error: "No Docker environment configured" }
+    environmentId = environment.id
+    const [service = "", port = ""] = values.expose.split(":")
+    const known = composeServicePorts(template.compose).some((p) => p.service === service && String(p.port) === port)
+    if (!known) fieldErrors.expose = ["Pick the service and port to expose"]
+    else {
+      const checked = checkHost(
+        { domains: values.domains, target: composeContainerName(name.data, service), port, tls: values.tls },
+        await listProxyHosts(environment.id)
+      )
+      for (const [k, msg] of Object.entries(checked.errors)) fieldErrors[k === "target" || k === "port" ? "expose" : k] = [msg]
+      expose = checked.host ?? null
+    }
+  }
   if (!name.success || Object.keys(fieldErrors).length) {
     return { error: "Please fix the highlighted fields", fieldErrors, values }
   }
@@ -62,6 +90,17 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
       env,
       deploy: true,
     })
+    if (expose && environmentId) {
+      await saveProxyHost(environmentId, { ...expose, enabled: true })
+      await audit(ctx.user, "proxy.host.create", expose.domains.join(", "))
+      const { settings } = await getProxySettings(environmentId)
+      if (settings.mode !== "off") {
+        // The stack is up either way; a proxy problem shows on the Proxy page.
+        await applyProxy(await ctx.docker(), environmentId).catch((err) =>
+          console.warn(`[gantry] proxy update after deploying ${name.data} failed: ${(err as Error).message}`)
+        )
+      }
+    }
     return `Stack ${name.data} created`
   })
   if (!res.ok) {

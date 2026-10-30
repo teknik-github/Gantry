@@ -59,6 +59,7 @@ export type ContainerInspect = {
     WorkingDir: string
     Labels: Record<string, string> | null
     Tty: boolean
+    ExposedPorts?: Record<string, unknown> | null
   }
   HostConfig: {
     RestartPolicy: { Name: string; MaximumRetryCount: number }

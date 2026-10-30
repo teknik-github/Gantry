@@ -63,13 +63,13 @@ describe("checkVariables", () => {
     expect(res.errors).toEqual({
       NEEDED: "Required",
       BAD_PORT: "Use a port between 1 and 65535",
-      MIXED: expect.stringContaining("Can't contain"),
+      MIXED: expect.stringContaining("Can't contain $"),
     })
   })
 })
 
 describe(".env rendering", () => {
-  it.each(["plain", "with space", "it's", "a$b\\c\"d", "#hash", "", "x=y"])("round-trips %j", (value) => {
+  it.each(["plain", "with space", "it's", "a$b\\c\"d", "#hash", "", "x=y", "ends\\", "it's \\ \"q\""])("round-trips %j", (value) => {
     const text = `K=${dotenvValue(value)}\n`
     expect(parseDotenv(text).entries).toEqual([{ key: "K", value }])
   })
@@ -118,5 +118,32 @@ describe("built-in catalog", () => {
       const declared = new Set(t.variables.map((v) => v.name))
       for (const v of composeVariables(t.compose)) expect(declared.has(v.name), `${t.key}: ${v.name}`).toBe(true)
     }
+  })
+})
+
+describe("composeServicePorts", () => {
+  it("lists container ports per service from short and long syntax", async () => {
+    const { composeServicePorts, composeContainerName } = await import("@/lib/compose-ports")
+    const compose = `services:
+  web:
+    image: nginx
+    ports:
+      - "\${HTTP_PORT}:80"
+      - 127.0.0.1:8443:443/tcp
+      - "9000-9010:9000-9010"
+  db:
+    image: postgres
+    ports:
+      - target: 5432
+        published: "5432"
+  worker:
+    image: x
+`
+    expect(composeServicePorts(compose)).toEqual([
+      { service: "web", port: 80 },
+      { service: "web", port: 443 },
+      { service: "db", port: 5432 },
+    ])
+    expect(composeContainerName("shop", "web")).toBe("shop-web-1")
   })
 })

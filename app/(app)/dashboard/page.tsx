@@ -1,9 +1,10 @@
+import { Suspense } from "react"
 import type { Metadata } from "next"
 
 import { ChartAreaInteractive } from "@/components/chart-area-interactive"
 import { ContainersTable } from "@/components/gantry/containers-table"
 import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
-import { SectionCards } from "@/components/section-cards"
+import { ImagesCard, ImagesCardSkeleton, SectionCards } from "@/components/section-cards"
 import { formatBytes } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
@@ -18,15 +19,15 @@ export default async function DashboardPage() {
 
   const result = await tryDocker(async () => {
     const api = await getDocker()
-    const [info, containers, images, volumes, networks] = await Promise.all([
+    // Images are listed separately (DashboardImages): that call can be slow.
+    const [info, containers, volumes, networks] = await Promise.all([
       api.info(),
       api.listContainers(true),
-      api.listImages(),
       api.listVolumes(),
       api.listNetworks(),
     ])
     const { refs, updates } = env ? await updatesFor(api, env.id, containers) : {}
-    return { info, containers, images, volumes, networks, refs, updates }
+    return { info, containers, volumes, networks, refs, updates }
   })
 
   const header = (
@@ -49,7 +50,7 @@ export default async function DashboardPage() {
     )
   }
 
-  const { containers, images, volumes, networks, refs, updates } = result.data
+  const { containers, volumes, networks, refs, updates } = result.data
   const running = containers.filter((c) => c.State === "running").length
   const paused = containers.filter((c) => c.State === "paused").length
 
@@ -59,17 +60,17 @@ export default async function DashboardPage() {
       <SectionCards
         summary={{
           containers: { total: containers.length, running, paused, stopped: containers.length - running - paused },
-          images: {
-            total: images.length,
-            size: formatBytes(images.reduce((a, i) => a + i.Size, 0)),
-            dangling: images.filter((i) => !i.RepoTags?.length || i.RepoTags[0] === "<none>:<none>").length,
-          },
           volumes: { total: volumes.length },
           networks: {
             total: networks.length,
             custom: networks.filter((n) => !["bridge", "host", "none"].includes(n.Name)).length,
           },
         }}
+        images={
+          <Suspense fallback={<ImagesCardSkeleton />}>
+            <DashboardImages />
+          </Suspense>
+        }
       />
       <div className="px-4 lg:px-6">
         <ChartAreaInteractive />
@@ -79,5 +80,23 @@ export default async function DashboardPage() {
         isAdmin={user.role === "admin"}
       />
     </PageBody>
+  )
+}
+
+/** The images card, streamed in after the rest of the dashboard. */
+async function DashboardImages() {
+  const images = await getDocker()
+    .then((api) => api.listImages())
+    .catch(() => null)
+  return (
+    <ImagesCard
+      images={
+        images && {
+          total: images.length,
+          size: formatBytes(images.reduce((a, i) => a + i.Size, 0)),
+          dangling: images.filter((i) => !i.RepoTags?.length || i.RepoTags[0] === "<none>:<none>").length,
+        }
+      }
+    />
   )
 }

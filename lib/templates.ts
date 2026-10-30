@@ -122,20 +122,26 @@ export function checkVariables(
       errors[v.name] = "Must be a single line"
     } else if (value.length > 4096) {
       errors[v.name] = "Too long"
-    } else if (value.includes("'") && /["$\\]/.test(value)) {
-      errors[v.name] = `Can't contain both ' and any of " $ \\`
+    } else if (needsDoubleQuotes(value) && value.includes("$")) {
+      // Double quotes would interpolate the $.
+      errors[v.name] = "Can't contain $ together with ' or a trailing \\"
     }
     values[v.name] = value
   }
   return { values, errors }
 }
 
+/** Single quotes are literal, except that compose reads \' as an escaped quote. */
+function needsDoubleQuotes(value: string) {
+  return value.includes("'") || value.endsWith("\\")
+}
+
 /** Quotes a value so docker compose reads it back literally from .env. */
 export function dotenvValue(value: string) {
   if (/^[A-Za-z0-9_./:@+,-]*$/.test(value)) return value
-  // Single quotes are literal; values that contain one get double quotes
-  // (checkVariables rejects the characters that would be special there).
-  return value.includes("'") ? `"${value}"` : `'${value}'`
+  if (!needsDoubleQuotes(value)) return `'${value}'`
+  // In double quotes compose unescapes \\ and \" (checkVariables rejects $ here).
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
 }
 
 /** .env text for a stack created from a template. */

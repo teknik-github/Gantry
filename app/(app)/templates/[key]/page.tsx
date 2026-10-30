@@ -13,6 +13,8 @@ import { requireUser } from "@/lib/server/auth/dal"
 import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
 import { getCurrentEnvironment } from "@/lib/server/environments"
 import { getTemplate } from "@/lib/server/templates"
+import { composeServicePorts } from "@/lib/compose-ports"
+import { getProxySettings } from "@/lib/server/proxy"
 
 export async function generateMetadata({ params }: PageProps<"/templates/[key]">): Promise<Metadata> {
   const template = await getTemplate((await params).key)
@@ -25,6 +27,7 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
   if (!template) notFound()
   const isAdmin = user.role === "admin"
   const env = await getCurrentEnvironment()
+  const proxyMode = env ? (await getProxySettings(env.id)).settings.mode : "off"
 
   return (
     <PageBody>
@@ -74,7 +77,13 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <TemplateDeployForm templateKey={template.key} stackName={template.stackName} variables={template.variables} />
+                <TemplateDeployForm
+                  templateKey={template.key}
+                  stackName={template.stackName}
+                  variables={template.variables}
+                  exposable={composeServicePorts(template.compose)}
+                  proxyMode={proxyMode}
+                />
               </CardContent>
             </Card>
           ) : (
@@ -88,22 +97,25 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
             </CardHeader>
           </Card>
         )}
-        <Card className="min-w-0">
-          <CardHeader>
-            <CardTitle>Compose file</CardTitle>
-            <CardDescription>
-              {"${VARIABLES}"} are filled in from the stack&apos;s .env.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <pre
-              className="max-h-[70vh] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed"
-              data-testid="template-compose"
-            >
-              {template.compose}
-            </pre>
-          </CardContent>
-        </Card>
+        {/* Custom templates can come from a stack's compose file, which may hold secrets: admins only. */}
+        {isAdmin || template.source === "builtin" ? (
+          <Card className="min-w-0">
+            <CardHeader>
+              <CardTitle>Compose file</CardTitle>
+              <CardDescription>
+                {"${VARIABLES}"} are filled in from the stack&apos;s .env.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <pre
+                className="max-h-[70vh] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed"
+                data-testid="template-compose"
+              >
+                {template.compose}
+              </pre>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </PageBody>
   )

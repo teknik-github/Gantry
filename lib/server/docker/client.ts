@@ -34,6 +34,9 @@ type RequestOptions = {
 
 export type DockerTls = NonNullable<DockerTarget["tls"]>
 
+/** Buffered (non-streaming) responses larger than this are refused. */
+const MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+
 /**
  * Where to connect for a target: a Unix socket, or host/port for "tcp"
  * (plus the PEM material when it uses TLS). Accepts "host:port",
@@ -127,7 +130,16 @@ export function dockerRaw(
       },
       (res) => {
         const chunks: Buffer[] = []
-        res.on("data", (c: Buffer) => chunks.push(c))
+        let size = 0
+        res.on("data", (c: Buffer) => {
+          size += c.length
+          // e.g. logs of a container that writes huge lines: don't exhaust memory.
+          if (size > MAX_RESPONSE_BYTES) {
+            req.destroy(new DockerError(`Docker response larger than ${MAX_RESPONSE_BYTES / 1024 / 1024} MB`, 502))
+            return
+          }
+          chunks.push(c)
+        })
         res.on("end", () => {
           const body = Buffer.concat(chunks)
           const status = res.statusCode ?? 0

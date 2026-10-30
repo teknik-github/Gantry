@@ -3,9 +3,11 @@ import { notFound } from "next/navigation"
 import { ArrowLeftIcon, ScrollTextIcon, TerminalSquareIcon } from "lucide-react"
 
 import { ContainerActions, LogViewer } from "@/components/gantry/container-detail-client"
+import { ExposeContainerDialog } from "@/components/gantry/proxy-ui"
 import type { RecreateInfo } from "@/components/gantry/container-edit-dialog"
 import { ExecConsole } from "@/components/gantry/exec-console"
 import { DockerUnavailable, Mono, PageBody, StateBadge } from "@/components/gantry/ui"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -20,7 +22,9 @@ import {
   type RecreateInspect,
 } from "@/lib/server/docker/recreate"
 import { selfContainerIds } from "@/lib/server/docker/self"
-import { getDocker } from "@/lib/server/environments"
+import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { updatesFor } from "@/lib/server/image-updates"
+import { getProxySettings, listProxyHosts } from "@/lib/server/proxy"
 import { tryDocker } from "@/lib/server/views"
 
 export default async function ContainerPage({ params, searchParams }: PageProps<"/containers/[id]">) {
@@ -29,7 +33,16 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
   const { tab } = await searchParams
   if (!/^[a-f0-9]{12,64}$/.test(id)) notFound()
 
-  const result = await tryDocker(async () => (await getDocker()).inspectContainer(id))
+  const env = await getCurrentEnvironment()
+  const result = await tryDocker(async () => {
+    const api = await getDocker()
+    const c = await api.inspectContainer(id)
+    // Update status from the last check of its tag (no registry call here).
+    const update = env
+      ? (await updatesFor(api, env.id, [{ Id: c.Id, Image: c.Config.Image, ImageID: c.Image }], new Map([[c.Id, c.Config.Image]]))).updates.get(c.Id)
+      : undefined
+    return { c, update }
+  })
   if (result.error !== undefined) {
     if (/no such container/i.test(result.error)) notFound()
     return (
@@ -39,8 +52,11 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
     )
   }
 
-  const c = result.data
+  const { c, update } = result.data
   const name = c.Name.replace(/^\//, "")
+  const [proxy, proxyHosts] = env ? await Promise.all([getProxySettings(env.id), listProxyHosts(env.id)]) : [null, []]
+  const domains = proxyHosts.filter((h) => h.target === name)
+  const exposedPorts = [...new Set(Object.keys(c.Config.ExposedPorts ?? {}).map((p) => Number(p.split("/")[0])))].filter(Boolean)
   const isAdmin = user.role === "admin"
   const recreate = isAdmin ? await recreateInfo(c as unknown as RecreateInspect) : undefined
   const ports = Object.entries(c.HostConfig.PortBindings ?? {}).flatMap(([container, binds]) =>
@@ -63,7 +79,12 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
           </h2>
           <Mono className="text-muted-foreground">{shortId(c.Id)}</Mono>
         </div>
-        <ContainerActions id={c.Id} name={name} state={c.State.Status} isAdmin={isAdmin} recreate={recreate} />
+        <div className="flex flex-wrap items-center gap-2">
+          {isAdmin ? (
+            <ExposeContainerDialog target={name} ports={exposedPorts} proxyOff={!proxy || proxy.settings.mode === "off"} />
+          ) : null}
+          <ContainerActions id={c.Id} name={name} state={c.State.Status} isAdmin={isAdmin} recreate={recreate} />
+        </div>
       </div>
 
       <div className="grid gap-4 px-4 lg:px-6 @4xl/main:grid-cols-2">
@@ -74,8 +95,39 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
           <CardContent>
             <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm">
               <Row label="Image">
-                <Mono>{c.Config.Image}</Mono>
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <Mono>{c.Config.Image}</Mono>
+                  {update?.status === "update" ? (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-500/50 px-1.5 text-amber-700 dark:text-amber-400"
+                      data-testid="update-badge"
+                      title={`A newer image is available for ${update.reference}`}
+                    >
+                      update available
+                    </Badge>
+                  ) : null}
+                </span>
               </Row>
+              {domains.length ? (
+                <Row label="Domains">
+                  <span className="flex flex-col">
+                    {domains.flatMap((h) =>
+                      h.domains.map((d) => (
+                        <a
+                          key={`${h.id}-${d}`}
+                          href={`${h.tls === "off" ? "http" : "https"}://${d.replace(/^\*\./, "www.")}`}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className={h.enabled ? "underline-offset-4 hover:underline" : "text-muted-foreground line-through"}
+                        >
+                          {d} → :{h.port}
+                        </a>
+                      ))
+                    )}
+                  </span>
+                </Row>
+              ) : null}
               <Row label="Created">{formatDate(c.Created)}</Row>
               <Row label="Started">{c.State.Running ? formatDate(c.State.StartedAt) : "—"}</Row>
               {!c.State.Running && !c.State.FinishedAt.startsWith("0001") ? (

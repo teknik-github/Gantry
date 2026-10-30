@@ -22,6 +22,7 @@ export async function containerAction(id: string, action: ContainerAction): Prom
   if (!parsed.success) return { error: "Invalid request" }
 
   return runAction("operate", `container.${action}`, id, async ({ docker }) => {
+    if (parsed.data.action !== "start" && parsed.data.action !== "unpause") refuseSelf(parsed.data.id)
     await (await docker()).containerAction(parsed.data.id, parsed.data.action)
   })
 }

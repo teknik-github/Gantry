@@ -33,3 +33,28 @@ describe.skipIf(!hasCompose)("built-in templates with docker compose", () => {
     }
   })
 })
+
+describe.skipIf(!hasCompose)(".env values as docker compose reads them", () => {
+  it("round-trips quotes, backslashes and spaces", () => {
+    const values = ["ends\\", "it's \\ \"q\"", "a\\b", "x y", "p@ss:w0rd", "#not a comment", "it's"]
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gantry-dotenv-"))
+    try {
+      const variables = values.map((_, i) => ({ name: `V${i}` }))
+      fs.writeFileSync(path.join(dir, ".env"), renderDotenv(variables, Object.fromEntries(values.map((v, i) => [`V${i}`, v]))))
+      fs.writeFileSync(
+        path.join(dir, "docker-compose.yml"),
+        `services:\n  a:\n    image: alpine\n    environment:\n${values.map((_, i) => `      V${i}: \${V${i}}\n`).join("")}`
+      )
+      const res = spawnSync("docker", ["compose", "--env-file", ".env", "config", "--format", "json"], {
+        cwd: dir,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: dir } as unknown as NodeJS.ProcessEnv,
+      })
+      expect(res.status, res.stderr).toBe(0)
+      const env = (JSON.parse(res.stdout) as { services: { a: { environment: Record<string, string> } } }).services.a.environment
+      expect(values.map((_, i) => env[`V${i}`])).toEqual(values)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

@@ -186,7 +186,8 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
               )}
             </CardDescription>
           </CardHeader>
-          {stack.last_output ? (
+          {/* compose's output can quote the compose file (e.g. interpolation errors): admins only. */}
+          {stack.last_output && isAdmin ? (
             <CardContent>
               <pre
                 data-testid="stack-output"

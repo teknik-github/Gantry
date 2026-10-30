@@ -213,15 +213,19 @@ function ChannelFields({ errors, initial }: { errors: Errors; initial?: ChannelR
         return (
           <Field key={`${type}-${f.name}`} data-invalid={error ? true : undefined}>
             <FieldLabel htmlFor={id}>{f.label}</FieldLabel>
-            <Input
-              id={id}
-              name={`cfg:${f.name}`}
-              type={secret ? "password" : "text"}
-              autoComplete="off"
-              spellCheck={false}
-              defaultValue={secret ? "" : initial?.publicConfig[f.name]}
-              placeholder={secret && initial ? "Leave empty to keep the current one" : "placeholder" in f ? f.placeholder : undefined}
-            />
+            {"options" in f && f.options ? (
+              <OptionSelect id={id} name={`cfg:${f.name}`} options={f.options} initial={initial?.publicConfig[f.name]} />
+            ) : (
+              <Input
+                id={id}
+                name={`cfg:${f.name}`}
+                type={secret ? "password" : "text"}
+                autoComplete="off"
+                spellCheck={false}
+                defaultValue={secret ? "" : initial?.publicConfig[f.name]}
+                placeholder={secret && initial ? "Leave empty to keep the current one" : "placeholder" in f ? f.placeholder : undefined}
+              />
+            )}
             {"description" in f && f.description ? <FieldDescription>{f.description}</FieldDescription> : null}
             <FieldError>{error}</FieldError>
           </Field>
@@ -247,6 +251,24 @@ function ChannelFields({ errors, initial }: { errors: Errors; initial?: ChannelR
         Enabled
       </Label>
     </FieldGroup>
+  )
+}
+
+function OptionSelect({ id, name, options, initial }: { id: string; name: string; options: readonly string[]; initial?: string }) {
+  const [value, setValue] = React.useState(initial && options.includes(initial) ? initial : options[0])
+  return (
+    <Select name={name} value={value} onValueChange={setValue}>
+      <SelectTrigger id={id} className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o} value={o}>
+            {o === "starttls" ? "STARTTLS" : o === "tls" ? "TLS" : o === "none" ? "None" : o}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
