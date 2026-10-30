@@ -3,6 +3,7 @@ import Link from "next/link"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { PodActions } from "@/components/gantry/kubernetes/pod-actions"
+import { PodConsole } from "@/components/gantry/kubernetes/pod-console"
 import { PodLogViewer } from "@/components/gantry/kubernetes/pod-logs"
 import { KubeUnavailable, loadKubePage } from "@/components/gantry/kubernetes/page"
 import { Age, KubeStatus } from "@/components/gantry/kubernetes/tables"
@@ -128,6 +129,17 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
           </CardContent>
         </Card>
       </div>
+      {page.user.role === "admin" ? (
+        <div className="px-4 lg:px-6">
+          <PodConsole
+            environmentId={page.env.id}
+            namespace={namespace}
+            pod={name}
+            containers={containers.map((c) => c.name)}
+            running={pod.status?.phase === "Running" && !pod.metadata.deletionTimestamp}
+          />
+        </div>
+      ) : null}
       <div className="px-4 lg:px-6">
         <PodLogViewer
           environmentId={page.env.id}

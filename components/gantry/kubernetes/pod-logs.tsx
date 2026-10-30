@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { RefreshCwIcon } from "lucide-react"
+import { DownloadIcon, RefreshCwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,7 +10,22 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 
-/** Recent logs of one container of a pod, polled while auto-refresh is on. */
+/** The viewer keeps at most this much text; older lines scroll away. */
+const MAX_CHARS = 1_000_000
+/** Streamed chunks are rendered at most this often. */
+const FLUSH_MS = 150
+
+function trim(text: string) {
+  if (text.length <= MAX_CHARS) return text
+  const cut = text.indexOf("\n", text.length - MAX_CHARS)
+  return text.slice(cut >= 0 ? cut + 1 : text.length - MAX_CHARS)
+}
+
+/**
+ * Logs of one container of a pod. "Follow" streams new lines as they are
+ * written (the request stays open; leaving the page or turning it off closes
+ * it on the server too); otherwise the last lines are loaded once.
+ */
 export function PodLogViewer({
   environmentId,
   namespace,
@@ -28,58 +43,104 @@ export function PodLogViewer({
   const [error, setError] = React.useState<string | null>(null)
   const [tail, setTail] = React.useState("500")
   const [follow, setFollow] = React.useState(true)
-  const [loading, setLoading] = React.useState(false)
+  const [previous, setPrevious] = React.useState(false)
+  const [state, setState] = React.useState<"loading" | "streaming" | "ended" | "idle">("idle")
   const [refreshKey, setRefreshKey] = React.useState(0)
   const preRef = React.useRef<HTMLPreElement>(null)
+  // The previous instance has finished: there is nothing to follow.
+  const streaming = follow && !previous
+
+  const query = React.useCallback(
+    (extra: Record<string, string>) => {
+      const q = new URLSearchParams({ tail, environment: String(environmentId), ...extra })
+      if (container) q.set("container", container)
+      if (previous) q.set("previous", "1")
+      return `/api/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs?${q}`
+    },
+    [tail, environmentId, container, previous, namespace, name]
+  )
 
   React.useEffect(() => {
-    let cancelled = false
-    const query = new URLSearchParams({ tail, environment: String(environmentId) })
-    if (container) query.set("container", container)
-    const url = `/api/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs?${query}`
+    const abort = new AbortController()
+    let pending = ""
+    let text = ""
+    let flushTimer: ReturnType<typeof setTimeout> | undefined
+    const flush = () => {
+      flushTimer = undefined
+      if (!pending) return
+      text = trim(text + pending)
+      pending = ""
+      setLogs(text)
+    }
 
     async function load() {
+      setState("loading")
+      setError(null)
+      setLogs("")
       try {
-        const res = await fetch(url, { cache: "no-store" })
-        if (cancelled) return
+        const res = await fetch(query(streaming ? { follow: "1" } : {}), { cache: "no-store", signal: abort.signal })
         if (res.status === 401) return router.replace("/login")
         if (!res.ok) {
-          setError((await res.json().catch(() => null))?.error ?? "Failed to load logs")
-        } else {
-          const text = await res.text()
-          if (cancelled) return
-          setError(null)
-          setLogs(text)
+          setError(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Failed to load logs")
+          setState("idle")
+          return
         }
+        if (!streaming || !res.body) {
+          setLogs(trim(await res.text()))
+          setState("idle")
+          return
+        }
+        setState("streaming")
+        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          pending += value
+          flushTimer ??= setTimeout(flush, FLUSH_MS)
+        }
+        clearTimeout(flushTimer)
+        flush()
+        setState("ended")
       } catch {
-        if (!cancelled) setError("Failed to load logs")
-      } finally {
-        if (!cancelled) setLoading(false)
+        if (abort.signal.aborted) return
+        clearTimeout(flushTimer)
+        flush()
+        setError("The log stream was interrupted")
+        setState("ended")
       }
     }
 
-    load()
-    const timer = follow ? setInterval(load, 3_000) : undefined
+    void load()
     return () => {
-      cancelled = true
-      clearInterval(timer)
+      abort.abort()
+      clearTimeout(flushTimer)
     }
-  }, [environmentId, namespace, name, container, tail, follow, refreshKey, router])
+  }, [query, streaming, refreshKey, router])
 
   React.useEffect(() => {
     const el = preRef.current
-    if (el && follow) el.scrollTop = el.scrollHeight
-  }, [logs, follow])
+    if (el && streaming) el.scrollTop = el.scrollHeight
+  }, [logs, streaming])
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Logs</CardTitle>
-        <CardDescription>Most recent lines, with timestamps</CardDescription>
+        <CardDescription>
+          {state === "streaming"
+            ? "Following: new lines appear as they are written"
+            : state === "ended" && streaming
+              ? "The stream ended (the container stopped or the connection dropped)"
+              : "Most recent lines, with timestamps"}
+        </CardDescription>
         <CardAction className="flex flex-wrap items-center gap-3">
           <Label className="font-normal">
-            <Switch checked={follow} onCheckedChange={setFollow} />
-            Auto-refresh
+            <Switch checked={follow} onCheckedChange={setFollow} disabled={previous} aria-label="Follow" />
+            Follow
+          </Label>
+          <Label className="font-normal">
+            <Switch checked={previous} onCheckedChange={setPrevious} aria-label="Previous container" />
+            Previous
           </Label>
           {containers.length > 1 ? (
             <Select value={container} onValueChange={setContainer}>
@@ -110,29 +171,29 @@ export function PodLogViewer({
           <Button
             size="icon-sm"
             variant="outline"
-            onClick={() => {
-              setLoading(true)
-              setRefreshKey((k) => k + 1)
-            }}
-            disabled={loading}
-            aria-label="Refresh logs"
+            onClick={() => setRefreshKey((k) => k + 1)}
+            disabled={state === "loading"}
+            aria-label="Reload logs"
           >
-            <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
+            <RefreshCwIcon className={state === "loading" ? "animate-spin" : undefined} />
+          </Button>
+          <Button size="icon-sm" variant="outline" asChild>
+            <a href={query({ download: "1" })} download aria-label="Download logs">
+              <DownloadIcon />
+            </a>
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent>
-        {error ? (
-          <p className="text-sm text-destructive">{error}</p>
-        ) : (
-          <pre
-            ref={preRef}
-            data-testid="pod-logs"
-            className="h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap"
-          >
-            {logs || "No log output."}
-          </pre>
-        )}
+      <CardContent className="flex flex-col gap-2">
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        <pre
+          ref={preRef}
+          data-testid="pod-logs"
+          data-state={state}
+          className="h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap"
+        >
+          {logs || (state === "loading" ? "Loading…" : "No log output.")}
+        </pre>
       </CardContent>
     </Card>
   )

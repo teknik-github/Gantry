@@ -1,5 +1,9 @@
+import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import https from "node:https"
+import os from "node:os"
+import path from "node:path"
+import zlib from "node:zlib"
 
 import { expect, test, type Page } from "@playwright/test"
 import { parse } from "yaml"
@@ -23,6 +27,9 @@ const ENV = "gantry-test-k-kind"
 const NS = `gantry-test-k-${Date.now().toString(36)}`
 const APP = "gantry-e2e-hello"
 const SECRET_VALUE = `s3cr3t-${Date.now().toString(36)}-gantry`
+/** Namespace for the live update, exec, log follow and Helm tests. */
+const LIVE_NS = `gantry-test-k-live-${Date.now().toString(36)}`
+const RELEASE = "gantry-e2e-demo"
 
 const MANIFEST = `apiVersion: apps/v1
 kind: Deployment
@@ -154,6 +161,7 @@ const VIEWER_SA = "gantry-test-k-viewer"
 test.afterAll(async () => {
   if (!cluster) return
   await kubeApi(cluster, "DELETE", `/api/v1/namespaces/${NS}`).catch(() => {})
+  await kubeApi(cluster, "DELETE", `/api/v1/namespaces/${LIVE_NS}`).catch(() => {})
   await kubeApi(cluster, "DELETE", `/apis/rbac.authorization.k8s.io/v1/namespaces/default/rolebindings/${VIEWER_SA}`).catch(() => {})
   await kubeApi(cluster, "DELETE", `/api/v1/namespaces/default/serviceaccounts/${VIEWER_SA}`).catch(() => {})
 })
@@ -304,6 +312,160 @@ test("create a namespace, apply a manifest, scale, read logs, delete", async ({ 
     const res = await kubeApi(cluster, "GET", `/api/v1/namespaces/${NS}`)
     expect(res.status === 404 || JSON.parse(res.body).status?.phase === "Terminating").toBe(true)
   })
+})
+
+/** kubectl with the test cluster's kubeconfig when it is installed; else the same request through the API. */
+function hasCommand(cmd: string) {
+  try {
+    execFileSync("sh", ["-c", `${cmd} version ${cmd === "kubectl" ? "--client" : "--short"} >/dev/null 2>&1`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * `kubectl apply` of a manifest with the test kubeconfig only. Run through sh
+ * with a file: a snap-packaged kubectl misbehaves on Node's stdio pipes.
+ */
+function kubectlApply(manifest: string) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gantry-test-k-kubectl-"))
+  try {
+    const file = path.join(dir, "manifest.yaml")
+    fs.writeFileSync(file, manifest)
+    execFileSync("sh", ["-c", 'out=$(kubectl --kubeconfig "$1" apply -f "$2" 2>&1); code=$?; printf "%s\\n" "$out"; exit $code', "sh", KUBECONFIG!, file], {
+      env: { ...process.env, KUBECONFIG: "" },
+    })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+const TICKER = `apiVersion: v1
+kind: Pod
+metadata:
+  name: ticker
+  namespace: ${LIVE_NS}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+    - name: main
+      image: alpine:3
+      imagePullPolicy: IfNotPresent
+      command: ["sh", "-c", "i=0; while true; do i=$((i+1)); echo tick-$i; sleep 1; done"]
+`
+
+test("pods appear live, logs follow, and the console runs commands", async ({ page }) => {
+  test.setTimeout(240_000)
+  await kubeApi(cluster, "POST", "/api/v1/namespaces", { metadata: { name: LIVE_NS } })
+  await signInToCluster(page)
+  await page.goto("/kubernetes/pods")
+  await pickNamespace(page, LIVE_NS)
+  await expect(page.getByText("No pods.")).toBeVisible()
+  await expect(page.getByTestId("live-indicator")).toHaveAttribute("data-status", "connected")
+
+  // Created outside Gantry: the list updates from the watch, without a reload.
+  if (hasCommand("kubectl")) {
+    kubectlApply(TICKER)
+  } else {
+    const doc = parse(TICKER)
+    await kubeApi(cluster, "POST", `/api/v1/namespaces/${LIVE_NS}/pods`, doc)
+  }
+  const row = page.getByRole("row", { name: /ticker/ })
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await expect(row).toContainText("Running", { timeout: 90_000 })
+
+  // Logs are followed: new lines arrive on the open stream.
+  await row.getByRole("link", { name: "ticker" }).click()
+  const logs = page.getByTestId("pod-logs")
+  await expect(logs).toHaveAttribute("data-state", "streaming")
+  await expect(logs).toContainText(/tick-\d+/)
+  const last = async () => Math.max(...((await logs.textContent()) ?? "").match(/tick-(\d+)/g)!.map((t) => Number(t.slice(5))))
+  const first = await last()
+  await expect.poll(last, { timeout: 15_000 }).toBeGreaterThan(first + 2)
+
+  // Console: kubectl exec through a WebSocket to the API server.
+  const terminal = page.getByTestId("exec-terminal").locator(".xterm-rows")
+  await page.getByRole("button", { name: "Connect" }).click()
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible()
+  await page.getByTestId("exec-terminal").click()
+  await page.keyboard.type("echo gantry-$((6*7))")
+  await page.keyboard.press("Enter")
+  await expect(terminal).toContainText("gantry-42")
+  await page.keyboard.type("exit 3")
+  await page.keyboard.press("Enter")
+  await expect(terminal).toContainText("[process exited with code 3]")
+
+  await page.goto("/activity")
+  await expect(page.getByRole("cell", { name: "kubernetes.exec", exact: true }).first()).toBeVisible()
+})
+
+/** A one-ConfigMap chart, installed with the helm CLI if present, else as the release record Helm would write. */
+async function installRelease() {
+  const chart = { name: "gantry-e2e-chart", version: "0.1.0", appVersion: "1.0.0" }
+  const configMap = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${RELEASE}-config
+data:
+  greeting: hello`
+  if (hasCommand("helm")) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gantry-test-k-helm-"))
+    try {
+      fs.mkdirSync(path.join(dir, "chart/templates"), { recursive: true })
+      fs.writeFileSync(path.join(dir, "chart/Chart.yaml"), `apiVersion: v2\nname: ${chart.name}\nversion: ${chart.version}\nappVersion: "${chart.appVersion}"\n`)
+      fs.writeFileSync(path.join(dir, "chart/values.yaml"), "greeting: hello\n")
+      fs.writeFileSync(path.join(dir, "chart/templates/cm.yaml"), configMap.replace("greeting: hello", "greeting: {{ .Values.greeting }}"))
+      // Private helm dirs and an explicit kubeconfig: nothing of the user's is read or written.
+      const env = { ...process.env, KUBECONFIG: "", HELM_CACHE_HOME: path.join(dir, "cache"), HELM_CONFIG_HOME: path.join(dir, "config"), HELM_DATA_HOME: path.join(dir, "data") }
+      execFileSync("helm", ["install", RELEASE, path.join(dir, "chart"), "--kubeconfig", KUBECONFIG!, "--namespace", LIVE_NS, "--set", "greeting=hello"], { env, stdio: "pipe" })
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+    return
+  }
+  await kubeApi(cluster, "POST", `/api/v1/namespaces/${LIVE_NS}/configmaps`, parse(configMap))
+  const record = {
+    name: RELEASE,
+    namespace: LIVE_NS,
+    version: 1,
+    info: { status: "deployed", last_deployed: new Date().toISOString(), description: "Install complete" },
+    chart: { metadata: { name: chart.name, version: chart.version, appVersion: chart.appVersion } },
+    config: { greeting: "hello" },
+    manifest: `---\n# Source: ${chart.name}/templates/cm.yaml\n${configMap}\n`,
+  }
+  const release = zlib.gzipSync(Buffer.from(JSON.stringify(record))).toString("base64")
+  await kubeApi(cluster, "POST", `/api/v1/namespaces/${LIVE_NS}/secrets`, {
+    metadata: { name: `sh.helm.release.v1.${RELEASE}.v1`, labels: { owner: "helm", name: RELEASE, version: "1", status: "deployed" } },
+    type: "helm.sh/release.v1",
+    data: { release: Buffer.from(release).toString("base64") },
+  })
+}
+
+test("Helm releases are listed, shown and uninstalled", async ({ page }) => {
+  test.setTimeout(180_000)
+  await installRelease()
+  await signInToCluster(page)
+  await page.goto("/kubernetes/helm")
+  await pickNamespace(page, LIVE_NS)
+  const row = page.getByRole("row", { name: new RegExp(RELEASE) })
+  await expect(row).toContainText("gantry-e2e-chart-0.1.0")
+  await expect(row).toContainText("1.0.0")
+  await expect(page.getByTestId(`helm-status-${RELEASE}`)).toContainText("deployed")
+
+  await row.getByRole("link", { name: RELEASE }).click()
+  await expect(page.getByTestId("helm-values")).toContainText("greeting: hello")
+  await expect(page.getByTestId("helm-manifest")).toContainText(`name: ${RELEASE}-config`)
+
+  await page.getByRole("button", { name: "Uninstall" }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Uninstall" }).click()
+  await expect(page).toHaveURL(/\/kubernetes\/helm$/)
+  await expect(page.getByText(`Release ${RELEASE} uninstalled`)).toBeVisible()
+  expect((await kubeApi(cluster, "GET", `/api/v1/namespaces/${LIVE_NS}/configmaps/${RELEASE}-config`)).status).toBe(404)
+  const records = await kubeApi(cluster, "GET", `/api/v1/namespaces/${LIVE_NS}/secrets?labelSelector=owner%3Dhelm`)
+  expect(JSON.parse(records.body).items).toHaveLength(0)
+  await page.goto("/kubernetes/helm")
+  await expect(page.getByText("No Helm releases.")).toBeVisible()
 })
 
 test("a standard user with a read-only token can look but not change", async ({ page, browser }) => {

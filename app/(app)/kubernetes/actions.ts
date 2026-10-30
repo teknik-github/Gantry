@@ -18,6 +18,7 @@ import { audit } from "@/lib/server/audit"
 import { getCurrentUser } from "@/lib/server/auth/dal"
 import type { ApplyResult } from "@/lib/server/kubernetes/api"
 import { getKube, getKubeEnvironment, KubeError, NAMESPACE_COOKIE } from "@/lib/server/kubernetes"
+import { uninstallRelease } from "@/lib/server/kubernetes/helm"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 // Every action names the environment the page was rendered for; getKube()
@@ -187,4 +188,22 @@ export async function applyManifest(_prev: ApplyState, formData: FormData): Prom
   )
   // A partial failure is still reported with every object's outcome.
   return { ...res, results, values }
+}
+
+/**
+ * Uninstalls a Helm release: deletes the objects of its manifest and its
+ * revision records (no hooks are run, like `helm uninstall --no-hooks`).
+ */
+export async function uninstallHelmRelease(ref: ObjectRef): Promise<ActionState> {
+  const r = parseRef(objectSchema, ref)
+  if (!r) return { error: "Invalid release" }
+  return runAction("admin", "kubernetes.helm.uninstall", `${r.namespace}/${r.name}`, async () => {
+    const { api } = await getKube(r.environmentId)
+    const res = await uninstallRelease(api, r.namespace, r.name)
+    if (res.failed.length) {
+      throw new UserError(`Some objects could not be deleted, so the release was kept: ${res.failed.join("; ")}`)
+    }
+    const kept = res.kept.length ? ` (kept by resource policy: ${res.kept.join(", ")})` : ""
+    return `Release ${r.name} uninstalled: ${res.deleted} object(s) deleted${kept}`
+  })
 }
