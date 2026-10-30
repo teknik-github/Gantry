@@ -206,6 +206,8 @@ export function docker(target: DockerTarget, options: DockerOptions = {}) {
       dockerJson<{ Id: string; Warnings: string[] }>(target, "POST", "/containers/create", {
         query: { name },
         body: spec,
+        // Creating can take well over 30 s on a busy daemon (snapshot preparation).
+        timeoutMs: 120_000,
       }),
 
     /** Extracts a tar archive into `path` inside the container. */
@@ -213,6 +215,7 @@ export function docker(target: DockerTarget, options: DockerOptions = {}) {
       dockerRaw(target, "PUT", `/containers/${seg(id)}/archive`, {
         query: { path },
         rawBody: { data: tar, contentType: "application/x-tar" },
+        timeoutMs: 120_000,
       }),
     /** Runs a command in a running container and waits for it (no TTY); output is stdout+stderr. */
     async execRun(id: string, cmd: string[], timeoutMs = 60_000) {

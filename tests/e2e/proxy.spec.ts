@@ -105,7 +105,7 @@ test("the built-in proxy serves containers by domain over HTTP and HTTPS", async
   await page.getByRole("spinbutton", { name: "HTTP port on the host" }).fill(String(HTTP_PORT))
   await page.getByRole("spinbutton", { name: "HTTPS port on the host" }).fill(String(HTTPS_PORT))
   await page.getByRole("button", { name: "Save & apply" }).click()
-  await expect(page.getByText("Built-in proxy configured")).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText("Built-in proxy configured", { exact: true })).toBeVisible({ timeout: 120_000 })
   await expect(page.getByTestId("proxy-status")).toHaveText(`running on :${HTTP_PORT} / :${HTTPS_PORT}`)
 
   // Validation: bad and duplicate domains.
@@ -144,7 +144,7 @@ test("external mode removes the built-in proxy, attaches targets and shows confi
   await page.getByRole("option", { name: "External proxy" }).click()
   await page.getByRole("textbox", { name: "Proxy network" }).fill(EXT_NET)
   await page.getByRole("button", { name: "Save & apply" }).click()
-  await expect(page.getByText("External proxy configured")).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText("External proxy configured", { exact: true })).toBeVisible({ timeout: 120_000 })
   // The form keeps the saved choice (no reset to the first value).
   await expect(page.getByRole("combobox", { name: "Mode" })).toHaveText("External proxy")
 
@@ -167,5 +167,5 @@ test("external mode removes the built-in proxy, attaches targets and shows confi
   await page.getByRole("combobox", { name: "Mode" }).click()
   await page.getByRole("option", { name: "Off" }).click()
   await page.getByRole("button", { name: "Save & apply" }).click()
-  await expect(page.getByText("Proxy turned off")).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText("Proxy turned off", { exact: true })).toBeVisible({ timeout: 60_000 })
 })

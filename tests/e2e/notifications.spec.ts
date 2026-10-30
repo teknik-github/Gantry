@@ -214,7 +214,8 @@ test("an email channel sends through SMTP", async ({ page }) => {
     await expect.poll(() => sink.messages.length).toBe(1)
     // The subject has a non-ASCII "·" and is MIME-encoded; the body is plain.
     expect(sink.messages[0]).toMatch(/^Subject: /m)
-    expect(sink.messages[0]).toContain("If you can read this, Gantry can reach this channel.")
+    // Quoted-printable body: undo soft line breaks before matching.
+    expect(sink.messages[0].replace(/=\r\n/g, "")).toContain("If you can read this, Gantry can reach this channel.")
     expect(sink.messages[0]).toMatch(/To: ops@example.test, oncall@example.test/)
 
     // Changing the server would need the password again: there is none here, so it just saves.
