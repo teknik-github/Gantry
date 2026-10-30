@@ -12,6 +12,15 @@ import type { ActionState } from "@/lib/validation"
 
 type Permission = "operate" | "admin"
 
+/** The signed-in user if their role grants `permission`; denies anything else. */
+async function authorize(permission: Permission): Promise<{ user: CurrentUser } | { error: string }> {
+  const user = await getCurrentUser()
+  if (!user) return { error: "Your session has expired. Please sign in again." }
+  const allowed = permission === "operate" || (permission === "admin" && user.role === "admin")
+  if (!allowed) return { error: "Only administrators can do this." }
+  return { user }
+}
+
 /**
  * Wraps a Server Action: re-authenticates (never trust the proxy alone),
  * enforces the role, audits, maps Docker errors to messages and refreshes
@@ -26,11 +35,9 @@ export async function runAction(
   auditTarget: string,
   fn: (ctx: { user: CurrentUser; docker: () => Promise<DockerApi> }) => Promise<string | void>
 ): Promise<ActionState> {
-  const user = await getCurrentUser()
-  if (!user) return { error: "Your session has expired. Please sign in again." }
-  if (permission === "admin" && user.role !== "admin") {
-    return { error: "Only administrators can do this." }
-  }
+  const auth = await authorize(permission)
+  if ("error" in auth) return auth
+  const { user } = auth
 
   try {
     const message = await fn({ user, docker: getDocker })
@@ -60,11 +67,9 @@ export async function runBulkAction<T>(
   opts: { verb: string; noun: string; label: (item: T) => string; auditTarget?: (item: T) => string },
   fn: (item: T, docker: DockerApi) => Promise<void>
 ): Promise<ActionState> {
-  const user = await getCurrentUser()
-  if (!user) return { error: "Your session has expired. Please sign in again." }
-  if (permission === "admin" && user.role !== "admin") {
-    return { error: "Only administrators can do this." }
-  }
+  const auth = await authorize(permission)
+  if ("error" in auth) return auth
+  const { user } = auth
   if (!items.length) return { error: "Nothing selected" }
   if (items.length > BULK_LIMIT) return { error: `Select at most ${BULK_LIMIT} items at a time` }
 
