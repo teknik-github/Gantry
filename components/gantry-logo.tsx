@@ -6,7 +6,7 @@ export function GantryMark({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground",
+        "flex size-6 items-center justify-center rounded-md bg-crane text-dock",
         className
       )}
     >

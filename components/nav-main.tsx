@@ -32,7 +32,13 @@ export function NavMain({ items, label }: { items: NavItem[]; label?: string }) 
             const active = pathname === item.url || (!item.exact && pathname.startsWith(`${item.url}/`))
             return (
               <SidebarMenuItem key={item.title}>
-                <SidebarMenuButton asChild tooltip={item.title} isActive={active}>
+                <SidebarMenuButton
+                  asChild
+                  tooltip={item.title}
+                  isActive={active}
+                  // Crane-yellow marker on the current page.
+                  className="data-[active=true]:shadow-[inset_3px_0_0_var(--crane)] data-[active=true]:[&>svg]:text-crane"
+                >
                   <Link href={item.url}>
                     {item.icon}
                     <span>{item.title}</span>

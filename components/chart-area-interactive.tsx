@@ -38,8 +38,8 @@ type Point = { ts: number; cpu: number | null; memory: number | null }
 type Metric = "cpu" | "memory"
 
 const chartConfig = {
-  cpu: { label: "CPU", color: "var(--primary)" },
-  memory: { label: "Memory", color: "var(--primary)" },
+  cpu: { label: "CPU", color: "var(--chart-1)" },
+  memory: { label: "Memory", color: "var(--chart-2)" },
 } satisfies ChartConfig
 
 const RANGES = {

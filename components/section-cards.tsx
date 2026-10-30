@@ -26,10 +26,13 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
   const { containers, volumes, networks } = summary
 
   return (
-    <div className="grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4 dark:*:data-[slot=card]:bg-card">
+    <div className="grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:relative *:data-[slot=card]:overflow-hidden *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
       <Card className="@container/card">
+        <ContainerStripe tone="harbor" />
         <CardHeader>
-          <CardDescription>Containers</CardDescription>
+          <CardDescription>
+          <Kind tone="harbor" icon={<BoxIcon />}>Containers</Kind>
+        </CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
             {containers.total}
           </CardTitle>
@@ -51,8 +54,11 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
       </Card>
       {images}
       <Card className="@container/card">
+        <ContainerStripe tone="rust" />
         <CardHeader>
-          <CardDescription>Volumes</CardDescription>
+          <CardDescription>
+          <Kind tone="rust" icon={<HardDriveIcon />}>Volumes</Kind>
+        </CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
             {volumes.total}
           </CardTitle>
@@ -65,8 +71,11 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
         </CardFooter>
       </Card>
       <Card className="@container/card">
+        <ContainerStripe tone="sea" />
         <CardHeader>
-          <CardDescription>Networks</CardDescription>
+          <CardDescription>
+          <Kind tone="sea" icon={<NetworkIcon />}>Networks</Kind>
+        </CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
             {networks.total}
           </CardTitle>
@@ -88,8 +97,11 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
 export function ImagesCard({ images }: { images: { total: number; size: string; dangling: number } | null }) {
   return (
     <Card className="@container/card">
+      <ContainerStripe tone="steel" />
       <CardHeader>
-        <CardDescription>Images</CardDescription>
+        <CardDescription>
+          <Kind tone="steel" icon={<LayersIcon />}>Images</Kind>
+        </CardDescription>
         <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
           {images ? images.total : "—"}
         </CardTitle>
@@ -118,8 +130,11 @@ export function ImagesCard({ images }: { images: { total: number; size: string; 
 export function ImagesCardSkeleton() {
   return (
     <Card className="@container/card" aria-busy="true">
+      <ContainerStripe tone="steel" />
       <CardHeader>
-        <CardDescription>Images</CardDescription>
+        <CardDescription>
+          <Kind tone="steel" icon={<LayersIcon />}>Images</Kind>
+        </CardDescription>
         <Skeleton className="h-8 w-16" />
       </CardHeader>
       <CardFooter className="flex-col items-start gap-2 text-sm">
@@ -127,5 +142,37 @@ export function ImagesCardSkeleton() {
         <Skeleton className="h-4 w-40" />
       </CardFooter>
     </Card>
+  )
+}
+
+type Tone = "harbor" | "steel" | "rust" | "sea"
+
+const TONE_TEXT: Record<Tone, string> = {
+  harbor: "bg-harbor/12 text-harbor",
+  steel: "bg-steel/12 text-steel",
+  rust: "bg-rust/12 text-rust",
+  sea: "bg-sea/12 text-sea",
+}
+
+/** Card label with its resource colour. */
+function Kind({ tone, icon, children }: { tone: Tone; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-2">
+      <span className={`flex size-6 items-center justify-center rounded-md [&_svg]:size-3.5 ${TONE_TEXT[tone]}`}>{icon}</span>
+      {children}
+    </span>
+  )
+}
+
+/** Top edge drawn like the corrugated wall of a shipping container. */
+function ContainerStripe({ tone }: { tone: Tone }) {
+  return (
+    <span
+      aria-hidden
+      className="absolute inset-x-0 top-0 h-1"
+      style={{
+        background: `repeating-linear-gradient(90deg, var(--${tone}) 0 9px, color-mix(in oklch, var(--${tone}) 70%, black) 9px 11px)`,
+      }}
+    />
   )
 }
