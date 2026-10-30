@@ -22,6 +22,7 @@ const TITLES: Record<string, string> = {
   environments: "Environments",
   users: "Users",
   activity: "Activity",
+  backups: "Backups",
   account: "Account",
   kubernetes: "Kubernetes",
 }

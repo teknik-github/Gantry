@@ -90,6 +90,7 @@ const NON_DOCKER_PAGES = new Set([
   "templates",
   "notifications",
   "kubernetes",
+  "backups",
 ])
 
 // Containers being created or removed changes usage counts on the object lists.

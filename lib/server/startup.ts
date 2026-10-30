@@ -2,6 +2,7 @@ import "server-only"
 
 import { startAlertWatcher } from "@/lib/server/alerts"
 import { startAutoUpdateScheduler } from "@/lib/server/auto-update"
+import { startBackupScheduler } from "@/lib/server/backup"
 import { bootstrapFirstRun } from "@/lib/server/bootstrap"
 import { startUpdateChecker } from "@/lib/server/image-updates"
 import { startMetricsSampler } from "@/lib/server/metrics-sampler"
@@ -18,6 +19,7 @@ export async function runStartupTasks() {
     ["image update checker", startUpdateChecker],
     ["alert watcher", startAlertWatcher],
     ["auto-update scheduler", startAutoUpdateScheduler],
+    ["backup scheduler", startBackupScheduler],
     ["git stack poller", startGitPoller],
   ]
 

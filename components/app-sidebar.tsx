@@ -13,6 +13,7 @@ import {
   UsersIcon,
   BellIcon,
   GlobeIcon,
+  ArchiveIcon,
   HistoryIcon,
   RefreshCwIcon,
   KeyRoundIcon,
@@ -67,6 +68,7 @@ const navAdmin = [
   { title: "Proxy", url: "/proxy", icon: <GlobeIcon /> },
   { title: "Users", url: "/users", icon: <UsersIcon /> },
   { title: "Activity", url: "/activity", icon: <HistoryIcon /> },
+  { title: "Backups", url: "/backups", icon: <ArchiveIcon /> },
 ]
 
 export function AppSidebar({
