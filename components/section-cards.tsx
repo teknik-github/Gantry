@@ -43,7 +43,7 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
             </Badge>
           </CardAction>
         </CardHeader>
-        <CardFooter className="flex-col items-start gap-1.5 text-sm">
+        <CardFooter className="flex-1 flex-col items-start gap-1.5 text-sm">
           <Link href="/containers" className="line-clamp-1 flex gap-2 font-medium hover:underline">
             Manage containers <BoxIcon className="size-4" />
           </Link>
@@ -63,7 +63,7 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
             {volumes.total}
           </CardTitle>
         </CardHeader>
-        <CardFooter className="flex-col items-start gap-1.5 text-sm">
+        <CardFooter className="flex-1 flex-col items-start gap-1.5 text-sm">
           <Link href="/volumes" className="line-clamp-1 flex gap-2 font-medium hover:underline">
             Manage volumes <HardDriveIcon className="size-4" />
           </Link>
@@ -83,7 +83,7 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
             <Badge variant="outline">{networks.custom} custom</Badge>
           </CardAction>
         </CardHeader>
-        <CardFooter className="flex-col items-start gap-1.5 text-sm">
+        <CardFooter className="flex-1 flex-col items-start gap-1.5 text-sm">
           <Link href="/networks" className="line-clamp-1 flex gap-2 font-medium hover:underline">
             Manage networks <NetworkIcon className="size-4" />
           </Link>
@@ -111,7 +111,7 @@ export function ImagesCard({ images }: { images: { total: number; size: string; 
           </CardAction>
         ) : null}
       </CardHeader>
-      <CardFooter className="flex-col items-start gap-1.5 text-sm">
+      <CardFooter className="flex-1 flex-col items-start gap-1.5 text-sm">
         <Link href="/images" className="line-clamp-1 flex gap-2 font-medium hover:underline">
           Manage images <LayersIcon className="size-4" />
         </Link>
@@ -137,7 +137,7 @@ export function ImagesCardSkeleton() {
         </CardDescription>
         <Skeleton className="h-8 w-16" />
       </CardHeader>
-      <CardFooter className="flex-col items-start gap-2 text-sm">
+      <CardFooter className="flex-1 flex-col items-start gap-2 text-sm">
         <Skeleton className="h-4 w-28" />
         <Skeleton className="h-4 w-40" />
       </CardFooter>

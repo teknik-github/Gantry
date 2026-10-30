@@ -24,12 +24,12 @@ const CUSTOM = "custom"
 
 // A stable colour per category for the initials tile.
 const TILE_COLORS = [
-  "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-  "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-  "bg-violet-500/15 text-violet-700 dark:text-violet-300",
-  "bg-rose-500/15 text-rose-700 dark:text-rose-300",
-  "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+  // The palette's container colours (app/globals.css).
+  "bg-harbor/12 text-harbor",
+  "bg-sea/12 text-sea",
+  "bg-rust/12 text-rust",
+  "bg-steel/12 text-steel",
+  "bg-crane/20 text-dock dark:text-crane",
 ]
 
 function tileColor(category: string) {
