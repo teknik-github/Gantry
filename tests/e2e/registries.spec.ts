@@ -164,6 +164,8 @@ test("private images need a registry login stored in Gantry", async ({ page }) =
   const again = await pullFromImagesPage(page)
   await expect(again).toBeHidden({ timeout })
   await expect(page.getByText(`Pulled ${IMAGE}`)).toBeVisible()
+  // A copy of alpine:3, so old: search instead of relying on the first page.
+  await page.getByRole("textbox", { name: "Search" }).fill(IMAGE)
   await expect(page.getByRole("row").filter({ hasText: IMAGE })).toHaveCount(1)
 })
 
@@ -264,6 +266,7 @@ test("auto-update recreates opted-in containers when their tag has a newer image
   await page.getByLabel("At", { exact: true }).fill("04:30")
   await page.getByRole("button", { name: "Save schedule" }).click()
   await expect(page.getByText("Auto-update runs daily at 04:30")).toBeVisible()
+  await expect(page.getByRole("checkbox", { name: "Run every day" })).toBeChecked()
 
   await page.getByRole("button", { name: "Run now" }).click()
   await expect(page.getByText(/Auto-update finished: 1 updated/)).toBeVisible({ timeout: 180_000 })

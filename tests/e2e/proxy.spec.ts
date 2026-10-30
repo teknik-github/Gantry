@@ -145,6 +145,8 @@ test("external mode removes the built-in proxy, attaches targets and shows confi
   await page.getByRole("textbox", { name: "Proxy network" }).fill(EXT_NET)
   await page.getByRole("button", { name: "Save & apply" }).click()
   await expect(page.getByText("External proxy configured")).toBeVisible({ timeout: 120_000 })
+  // The form keeps the saved choice (no reset to the first value).
+  await expect(page.getByRole("combobox", { name: "Mode" })).toHaveText("External proxy")
 
   await expect.poll(async () => (await docker("GET", "/containers/gantry-proxy/json").then(() => true, () => false))).toBe(false)
   const web = await docker<{ NetworkSettings: { Networks: Record<string, unknown> } }>("GET", `/containers/${WEB}/json`)
