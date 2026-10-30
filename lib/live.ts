@@ -55,7 +55,16 @@ export function toLiveEvent(raw: unknown): LiveEvent | null {
 }
 
 // Pages that show no Docker state, so Docker events never refresh them.
-const NON_DOCKER_PAGES = new Set(["users", "account", "activity", "environments", "registries", "templates", "notifications"])
+const NON_DOCKER_PAGES = new Set([
+  "users",
+  "account",
+  "activity",
+  "environments",
+  "registries",
+  "templates",
+  "notifications",
+  "kubernetes",
+])
 
 // Containers being created or removed changes usage counts on the object lists.
 const containerAddedOrRemoved = (e: LiveEvent) =>

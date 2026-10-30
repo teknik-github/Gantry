@@ -25,6 +25,12 @@ export async function GET(request: NextRequest) {
 
   const env = await getCurrentEnvironment()
   if (!env) return Response.json({ error: "No Docker environment configured" }, { status: 404 })
+  // Live updates follow Docker events; Kubernetes environments have none.
+  if (env.type === "kubernetes") {
+    return Response.json({ error: "Live updates are only available for Docker environments" }, { status: 404 })
+  }
+  // The whole row: the event stream needs its TLS material for tcp+TLS environments.
+  const dockerEnv = { ...env, type: env.type }
 
   const encoder = new TextEncoder()
   let stop = () => {}
@@ -43,7 +49,7 @@ export async function GET(request: NextRequest) {
 
       // Reconnect delay for EventSource, then the initial state.
       send(`retry: 3000\nevent: hello\ndata: ${JSON.stringify({ environment: env.id })}\n\n`)
-      const unsubscribe = subscribeToEnvironment(env, (msg) => {
+      const unsubscribe = subscribeToEnvironment(dockerEnv, (msg) => {
         if (msg.kind === "status") send(`event: status\ndata: ${JSON.stringify({ status: msg.status })}\n\n`)
         else send(`event: docker\ndata: ${JSON.stringify(msg.event)}\n\n`)
       })

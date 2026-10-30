@@ -1,6 +1,6 @@
 import "server-only"
 
-import type { Environment } from "@/lib/server/db/schema"
+import type { DockerEnvironmentType, Environment } from "@/lib/server/db/schema"
 import { dockerEventSource } from "@/lib/server/docker/events"
 import { EventHub, type HubListener } from "@/lib/server/event-hub"
 import { environmentTarget } from "@/lib/server/environment-target"
@@ -27,7 +27,10 @@ function hub() {
 }
 
 /** Subscribes to the live Docker events of an environment (shared upstream connection). */
-export function subscribeToEnvironment(env: Environment, listener: HubListener) {
+export function subscribeToEnvironment(
+  env: Environment & { type: DockerEnvironmentType },
+  listener: HubListener
+) {
   // Includes the TLS material, so tcp environments with mutual TLS work too. The
   // ciphertext tail changes whenever certificates are saved again (fresh IV),
   // which opens a new upstream with them.

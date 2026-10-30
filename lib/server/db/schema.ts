@@ -1,7 +1,9 @@
 import type { Generated, Insertable, Selectable } from "kysely"
 
 export type Role = "admin" | "user"
-export type EnvironmentType = "socket" | "tcp"
+export type EnvironmentType = "socket" | "tcp" | "kubernetes"
+/** Environment types that talk to a Docker Engine. */
+export type DockerEnvironmentType = Exclude<EnvironmentType, "kubernetes">
 
 export interface UsersTable {
   id: Generated<number>
@@ -15,13 +17,22 @@ export interface EnvironmentsTable {
   id: Generated<number>
   name: string
   type: EnvironmentType
-  /** Socket path for "socket", host:port for "tcp" */
+  /** Socket path for "socket", host:port for "tcp", API server URL for "kubernetes" */
   url: string
   created_at: string
   /** TLS material for "tcp", encrypted at rest (see lib/server/crypto.ts). Null = plain HTTP. */
   tls_ca: string | null
   tls_cert: string | null
   tls_key: string | null
+  /**
+   * "kubernetes" only: bearer token and/or client certificate plus the CA,
+   * as encrypted JSON (lib/server/kubernetes/target.ts).
+   */
+  kube_credentials: string | null
+  /** "kubernetes" only: namespace preselected on list pages and for Apply. */
+  kube_namespace: string | null
+  /** "kubernetes" only: 1 = don't verify the API server's certificate. */
+  kube_insecure: Generated<number>
 }
 
 /** Environments a standard user may see and use. Admins can use all of them. */

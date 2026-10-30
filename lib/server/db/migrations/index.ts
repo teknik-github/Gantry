@@ -10,6 +10,7 @@ import { metrics } from "@/lib/server/db/migrations/005_metrics"
 import { registries } from "@/lib/server/db/migrations/006_registries"
 import { templates } from "@/lib/server/db/migrations/007_templates"
 import { notifications } from "@/lib/server/db/migrations/008_notifications"
+import { kubernetes } from "@/lib/server/db/migrations/009_kubernetes"
 import { proxy } from "@/lib/server/db/migrations/010_proxy"
 
 // One file per migration, written with Kysely's schema builder only so the
@@ -24,7 +25,7 @@ const migrations: Record<string, Migration> = {
   "006_registries": registries,
   "007_templates": templates,
   "008_notifications": notifications,
-  // 009 is taken by Kubernetes environments (separate branch).
+  "009_kubernetes": kubernetes,
   "010_proxy": proxy,
 }
 

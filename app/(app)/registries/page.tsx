@@ -16,7 +16,7 @@ export default async function RegistriesPage() {
     <PageBody>
       <PageHeader
         title="Registries"
-        description="Logins for private registries. Gantry uses them for pulls, update checks, recreate and stacks on every environment."
+        description="Logins for private registries. Gantry uses them for pulls, update checks, recreate and stacks on every Docker environment (Kubernetes clusters use their own image pull secrets)."
       />
       <RegistriesTable
         data={registries.map((r) => ({ ...r, updatedLabel: timeAgo(r.updatedAt) }))}

@@ -81,7 +81,8 @@ async function sampleEnvironment(env: Environment, ts: string, budgetMs: number)
 export async function sampleAllEnvironments(state: { lastPrune: number }, now = Date.now()) {
   const { intervalMs, retentionDays } = metricsConfig()
   const db = await getDb()
-  const envs = await db.selectFrom("environments").selectAll().execute()
+  // Kubernetes environments have no Docker host to sample.
+  const envs = await db.selectFrom("environments").selectAll().where("type", "!=", "kubernetes").execute()
   const ts = new Date(now).toISOString()
   // Leave headroom so a pass always ends before the next one is due.
   const budgetMs = Math.max(5_000, Math.min(intervalMs * 0.8, 50_000))

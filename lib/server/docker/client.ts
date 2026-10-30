@@ -4,10 +4,10 @@ import http from "node:http"
 import https from "node:https"
 import net from "node:net"
 
-import type { EnvironmentType } from "@/lib/server/db/schema"
+import type { DockerEnvironmentType } from "@/lib/server/db/schema"
 
 export type DockerTarget = {
-  type: EnvironmentType
+  type: DockerEnvironmentType
   url: string
   /** PEM material for "tcp" endpoints that require TLS (Docker's --tlsverify). */
   tls?: { ca: string; cert: string; key: string } | null

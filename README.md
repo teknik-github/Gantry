@@ -1,6 +1,6 @@
 # Gantry
 
-A Portainer-style web UI for Docker, built with Next.js 16 and shadcn/ui
+A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and shadcn/ui
 (`login-02` for authentication, `dashboard-01` for the app shell).
 
 - Dashboard with container/image/volume/network totals, live CPU/memory usage
@@ -32,6 +32,11 @@ A Portainer-style web UI for Docker, built with Next.js 16 and shadcn/ui
   start/stop/restart/pause/resume/kill or remove them at once
 - Multiple Docker environments: local socket or TCP, optionally with mutual TLS;
   standard users only see the environments they were given
+- **Kubernetes environments**: connect a cluster with a service account token
+  or a kubeconfig; overview (nodes, namespaces, pods by phase), workloads
+  (scale, rollout restart, delete), pods (status, logs, delete), services and
+  ingresses, namespaces, ConfigMaps and Secrets (names and keys only), warning
+  events, and **Apply manifest** (multi-document YAML, server-side apply)
 - Users with `admin` / `user` roles, plus an activity log
 - Database: **SQLite** (default) or **MySQL**, chosen with `DB_DRIVER`
 
@@ -98,6 +103,21 @@ Unit/integration extras:
   MySQL. The database is wiped, so point it at a throwaway one.
 
 The first run needs a browser: `pnpm exec playwright install chromium`.
+
+The Kubernetes suite (`tests/e2e/kubernetes.spec.ts`) needs a **throwaway**
+cluster (it creates and deletes a namespace and adds the cluster as an
+environment) and is skipped otherwise. Never point it at a real cluster:
+
+```bash
+kind create cluster --name gantry-k8s-e2e --kubeconfig /tmp/gantry-k8s-e2e.kubeconfig
+GANTRY_E2E_KUBECONFIG=/tmp/gantry-k8s-e2e.kubeconfig \
+  GANTRY_E2E_KUBE_TOKEN="$(kubectl --kubeconfig /tmp/gantry-k8s-e2e.kubeconfig -n kube-system create token gantry-admin)" \
+  pnpm test:e2e tests/e2e/login.spec.ts tests/e2e/kubernetes.spec.ts
+kind delete cluster --name gantry-k8s-e2e
+```
+
+`GANTRY_E2E_KUBE_TOKEN` is optional (a cluster-admin service account token,
+see below; it also tests the token form). The test workload runs `alpine:3`.
 
 ## Configuration
 
@@ -280,6 +300,73 @@ last run's results stay on the page, are recorded in the activity log (as
   dialog). New users and environments start without grants; existing standard
   users kept access to all existing environments when this was introduced.
 
+### Kubernetes environments
+
+Add a cluster under **Environments → Add environment → Kubernetes (API
+server)**, either with
+
+- the **API server URL**, a **bearer token** and the cluster's **CA
+  certificate** (PEM; leave it empty if the API server has a publicly trusted
+  certificate), or
+- a pasted **kubeconfig**: the current context (or the one you name) gives the
+  server, CA and credentials. Tokens and client certificates work; they must
+  be embedded (`kubectl config view --raw --minify --flatten`). Credential
+  plugins (`exec`, `auth-provider`: EKS, GKE, AKS/kubelogin, OIDC) can't run
+  on the server and are rejected; use a service account token for those
+  clusters.
+
+Gantry checks the connection (`/version` and an authenticated discovery call)
+before saving. Tokens, client keys and the CA are stored AES-256-GCM-encrypted
+like Docker TLS keys and never sent to the browser. "Skip TLS verification" is
+off by default; only use it for test clusters, since anyone on the network
+path could then impersonate the API server and capture the token. The default
+namespace is preselected on the list pages (the namespace picker is remembered
+per environment).
+
+A service account for Gantry (Kubernetes 1.24+):
+
+```bash
+kubectl -n kube-system create serviceaccount gantry
+# Full access (needed for scale/restart/delete/apply/namespaces):
+kubectl create clusterrolebinding gantry --clusterrole=cluster-admin --serviceaccount=kube-system:gantry
+# ...or read-only access to one namespace:
+#   kubectl -n my-app create rolebinding gantry-view --clusterrole=view --serviceaccount=kube-system:gantry
+# A token (rotate it before it expires)...
+kubectl -n kube-system create token gantry --duration=8760h
+# ...or a long-lived one stored in a Secret:
+kubectl -n kube-system apply -f - <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gantry-token
+  annotations:
+    kubernetes.io/service-account.name: gantry
+type: kubernetes.io/service-account-token
+YAML
+kubectl -n kube-system get secret gantry-token -o jsonpath='{.data.token}' | base64 -d
+kubectl -n kube-system get secret gantry-token -o jsonpath='{.data.ca\.crt}' | base64 -d   # CA certificate
+```
+
+Gantry can only do what the account's RBAC allows; pages it may not read show
+the API's "forbidden" message. With a Kubernetes environment selected, the
+sidebar shows the Kubernetes pages instead of the Docker ones; Docker-only
+pages (containers, stacks, templates, topology, ...) say so instead of failing.
+Registries apply to Docker environments only (clusters pull with their own
+image pull secrets).
+
+- Viewing (lists, pod logs) needs access to the environment, like Docker.
+  Scaling, rollout restart, deleting pods/workloads, creating/deleting
+  namespaces and applying manifests are admin-only and audited.
+- **Apply manifest** uses server-side apply (`fieldManager=gantry`) into the
+  chosen namespace; objects that name another namespace are refused, as with
+  `kubectl apply -n`. "Force conflicts" (off by default) takes over fields
+  owned by other managers; "Dry run" validates on the server without changes.
+  Every object gets its own result; a failing one doesn't stop the rest.
+- Secrets are listed with their keys only; values are dropped on the server.
+- Kubernetes pages don't update live (no Docker events); reload to refresh.
+  The metrics history, image update checks and live Docker events skip
+  Kubernetes environments.
+
 ### Live updates and history
 
 - Pages refresh themselves from Docker events, streamed as Server-Sent Events
@@ -310,5 +397,6 @@ last run's results stay on the page, are recorded in the activity log (as
   is left or nobody reads them for 20 seconds.
 - A fresh instance can only be claimed with the setup token from the server
   log / data directory; it is deleted once the admin exists.
-- Access to the Docker socket is equivalent to root on the host. Keep Gantry
-  on a trusted network or behind HTTPS.
+- Access to the Docker socket is equivalent to root on the host, and a
+  cluster-admin token to the whole cluster. Keep Gantry on a trusted network
+  or behind HTTPS.

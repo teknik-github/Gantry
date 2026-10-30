@@ -7,6 +7,7 @@ import { audit } from "@/lib/server/audit"
 import { getCurrentUser, type CurrentUser } from "@/lib/server/auth/dal"
 import { DockerError } from "@/lib/server/docker/client"
 import { getDocker } from "@/lib/server/environments"
+import { KubeError } from "@/lib/server/kubernetes/client"
 import type { DockerApi } from "@/lib/server/docker/api"
 import type { ActionState } from "@/lib/validation"
 
@@ -28,6 +29,9 @@ async function authorize(permission: Permission): Promise<{ user: CurrentUser } 
  *
  * - "operate": any signed-in user (start/stop/restart...)
  * - "admin": create/remove resources, manage users and environments
+ *
+ * Kubernetes actions get their client from getKube() inside `fn`; its
+ * KubeErrors are shown like Docker errors.
  */
 export async function runAction(
   permission: Permission,
@@ -45,7 +49,7 @@ export async function runAction(
     refresh()
     return { ok: true, message: message || undefined }
   } catch (err) {
-    if (err instanceof DockerError) return { error: err.message }
+    if (err instanceof DockerError || err instanceof KubeError) return { error: err.message }
     if (err instanceof UserError) return { error: err.message }
     console.error(`[gantry] action ${auditAction} failed`, err)
     return { error: "Something went wrong. Check the server logs." }

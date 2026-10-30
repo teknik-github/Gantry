@@ -2,8 +2,9 @@
 
 import { useTransition } from "react"
 import Link from "next/link"
+import { usePathname, useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { CheckIcon, ChevronsUpDownIcon, ServerIcon } from "lucide-react"
+import { CheckIcon, ChevronsUpDownIcon, ServerIcon, ShipWheelIcon } from "lucide-react"
 
 import { selectEnvironment } from "@/app/(app)/environments/actions"
 import { GantryMark } from "@/components/gantry-logo"
@@ -29,6 +30,8 @@ export function EnvSwitcher({
   isAdmin: boolean
 }) {
   const [pending, startTransition] = useTransition()
+  const router = useRouter()
+  const pathname = usePathname()
   const current = environments.find((e) => e.id === currentId)
 
   return (
@@ -58,11 +61,18 @@ export function EnvSwitcher({
                 onSelect={() =>
                   startTransition(async () => {
                     const res = await selectEnvironment(env.id)
-                    if (res.error) toast.error(res.error)
+                    if (res.error) {
+                      toast.error(res.error)
+                      return
+                    }
+                    // Docker pages are no use on a cluster and vice versa: go to the matching home page.
+                    const onKubernetesPage = pathname === "/kubernetes" || pathname.startsWith("/kubernetes/")
+                    if (env.type === "kubernetes" && !onKubernetesPage) router.push("/kubernetes")
+                    else if (env.type !== "kubernetes" && onKubernetesPage) router.push("/dashboard")
                   })
                 }
               >
-                <ServerIcon />
+                {env.type === "kubernetes" ? <ShipWheelIcon /> : <ServerIcon />}
                 <div className="grid flex-1 leading-tight">
                   <span>{env.name}</span>
                   <span className="truncate text-xs text-muted-foreground">{env.url}</span>
