@@ -11,6 +11,7 @@ import { timeAgo } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
 import { groupByProject, listStacks } from "@/lib/server/stacks"
+import { gitStackIds } from "@/lib/server/stacks/git-records"
 import { summarizeProject } from "@/lib/server/stacks/views"
 import { tryDocker } from "@/lib/server/views"
 import { STACK_NAME_RE, validateCompose } from "@/lib/stacks"
@@ -45,6 +46,7 @@ export default async function StacksPage() {
     tryDocker(async () => (await getDocker()).listContainers(true)),
   ])
   const projects = groupByProject(result.data ?? [])
+  const gitIds = await gitStackIds(stacks.map((s) => s.id))
 
   const rows: StackRow[] = stacks.map((s) => {
     const summary = result.error === undefined ? summarizeProject(projects.get(s.name) ?? []) : null
@@ -63,6 +65,7 @@ export default async function StacksPage() {
       lastStatus: s.last_status,
       lastAction: s.last_action,
       lastRunLabel: s.last_run_at ? timeAgo(s.last_run_at) : null,
+      git: gitIds.has(s.id),
     }
   })
 

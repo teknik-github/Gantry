@@ -11,6 +11,9 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
   **pull & recreate** (update to the latest image)
 - **Stacks**: create, edit and deploy docker compose projects; existing compose
   projects are listed and can be imported
+- **Git stacks (GitOps)**: deploy a compose file from a Git repository (private
+  ones with an encrypted token), redeploy on push via webhooks (GitHub, GitLab,
+  Gitea/Forgejo, any CI) or by polling, with the deployed commit on the stack page
 - **Topology**: interactive map of compose projects, containers, networks,
   volumes and `depends_on` relations
 - Images (pull, remove, prune), volumes and networks (create, remove)
@@ -94,6 +97,11 @@ afterwards; they are skipped when Docker isn't reachable. Useful switches:
 - `E2E_BASE_URL=http://host:port` targets a running, not-yet-set-up Gantry instead
 - `E2E_PORT` changes the port (default 3100)
 
+The Git stack suite serves a private repository from the test process with
+`git http-backend` over plain http on 127.0.0.1. The test server is started
+with `GANTRY_TEST_ALLOW_HTTP_GIT=1`, which lets Gantry accept `http://` Git
+URLs, and only for loopback hosts; never set it in production.
+
 Unit/integration extras:
 
 - The TLS tests need `openssl` and the Docker socket (they run a local mTLS
@@ -155,6 +163,68 @@ see below; it also tests the token form). The test workload runs `alpine:3`.
 - Stack names are compose project names (`^[a-z0-9][a-z0-9_-]{0,62}$`). A name
   that matches an existing compose project is refused; use **Import** instead.
 - Changes are admin-only, since compose files can bind-mount anything on the host.
+
+### Git stacks
+
+- **New stack → Git repository**: an `https://` URL, a branch, tag or full
+  commit id, and the compose file's path in the repository (default
+  `docker-compose.yml`; `compose.yaml`, `deploy/prod.yml` … work too). The ref
+  is cloned right away, so a wrong URL, ref, path or token is reported before
+  anything is saved.
+- The checkout lives in `DATA_DIR/stacks/<envId>-<name>/repo/`, and compose
+  runs with `-f repo/<path>`, so **relative paths in the compose file
+  (`build:`, `env_file:`, bind mounts) resolve inside the repository** (still
+  inside Gantry's container, see above). Gantry's `.env` for the stack stays
+  editable in the UI and lives next to the checkout (`--env-file`), not in the
+  repository; use it for `${VAR}` substitution (`environment: KEY: ${KEY}`).
+- Updates are shallow fetches of the ref followed by a forced checkout of the
+  commit: tracked files are reset, untracked files (e.g. data folders) stay.
+  Submodules and Git LFS files are not fetched.
+- **Pull & redeploy** fetches the ref, then runs `docker compose pull` and
+  `up -d`. If neither the commit nor the `.env` changed since the last
+  successful deploy it does nothing; **Force redeploy** runs it anyway.
+  **Deploy** uses the current checkout without fetching. The page shows the
+  deployed commit (short id, message, author and date).
+- Private repositories: a username and an access token (GitHub fine-grained
+  token with *Contents: read*, GitLab `read_repository`, Gitea/Forgejo
+  `read:repository`). The token is encrypted at rest (AES-GCM, bound to the
+  stack), never sent back to the browser, and kept out of git's argv, the
+  environment, the stored URL and `.git/config`: for each git command it is
+  written to a file in a private temp dir (0700/0600) that a credential helper
+  `cat`s, configured through `GIT_CONFIG_*` variables, and removed afterwards.
+  git only sends it when the server asks for credentials. Changing the host
+  of the URL requires entering the token again.
+- git runs with a minimal environment (no system/global git config, no
+  credential helpers from the host, prompts off, hooks off, https only), a
+  5-minute fetch timeout, a stall timeout and capped output.
+- **Webhooks** (per stack, off by default): *Enable webhook* creates a URL
+  `/api/webhooks/stacks/<random id>` and a secret that is shown once (stored
+  encrypted; *Regenerate secret* rotates it). The stack page has setup steps
+  per provider:
+  - GitHub: content type `application/json`, the secret, "Just the push
+    event" (verified with `X-Hub-Signature-256`, HMAC-SHA256 of the body).
+  - GitLab: the secret as *Secret token* (`X-Gitlab-Token`), push events
+    (and tag push events for tags).
+  - Gitea / Forgejo: the secret (`X-Gitea-Signature` / `X-Forgejo-Signature`,
+    HMAC-SHA256), push events.
+  - Anything else (CI): `curl -X POST -H "X-Gantry-Token: <secret>" <url>`
+    (or `Authorization: Bearer`, or `?token=` — avoid the query string, it ends
+    up in access logs). An optional JSON body `{"ref": "refs/heads/main"}` is
+    checked like a push.
+  Signatures and tokens are compared in constant time. Only pushes to the
+  stack's branch (or tag) redeploy; other refs, branch deletions and other
+  events are acknowledged and ignored. Deliveries are answered at once (`202`)
+  and the redeploy runs in the background; concurrent deliveries are merged
+  (one run at a time per stack, at most one queued behind it).
+- **Polling** (per stack, off by default): *Check for new commits every N
+  minutes* asks the remote (`git ls-remote`) and pulls & redeploys when the
+  ref moved. Busy stacks are skipped until the next check; a commit that
+  failed to deploy is not retried until a newer one appears.
+- Deploys of Git stacks (manual, webhook or polling) raise a **Git stack
+  deployed** notification (success or failure) for channels subscribed to it.
+- Creating and editing Git stacks, and managing webhook secrets, is
+  admin-only and audited, as is every webhook delivery (accepted, ignored or
+  rejected, without the secret).
 
 ### Edit / recreate containers
 
@@ -382,7 +452,11 @@ image pull secrets).
 
 - `proxy.ts` sits in front of everything. Every `/api/*` route needs a valid
   signed session (anything else gets `401`, including unknown routes), and
-  only `/api/health` is public. Pages without a session redirect to `/login`.
+  only `/api/health` is public — plus `POST` (only) to exactly
+  `/api/webhooks/stacks/<32-character id>`, which authenticates each delivery
+  with the stack's webhook secret, refuses bodies over 1 MB, is limited to 30
+  deliveries per minute per webhook and audits every delivery. Pages without
+  a session redirect to `/login`.
 - Route handlers and Server Actions re-check the user against the database,
   so deleted users and role changes take effect immediately.
 - Passwords are hashed with scrypt. Failed logins are limited per account

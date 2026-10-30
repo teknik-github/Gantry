@@ -27,6 +27,8 @@ export type StackRow = {
   lastStatus: "success" | "error" | null
   lastAction: string | null
   lastRunLabel: string | null
+  /** Sourced from a Git repository. */
+  git: boolean
 }
 
 export type ExternalProjectRow = {
@@ -71,9 +73,16 @@ const stackColumns = stackHelper.columns([
   stackHelper.accessor("name", {
     header: ({ column }) => <SortHeader column={column} title="Name" />,
     cell: ({ row }) => (
-      <Link href={`/stacks/${row.original.id}`} className="font-medium underline-offset-4 hover:underline">
-        {row.original.name}
-      </Link>
+      <span className="flex items-center gap-2">
+        <Link href={`/stacks/${row.original.id}`} className="font-medium underline-offset-4 hover:underline">
+          {row.original.name}
+        </Link>
+        {row.original.git ? (
+          <Badge variant="outline" className="px-1.5 text-muted-foreground">
+            Git
+          </Badge>
+        ) : null}
+      </span>
     ),
     enableHiding: false,
   }),

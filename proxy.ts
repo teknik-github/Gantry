@@ -1,11 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server"
 
+import { WEBHOOK_ID_RE } from "@/lib/git-stacks"
 import { SESSION_COOKIE, verifySession } from "@/lib/server/auth/token"
 
 // Pages reachable without a session.
 const PUBLIC_PAGES = ["/login", "/setup"]
 // API routes reachable without a session (container healthcheck only).
 const PUBLIC_API = ["/api/health"]
+// Git stack webhooks: POST to exactly /api/webhooks/stacks/<opaque id>. The
+// handler authenticates each delivery with the stack's secret.
+const WEBHOOK_PREFIX = "/api/webhooks/stacks/"
+const MAX_WEBHOOK_BODY = 1024 * 1024
+
+function isWebhookDelivery(request: NextRequest, pathname: string) {
+  return (
+    request.method === "POST" &&
+    pathname.startsWith(WEBHOOK_PREFIX) &&
+    WEBHOOK_ID_RE.test(pathname.slice(WEBHOOK_PREFIX.length))
+  )
+}
 
 function matches(pathname: string, list: string[]) {
   return list.some((p) => pathname === p || pathname.startsWith(`${p}/`))
@@ -13,7 +26,8 @@ function matches(pathname: string, list: string[]) {
 
 /**
  * Gate in front of the whole app. Every /api/* route requires a valid,
- * signed session, so nothing behind it is reachable anonymously. Pages are
+ * signed session (except the healthcheck and Git webhook deliveries, which
+ * carry their own secret), so nothing else behind it is reachable anonymously. Pages are
  * redirected to /login. Handlers and Server Actions still re-check the user
  * through the DAL (proxy only checks the token, not the database).
  */
@@ -24,6 +38,15 @@ export async function proxy(request: NextRequest) {
 
   if (pathname.startsWith("/api/")) {
     if (matches(pathname, PUBLIC_API)) return NextResponse.next()
+    if (isWebhookDelivery(request, pathname)) {
+      // Refuse oversized bodies before they are buffered.
+      if (Number(request.headers.get("content-length") ?? 0) > MAX_WEBHOOK_BODY) {
+        return NextResponse.json({ error: "Payload too large" }, { status: 413 })
+      }
+      const res = NextResponse.next()
+      res.headers.set("Cache-Control", "no-store")
+      return res
+    }
     if (!session) {
       return NextResponse.json(
         { error: "Unauthorized" },

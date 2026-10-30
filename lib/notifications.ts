@@ -10,6 +10,7 @@ export const ALERT_KINDS = {
   environment_down: { label: "Environment unreachable", description: "Docker host down for 2 minutes, and when it is back" },
   image_update: { label: "Image update available", description: "A newer image was found for a container's tag" },
   auto_update: { label: "Auto-update result", description: "What the scheduled update changed or failed to change" },
+  stack_deploy: { label: "Git stack deployed", description: "A Git stack was deployed (manually, by webhook or polling) or failed to" },
 } as const
 
 export type AlertKind = keyof typeof ALERT_KINDS
@@ -154,7 +155,7 @@ export function buildRequest(type: ChannelType, config: ChannelConfig, alert: Al
         "Content-Type": "text/plain; charset=utf-8",
         // Header values must be ASCII; keep the title simple.
         Title: `Gantry ${alert.environment}: ${alert.subject}`.replace(/[^\x20-\x7e]/g, "?").slice(0, 200),
-        Tags: alert.kind === "auto_update" || alert.kind === "image_update" || alert.kind === "test" ? "package" : "warning",
+        Tags: alert.kind === "auto_update" || alert.kind === "image_update" || alert.kind === "stack_deploy" || alert.kind === "test" ? "package" : "warning",
       }
       if (alert.kind === "container_crash" || alert.kind === "container_oom" || alert.kind === "environment_down") headers.Priority = "high"
       if (config.token) headers.Authorization = `Bearer ${config.token}`

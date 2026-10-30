@@ -3,9 +3,11 @@ import Link from "next/link"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { StackEditor } from "@/components/gantry/stack-editor"
+import { GitStackForm } from "@/components/gantry/stack-git"
 import { DockerUnavailable, PageBody } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
 import { getCurrentEnvironment } from "@/lib/server/environments"
@@ -34,11 +36,26 @@ export default async function NewStackPage() {
       </div>
       {env && env.type !== "kubernetes" ? (
         <div className="px-4 lg:px-6">
-          <Card>
-            <CardContent>
-              <StackEditor />
-            </CardContent>
-          </Card>
+          <Tabs defaultValue="editor">
+            <TabsList>
+              <TabsTrigger value="editor">Web editor</TabsTrigger>
+              <TabsTrigger value="git">Git repository</TabsTrigger>
+            </TabsList>
+            <TabsContent value="editor">
+              <Card>
+                <CardContent>
+                  <StackEditor />
+                </CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="git">
+              <Card>
+                <CardContent>
+                  <GitStackForm />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       ) : (
         <DockerUnavailable message={env ? KUBERNETES_ENVIRONMENT : "No Docker environment configured"} />
