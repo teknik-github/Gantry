@@ -11,6 +11,7 @@ const SUFFIX = Date.now().toString(36)
 const NGINX_STACK = `gantry-test-g-nginx-${SUFFIX}`
 const CUSTOM_STACK = `gantry-test-g-custom-${SUFFIX}`
 const CUSTOM_TITLE = `E2E template ${SUFFIX}`
+const NGINX_DOMAIN = `e2e-${SUFFIX}.gantry.test`
 const NGINX_PORT = String(18000 + Math.floor(Math.random() * 1000))
 
 const CUSTOM_COMPOSE = `services:
@@ -105,6 +106,11 @@ test("a built-in template deploys as a stack with generated passwords", async ({
   await expect(page.getByLabel("HTTP port")).toHaveValue(NGINX_PORT)
 
   await stackName(page).fill(NGINX_STACK)
+  // Also serve it under a domain (the proxy is off in this run: the host is just saved).
+  await page.getByRole("textbox", { name: "Domain", exact: true }).fill(NGINX_DOMAIN)
+  await expect(page.getByRole("combobox", { name: "Service" })).toHaveText("nginx : 80")
+  await page.getByRole("combobox", { name: "TLS" }).click()
+  await page.getByRole("option", { name: "HTTP only" }).click()
   await page.getByRole("button", { name: "Deploy" }).click()
   await expect(page).toHaveURL(/\/stacks\/\d+$/, { timeout })
   await expect(page.getByRole("main").getByRole("heading", { level: 2, name: NGINX_STACK })).toContainText("1/1", { timeout })
@@ -114,6 +120,23 @@ test("a built-in template deploys as a stack with generated passwords", async ({
   await expect
     .poll(async () => (await fetch(`http://127.0.0.1:${NGINX_PORT}/`).catch(() => null))?.status ?? 0, { timeout: 30_000 })
     .toBeGreaterThan(0)
+
+  // The proxy host points at the stack's container; its page lists the domain.
+  const stackUrl = page.url()
+  await page.goto("/proxy")
+  const host = page.getByRole("row").filter({ hasText: NGINX_DOMAIN })
+  await expect(host).toContainText(`${NGINX_STACK}-nginx-1:80`)
+  await page.goto("/containers")
+  await page.getByRole("textbox", { name: "Search" }).fill(`${NGINX_STACK}-nginx-1`)
+  await page.getByRole("link", { name: `${NGINX_STACK}-nginx-1` }).click()
+  await expect(page.getByRole("link", { name: `${NGINX_DOMAIN} → :80` })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Expose via proxy" })).toBeVisible()
+
+  await page.goto("/proxy")
+  await host.getByRole("button", { name: `Remove ${NGINX_DOMAIN}` }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click()
+  await expect(page.getByRole("row").filter({ hasText: NGINX_DOMAIN })).toHaveCount(0)
+  await page.goto(stackUrl)
   await deleteStackFromItsPage(page)
 })
 

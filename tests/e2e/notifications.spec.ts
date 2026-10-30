@@ -1,4 +1,5 @@
 import http from "node:http"
+import net from "node:net"
 import type { AddressInfo } from "node:net"
 
 import { expect, test, type Page } from "@playwright/test"
@@ -145,4 +146,82 @@ test("channels can be edited without retyping the URL, paused and removed", asyn
   await row.getByRole("button", { name: `Remove ${CHANNEL}` }).click()
   await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click()
   await expect(page.getByRole("row").filter({ hasText: CHANNEL })).toHaveCount(0)
+})
+
+/** Minimal SMTP sink: accepts any message and keeps its raw text. */
+function smtpSink() {
+  const messages: string[] = []
+  const server = net.createServer((socket) => {
+    let data = ""
+    let inData = false
+    socket.write("220 sink ESMTP\r\n")
+    socket.on("data", (chunk) => {
+      data += chunk.toString("utf8")
+      let nl: number
+      while ((nl = data.indexOf("\r\n")) !== -1) {
+        if (inData) {
+          const end = data.indexOf("\r\n.\r\n")
+          if (end === -1) return
+          messages.push(data.slice(0, end))
+          data = data.slice(end + 5)
+          inData = false
+          socket.write("250 queued\r\n")
+          continue
+        }
+        const line = data.slice(0, nl)
+        data = data.slice(nl + 2)
+        const cmd = line.slice(0, 4).toUpperCase()
+        if (cmd === "EHLO" || cmd === "HELO") socket.write("250-sink\r\n250 8BITMIME\r\n")
+        else if (cmd === "DATA") {
+          inData = true
+          socket.write("354 go ahead\r\n")
+        } else if (cmd === "QUIT") socket.end("221 bye\r\n")
+        else socket.write("250 ok\r\n")
+      }
+    })
+  })
+  return { server, messages }
+}
+
+test("an email channel sends through SMTP", async ({ page }) => {
+  const sink = smtpSink()
+  await new Promise<void>((resolve) => sink.server.listen(0, "127.0.0.1", resolve))
+  const port = (sink.server.address() as AddressInfo).port
+  try {
+    await signIn(page)
+    await page.goto("/notifications")
+    await page.getByRole("button", { name: "Add channel" }).click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("E2E mail")
+    await dialog.getByRole("combobox", { name: "Type" }).click()
+    await page.getByRole("option", { name: "Email (SMTP)" }).click()
+    await dialog.getByRole("textbox", { name: "SMTP server" }).fill("127.0.0.1")
+    await dialog.getByRole("textbox", { name: "Port" }).fill(String(port))
+    await dialog.getByRole("combobox", { name: "Security" }).click()
+    await page.getByRole("option", { name: "None" }).click()
+    await dialog.getByRole("textbox", { name: "From" }).fill("Gantry <gantry@example.test>")
+    await dialog.getByRole("textbox", { name: "To" }).fill("not-an-address")
+    await dialog.getByRole("button", { name: "Save" }).click()
+    await expect(dialog.getByText("Comma-separated email addresses")).toBeVisible()
+    await dialog.getByRole("textbox", { name: "To" }).fill("ops@example.test, oncall@example.test")
+    await dialog.getByRole("button", { name: "Save" }).click()
+    await expect(dialog).toBeHidden()
+
+    const row = page.getByRole("row").filter({ hasText: "E2E mail" })
+    await expect(row).toContainText(`via 127.0.0.1`)
+    await row.getByRole("button", { name: "Send a test to E2E mail" }).click()
+    await expect(page.getByText("Test sent to E2E mail")).toBeVisible()
+    await expect.poll(() => sink.messages.length).toBe(1)
+    // The subject has a non-ASCII "·" and is MIME-encoded; the body is plain.
+    expect(sink.messages[0]).toMatch(/^Subject: /m)
+    expect(sink.messages[0]).toContain("If you can read this, Gantry can reach this channel.")
+    expect(sink.messages[0]).toMatch(/To: ops@example.test, oncall@example.test/)
+
+    // Changing the server would need the password again: there is none here, so it just saves.
+    await row.getByRole("button", { name: "Remove E2E mail" }).click()
+    await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click()
+    await expect(page.getByRole("row").filter({ hasText: "E2E mail" })).toHaveCount(0)
+  } finally {
+    await new Promise<void>((resolve) => sink.server.close(() => resolve()))
+  }
 })
