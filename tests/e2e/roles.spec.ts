@@ -114,8 +114,8 @@ test("a viewer can look but not touch", async ({ browser }) => {
 
   await page.goto(`/containers/${containerId}`)
   await expect(page.getByTestId("logs-hidden")).toBeVisible({ timeout })
-  await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
   await expect(page.getByRole("tab", { name: "Console" })).toHaveCount(0)
 
   // The server agrees: logs need the operator role; the dashboard data is readable.
@@ -137,24 +137,24 @@ test("an operator can stop and start but not remove; the server re-checks the ro
   test.setTimeout(TIMEOUT)
   const { context, page: op } = await as(browser, USERS.operator)
   await op.goto(`/containers/${containerId}`)
-  await expect(op.getByRole("button", { name: "Stop" })).toBeVisible({ timeout })
-  await expect(op.getByRole("button", { name: "Remove" })).toHaveCount(0)
+  await expect(op.getByRole("button", { name: "Stop", exact: true })).toBeVisible({ timeout })
+  await expect(op.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
   await expect(op.getByRole("tab", { name: "Console" })).toHaveCount(0)
   await expect(op.getByTestId("logs-hidden")).toHaveCount(0)
   expect((await op.request.get(`/api/containers/${containerId}/logs`)).status()).toBe(200)
 
-  await op.getByRole("button", { name: "Stop" }).click()
+  await op.getByRole("button", { name: "Stop", exact: true }).click()
   await expect(op.getByText(`${CONTAINER}: stopped`)).toBeVisible({ timeout })
-  await expect(op.getByRole("button", { name: "Start" })).toBeVisible({ timeout })
+  await expect(op.getByRole("button", { name: "Start", exact: true })).toBeVisible({ timeout })
 
   // The admin lowers the operator to viewer while their page is still open...
   await signIn(page, ADMIN)
   await grant(page, USERS.operator.username, "Viewer")
   // ...so the Start button they still see is refused by the server.
-  await op.getByRole("button", { name: "Start" }).click()
+  await op.getByRole("button", { name: "Start", exact: true }).click()
   await expect(op.getByText("This needs the operator role in local.")).toBeVisible({ timeout })
   await op.reload()
-  await expect(op.getByRole("button", { name: "Start" })).toHaveCount(0)
+  await expect(op.getByRole("button", { name: "Start", exact: true })).toHaveCount(0)
 
   await grant(page, USERS.operator.username, "Operator")
   await context.close()
@@ -178,8 +178,8 @@ test("a manager has full control of the environment, but no administration", asy
 
   await mgr.goto(`/containers/${disposableId}`)
   await expect(mgr.getByRole("tab", { name: "Console" })).toBeVisible({ timeout })
-  await mgr.getByRole("button", { name: "Remove" }).click()
-  await mgr.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click()
+  await mgr.getByRole("button", { name: "Remove", exact: true }).click()
+  await mgr.getByRole("alertdialog").getByRole("button", { name: "Remove", exact: true }).click()
   await expect(mgr).toHaveURL(/\/containers$/, { timeout })
 
   // Lowered to operator with the volumes page open: creating is refused.
