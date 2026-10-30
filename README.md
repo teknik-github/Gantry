@@ -34,9 +34,11 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
   standard users only see the environments they were given
 - **Kubernetes environments**: connect a cluster with a service account token
   or a kubeconfig; overview (nodes, namespaces, pods by phase), workloads
-  (scale, rollout restart, delete), pods (status, logs, delete), services and
-  ingresses, namespaces, ConfigMaps and Secrets (names and keys only), warning
-  events, and **Apply manifest** (multi-document YAML, server-side apply)
+  (scale, rollout restart, delete), pods (status, followed logs, console,
+  delete), services and ingresses, namespaces, ConfigMaps and Secrets (names
+  and keys only), warning events, **Helm releases** (values, manifest,
+  uninstall) and **Apply manifest** (multi-document YAML, server-side apply);
+  pages update live from Kubernetes watches
 - Users with `admin` / `user` roles, plus an activity log
 - Database: **SQLite** (default) or **MySQL**, chosen with `DB_DRIVER`
 
@@ -117,7 +119,12 @@ kind delete cluster --name gantry-k8s-e2e
 ```
 
 `GANTRY_E2E_KUBE_TOKEN` is optional (a cluster-admin service account token,
-see below; it also tests the token form). The test workload runs `alpine:3`.
+see below; it also tests the token form). The test workloads run `alpine:3`.
+The Helm test installs a tiny local chart with the `helm` CLI when it is on the
+PATH (with private Helm directories and the explicit kubeconfig), otherwise it
+writes the release record Helm would. `GANTRY_TEST_KUBECONFIG=…` also runs
+`tests/integration/kubernetes.test.ts` (client, watches, exec, log follow)
+against the same throwaway cluster.
 
 ## Configuration
 
@@ -363,16 +370,41 @@ image pull secrets).
   owned by other managers; "Dry run" validates on the server without changes.
   Every object gets its own result; a failing one doesn't stop the rest.
 - Secrets are listed with their keys only; values are dropped on the server.
-- Kubernetes pages don't update live (no Docker events); reload to refresh.
-  The metrics history, image update checks and live Docker events skip
-  Kubernetes environments.
+- **Live updates**: Gantry watches pods, deployments, stateful sets, daemon
+  sets, services, ingresses, events and namespaces (one watch per type and
+  environment, shared by every open tab, closed shortly after the last tab
+  leaves) and refreshes the pages that show what changed. Watches resume from
+  the last resource version, follow bookmarks, re-list after "410 Gone" and
+  reconnect with backoff. Credentials that may not watch cluster-wide fall back
+  to the environment's default namespace. The metrics history and image update
+  checks skip Kubernetes environments.
+- **Pod logs** are followed as they are written (one API connection per open
+  log view, closed when the view is closed or "Follow" is turned off; at most
+  64 at once). "Previous" shows the last instance of a restarted container;
+  the download button saves the whole log (up to 20 MB).
+- **Console**: administrators can open a shell in a container of a running pod
+  (`kubectl exec` over a WebSocket to the API server, `v5.channel.k8s.io` or
+  `v4.channel.k8s.io`), audited like Docker consoles. The account needs RBAC
+  `create` on `pods/exec` (and `get` on `pods/exec` for older clusters).
+- **Helm releases** are read from Helm 3's release records (Secrets of type
+  `helm.sh/release.v1`), so no `helm` binary is needed: chart, version, app
+  version, status, revision. Administrators can see a release's user-supplied
+  values and manifest (they may contain secrets) and **uninstall** it: Gantry
+  deletes the objects of the latest manifest (except those annotated
+  `helm.sh/resource-policy: keep`) and then the release records, like
+  `helm uninstall --no-hooks`; hooks are not run. Installing or upgrading
+  charts is not built in: use the `helm` CLI (the image doesn't contain it; to
+  use it inside the container, `docker exec` in and download the static binary
+  from https://get.helm.sh into a writable directory, or run it from a machine
+  with a kubeconfig).
 
 ### Live updates and history
 
-- Pages refresh themselves from Docker events, streamed as Server-Sent Events
-  from `/api/events` (one Docker events connection per environment, shared by
-  all tabs).
-- Behind a reverse proxy, don't buffer `/api/events` and `/api/exec/*`
+- Pages refresh themselves from Docker events (or Kubernetes watches),
+  streamed as Server-Sent Events from `/api/events` (one Docker events
+  connection or one set of watches per environment, shared by all tabs).
+- Behind a reverse proxy, don't buffer `/api/events`, `/api/exec/*` and
+  `/api/kubernetes/pods/*/logs`
   (nginx: `proxy_buffering off`, or rely on the `X-Accel-Buffering: no`
   header) and allow read timeouts above 25 seconds.
 - A background sampler records CPU, memory and running containers per

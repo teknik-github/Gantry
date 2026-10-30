@@ -84,11 +84,11 @@ async function SidebarNav() {
 }
 
 // Keyed to the current environment so switching it reconnects the event
-// stream. Live updates follow Docker events; Kubernetes environments have none.
+// stream: Docker events, or the watches of a Kubernetes environment.
 async function LiveUpdatesForEnvironment() {
   await requireUser()
   const env = await getCurrentEnvironment()
-  return <LiveUpdates environmentId={env && env.type !== "kubernetes" ? env.id : null} />
+  return <LiveUpdates environmentId={env?.id ?? null} />
 }
 
 async function SidebarAdmin() {

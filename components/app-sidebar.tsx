@@ -25,6 +25,7 @@ import {
   FileCogIcon,
   TriangleAlertIcon,
   FileUpIcon,
+  PackageIcon,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -54,6 +55,7 @@ const navKubernetes = [
   { title: "Namespaces", url: "/kubernetes/namespaces", icon: <FolderTreeIcon /> },
   { title: "ConfigMaps & Secrets", url: "/kubernetes/config", icon: <FileCogIcon /> },
   { title: "Events", url: "/kubernetes/events", icon: <TriangleAlertIcon /> },
+  { title: "Helm releases", url: "/kubernetes/helm", icon: <PackageIcon /> },
   { title: "Apply manifest", url: "/kubernetes/apply", icon: <FileUpIcon /> },
 ]
 

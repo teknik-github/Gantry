@@ -2,7 +2,7 @@ import "server-only"
 
 import type { ManifestObject } from "@/lib/kubernetes/manifest"
 import type { WorkloadKind } from "@/lib/kubernetes/names"
-import { KubeError, kubeJson, kubeRaw, type KubeTarget } from "@/lib/server/kubernetes/client"
+import { KubeError, kubeJson, kubeRaw, kubeStream, type KubeTarget } from "@/lib/server/kubernetes/client"
 
 // The slices of Kubernetes objects Gantry reads. Everything is optional:
 // the API omits empty fields.
@@ -121,6 +121,17 @@ export type KubeEvent = {
   involvedObject?: { kind?: string; name?: string; namespace?: string }
 }
 
+/** A Helm release record: which release and revision, and Helm's encoded payload (server only). */
+export type HelmReleaseSecret = {
+  secret: string
+  namespace: string
+  name: string
+  version: number
+  status: string
+  /** data.release as stored: base64 of Helm's base64(gzip(JSON)). */
+  release: string
+}
+
 export type ApplyResult = {
   index: number
   kind: string
@@ -128,6 +139,18 @@ export type ApplyResult = {
   namespace: string | null
   status: "created" | "configured" | "error"
   message?: string
+}
+
+export type LogOptions = {
+  container?: string
+  /** Omit for the whole log. */
+  tailLines?: number
+  /** The previous (crashed or restarted) instance of the container. */
+  previous?: boolean
+}
+
+function logQuery(opts: LogOptions) {
+  return { container: opts.container, tailLines: opts.tailLines, previous: opts.previous || undefined, timestamps: true }
 }
 
 const WORKLOAD_PLURAL: Record<WorkloadKind, string> = {
@@ -162,8 +185,76 @@ export function kube(target: KubeTarget) {
     return items
   }
 
+  /**
+   * Cached API discovery for one batch of objects: the resources (plural
+   * name, kind, namespaced) of an apiVersion.
+   */
+  function discovery() {
+    const cache = new Map<string, Promise<{ name: string; kind: string; namespaced: boolean }[]>>()
+    return (apiVersion: string) => {
+      let p = cache.get(apiVersion)
+      if (!p) {
+        const path = apiVersion === "v1" ? "/api/v1" : `/apis/${apiVersion}`
+        p = get<{ resources?: { name: string; kind: string; namespaced: boolean }[] }>(path).then((r) => r.resources ?? [])
+        cache.set(apiVersion, p)
+        // Retry after a failure: an earlier object may install the CRD.
+        p.catch(() => cache.delete(apiVersion))
+      }
+      return p
+    }
+  }
+
   return {
     target,
+    discovery,
+
+    /**
+     * Helm 3 release records (Secrets of type helm.sh/release.v1) in one
+     * namespace or all, optionally of one release. Only the labels and the
+     * encoded `release` field are kept; nothing else of the Secret is read.
+     */
+    async helmReleaseSecrets(ns: string | null, release?: string): Promise<HelmReleaseSecret[]> {
+      const items = await list<{ metadata: ObjectMeta; data?: { release?: string } }>("v1", "secrets", ns, {
+        labelSelector: release ? `owner=helm,name=${release}` : "owner=helm",
+        fieldSelector: "type=helm.sh/release.v1",
+      })
+      return items.flatMap((s) => {
+        const labels = s.metadata.labels ?? {}
+        const version = Number(labels.version)
+        if (!labels.name || !Number.isInteger(version) || !s.data?.release) return []
+        return [{ secret: s.metadata.name, namespace: s.metadata.namespace ?? "", name: labels.name, version, status: labels.status ?? "", release: s.data.release }]
+      })
+    },
+
+    async deleteSecret(ns: string, name: string) {
+      await kubeJson(target, { method: "DELETE", path: `${collectionPath("v1", "secrets", ns)}/${seg(name)}` })
+    },
+
+    /**
+     * Deletes one object from a manifest (namespaced ones in `namespace`
+     * unless they name their own). Returns false when it was already gone.
+     */
+    async deleteObject(
+      o: Pick<ManifestObject, "apiVersion" | "kind" | "name" | "namespace">,
+      namespace: string,
+      resourcesOf = discovery()
+    ): Promise<boolean> {
+      const resource = (await resourcesOf(o.apiVersion)).find((r) => r.kind === o.kind && !r.name.includes("/"))
+      if (!resource) throw new KubeError(`Kind ${o.kind} is not part of ${o.apiVersion}`, 400)
+      const group = o.apiVersion === "v1" ? "v1" : o.apiVersion
+      const ns = resource.namespaced ? (o.namespace ?? namespace) : null
+      try {
+        await kubeJson(target, {
+          method: "DELETE",
+          path: `${collectionPath(group, resource.name, ns)}/${seg(o.name)}`,
+          query: { propagationPolicy: "Background" },
+        })
+        return true
+      } catch (err) {
+        if (err instanceof KubeError && err.status === 404) return false
+        throw err
+      }
+    },
 
     version: () => get<{ gitVersion: string; platform?: string }>("/version"),
 
@@ -191,16 +282,32 @@ export function kube(target: KubeTarget) {
 
     listWorkloads: (kind: WorkloadKind, ns: string | null) => list<Workload>("apps/v1", WORKLOAD_PLURAL[kind], ns),
 
-    async podLogs(ns: string, name: string, opts: { container?: string; tailLines: number }) {
+    async podLogs(ns: string, name: string, opts: LogOptions & { limitBytes?: number }) {
       const res = await kubeRaw(target, {
         method: "GET",
         path: `${collectionPath("v1", "pods", ns)}/${seg(name)}/log`,
-        query: { container: opts.container, tailLines: opts.tailLines, timestamps: true, limitBytes: 5 * 1024 * 1024 },
+        query: { ...logQuery(opts), limitBytes: opts.limitBytes ?? 5 * 1024 * 1024 },
         // The log endpoint answers text/plain but refuses an Accept header naming it (406).
         accept: "*/*",
-        timeoutMs: 30_000,
+        timeoutMs: 60_000,
       })
       return res.body.toString("utf8")
+    },
+
+    /** Streams new log lines as they are written (follow=true) until `signal` aborts or the container stops. */
+    followPodLogs(ns: string, name: string, opts: LogOptions, signal: AbortSignal) {
+      return kubeStream(
+        target,
+        {
+          method: "GET",
+          path: `${collectionPath("v1", "pods", ns)}/${seg(name)}/log`,
+          query: { ...logQuery(opts), follow: true },
+          accept: "*/*",
+          // Logs can stay quiet for hours; only the client disconnecting ends this.
+          idleTimeoutMs: 0,
+        },
+        signal
+      )
     },
 
     async deletePod(ns: string, name: string) {
@@ -256,18 +363,7 @@ export function kube(target: KubeTarget) {
      * manifest is refused like `kubectl apply -n`. Failures don't stop the rest.
      */
     async apply(objects: ManifestObject[], opts: { namespace: string; force: boolean; dryRun: boolean }): Promise<ApplyResult[]> {
-      const discovery = new Map<string, Promise<{ name: string; kind: string; namespaced: boolean }[]>>()
-      const resourcesOf = (apiVersion: string) => {
-        let p = discovery.get(apiVersion)
-        if (!p) {
-          const path = apiVersion === "v1" ? "/api/v1" : `/apis/${apiVersion}`
-          p = get<{ resources?: { name: string; kind: string; namespaced: boolean }[] }>(path).then((r) => r.resources ?? [])
-          discovery.set(apiVersion, p)
-          // Retry after a failure: an earlier object may install the CRD.
-          p.catch(() => discovery.delete(apiVersion))
-        }
-        return p
-      }
+      const resourcesOf = discovery()
 
       const results: ApplyResult[] = []
       for (const o of objects) {

@@ -4,6 +4,8 @@ import type { DockerEnvironmentType, Environment } from "@/lib/server/db/schema"
 import { dockerEventSource } from "@/lib/server/docker/events"
 import { EventHub, type HubListener } from "@/lib/server/event-hub"
 import { environmentTarget } from "@/lib/server/environment-target"
+import { kubeTarget } from "@/lib/server/kubernetes/target"
+import { kubeEventSource } from "@/lib/server/kubernetes/watch"
 
 // One hub per server process; kept on globalThis so dev hot reloads reuse
 // the open Docker connections instead of leaking new ones.
@@ -18,7 +20,7 @@ function hub() {
       const message = (err as Error)?.message ?? String(err)
       if (lastErrors.get(key) === message) return
       lastErrors.set(key, message)
-      console.warn(`[gantry] docker events for environment ${key}: ${message}`)
+      console.warn(`[gantry] live events for environment ${key}: ${message}`)
     },
     onConnect(key) {
       lastErrors.delete(key)
@@ -36,4 +38,14 @@ export function subscribeToEnvironment(
   // which opens a new upstream with them.
   const key = `${env.id}:${env.type}:${env.url}:${env.tls_cert?.slice(-16) ?? "plain"}`
   return hub().subscribe(key, dockerEventSource(environmentTarget(env)), listener)
+}
+
+/**
+ * Subscribes to the watches of a Kubernetes environment (one set of watch
+ * connections per environment, shared by all tabs). The key changes when
+ * the credentials or settings are saved again, which opens new watches.
+ */
+export function subscribeToKubernetes(env: Environment, listener: HubListener) {
+  const key = `${env.id}:kubernetes:${env.url}:${env.kube_credentials?.slice(-16) ?? ""}:${env.kube_insecure}:${env.kube_namespace ?? ""}`
+  return hub().subscribe(key, kubeEventSource(kubeTarget(env), { fallbackNamespace: env.kube_namespace }), listener)
 }

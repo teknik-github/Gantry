@@ -34,6 +34,7 @@ const KUBERNETES_TITLES: Record<string, string> = {
   config: "ConfigMaps & Secrets",
   events: "Events",
   apply: "Apply manifest",
+  helm: "Helm releases",
 }
 
 export function SiteHeader() {

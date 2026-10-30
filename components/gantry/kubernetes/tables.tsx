@@ -58,13 +58,14 @@ export function Age({ at }: { at: string }) {
   )
 }
 
-const GOOD = new Set(["Running", "Succeeded", "Completed", "Active", "Ready"])
-const PENDING = new Set(["Pending", "ContainerCreating", "PodInitializing", "Terminating", "Unknown"])
+// Pod/node phases, plus Helm release states (deployed, pending-*, uninstalling, superseded).
+const GOOD = new Set(["Running", "Succeeded", "Completed", "Active", "Ready", "deployed", "superseded"])
+const PENDING = new Set(["Pending", "ContainerCreating", "PodInitializing", "Terminating", "Unknown", "uninstalling"])
 
 export function KubeStatus({ status }: { status: string }) {
   const color = GOOD.has(status)
     ? "bg-emerald-500"
-    : PENDING.has(status) || status.startsWith("Init:")
+    : PENDING.has(status) || status.startsWith("Init:") || status.startsWith("pending-")
       ? "bg-amber-500"
       : "bg-red-500"
   return (

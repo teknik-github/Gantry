@@ -41,11 +41,35 @@ const THEME = {
   brightBlack: "#525252",
 }
 
+type OpenConsole = (opts: {
+  shell: ExecShell
+  user: string
+  cols: number
+  rows: number
+}) => Promise<{ sid: string; error?: never } | { sid?: never; error: string }>
+
 /**
  * Interactive shell in a running container. Output streams from
- * GET /api/exec/:sid, keystrokes and resizes go out as POSTs.
+ * GET /api/exec/:sid, keystrokes and resizes go out as POSTs. Pass
+ * `containerId` for a Docker container, or `open` for another runtime
+ * (Kubernetes pods), with `controls` for its own choices (the container).
  */
-export function ExecConsole({ containerId, running }: { containerId: string; running: boolean }) {
+export function ExecConsole({
+  containerId,
+  open,
+  running,
+  description = "Interactive shell inside the container (docker exec)",
+  allowUser = true,
+  controls,
+}: {
+  containerId?: string
+  open?: OpenConsole
+  running: boolean
+  description?: string
+  /** Docker can run the shell as another user; Kubernetes exec can't. */
+  allowUser?: boolean
+  controls?: React.ReactNode
+}) {
   const router = useRouter()
   const hostRef = React.useRef<HTMLDivElement>(null)
   const termRef = React.useRef<Terminal | null>(null)
@@ -135,7 +159,9 @@ export function ExecConsole({ containerId, running }: { containerId: string; run
     term.reset()
     fitRef.current?.fit()
 
-    const res = await startExecSession({ id: containerId, shell, user, cols: term.cols, rows: term.rows })
+    const res = open
+      ? await open({ shell, user, cols: term.cols, rows: term.rows })
+      : await startExecSession({ id: containerId ?? "", shell, user, cols: term.cols, rows: term.rows })
     if (res.error !== undefined) {
       setStatus("error")
       setError(res.error)
@@ -228,8 +254,9 @@ export function ExecConsole({ containerId, running }: { containerId: string; run
             {STATUS[status].label}
           </Badge>
         </CardTitle>
-        <CardDescription>Interactive shell inside the container (docker exec)</CardDescription>
+        <CardDescription>{description}</CardDescription>
         <CardAction className="flex flex-wrap items-center gap-2">
+          {controls}
           <Select value={shell} onValueChange={(v) => setShell(v as ExecShell)} disabled={live || busy}>
             <SelectTrigger size="sm" className="w-32" aria-label="Shell">
               <SelectValue />
@@ -240,14 +267,16 @@ export function ExecConsole({ containerId, running }: { containerId: string; run
               <SelectItem value="sh">/bin/sh</SelectItem>
             </SelectContent>
           </Select>
-          <Input
-            value={user}
-            onChange={(e) => setUser(e.target.value)}
-            placeholder="User (default)"
-            aria-label="Run as user"
-            disabled={live || busy}
-            className="h-7 w-36 text-xs"
-          />
+          {allowUser ? (
+            <Input
+              value={user}
+              onChange={(e) => setUser(e.target.value)}
+              placeholder="User (default)"
+              aria-label="Run as user"
+              disabled={live || busy}
+              className="h-7 w-36 text-xs"
+            />
+          ) : null}
           {live ? (
             <Button size="sm" variant="outline" onClick={disconnect}>
               <PlugIcon data-icon="inline-start" />

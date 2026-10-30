@@ -37,7 +37,8 @@ export type KubeRequest = {
   method: string
   /** Absolute API path, e.g. /api/v1/namespaces. Callers encode path segments. */
   path: string
-  query?: Record<string, string | number | boolean | undefined>
+  /** Arrays repeat the parameter (exec's `command`). */
+  query?: Record<string, string | number | boolean | readonly string[] | undefined>
   /** Objects are sent as JSON; strings as they are. */
   body?: unknown
   /** Defaults to application/json when there is a body. */
@@ -69,7 +70,11 @@ export function parseServerUrl(value: string): URL {
 export function buildRequest(target: KubeTarget, req: KubeRequest): { options: https.RequestOptions; payload?: Buffer } {
   const base = parseServerUrl(target.server)
   const qs = new URLSearchParams()
-  for (const [k, v] of Object.entries(req.query ?? {})) if (v !== undefined) qs.set(k, String(v))
+  for (const [k, v] of Object.entries(req.query ?? {})) {
+    if (v === undefined) continue
+    if (Array.isArray(v)) for (const item of v) qs.append(k, item)
+    else qs.set(k, String(v))
+  }
   const query = qs.toString()
 
   let payload: Buffer | undefined
@@ -178,4 +183,45 @@ export async function kubeJson<T>(target: KubeTarget, req: KubeRequest): Promise
   } catch {
     throw new KubeError("The Kubernetes API returned something that isn't JSON", 502)
   }
+}
+
+/**
+ * Opens a long-lived response (watch, log follow) and resolves once the
+ * headers arrive with a 2xx status; the caller reads the body as it streams.
+ * Aborting `signal` closes the connection. `idleTimeoutMs` ends a stream
+ * that stays silent that long (dead peers, half-open connections).
+ */
+export function kubeStream(
+  target: KubeTarget,
+  req: KubeRequest & { idleTimeoutMs?: number },
+  signal?: AbortSignal
+): Promise<import("node:http").IncomingMessage> {
+  let built: ReturnType<typeof buildRequest>
+  try {
+    built = buildRequest(target, { ...req, timeoutMs: req.idleTimeoutMs ?? 0 })
+  } catch (err) {
+    return Promise.reject(err)
+  }
+  const { options, payload } = built
+  if (signal?.aborted) return Promise.reject(new KubeError("Aborted", 499))
+
+  return new Promise((resolve, reject) => {
+    const request = https.request(options, (res) => {
+      const status = res.statusCode ?? 0
+      if (status >= 400) {
+        const chunks: Buffer[] = []
+        res.on("data", (c: Buffer) => chunks.length < 64 && chunks.push(c))
+        res.on("end", () => reject(errorFromResponse(status, Buffer.concat(chunks).toString("utf8"))))
+        res.on("error", (err) => reject(connectionError(err)))
+        return
+      }
+      resolve(res)
+    })
+    const onAbort = () => request.destroy(new KubeError("Aborted", 499))
+    signal?.addEventListener("abort", onAbort, { once: true })
+    request.on("close", () => signal?.removeEventListener("abort", onAbort))
+    request.on("timeout", () => request.destroy(new KubeError("The Kubernetes API stream went silent", 504)))
+    request.on("error", (err: NodeJS.ErrnoException) => reject(connectionError(err)))
+    request.end(payload)
+  })
 }

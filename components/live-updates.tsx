@@ -165,13 +165,15 @@ export function LiveUpdates({ environmentId }: { environmentId: number | null })
             scheduleRefresh()
           }
         } else if (status === "reconnecting") {
-          lost() // Gantry is up but can't reach Docker.
+          lost() // Gantry is up but can't reach Docker / the cluster.
         }
       })
-      es.addEventListener("docker", (e) => {
+      const onEvent = (e: Event) => {
         const event = JSON.parse((e as MessageEvent).data) as LiveEvent
         if (eventAffectsPath(event, pathRef.current)) scheduleRefresh()
-      })
+      }
+      es.addEventListener("docker", onEvent)
+      es.addEventListener("kubernetes", onEvent)
       // Planned close by the server: reopen right away without a refresh.
       es.addEventListener("rotate", () => {
         es.close()
@@ -214,7 +216,7 @@ const LABELS: Record<LiveStatus, string> = {
 const TITLES: Record<LiveStatus, string> = {
   idle: "",
   connecting: "Connecting to live updates…",
-  connected: "Pages update automatically when Docker state changes",
+  connected: "Pages update automatically when the environment changes",
   reconnecting: "Live updates interrupted; reconnecting…",
 }
 
