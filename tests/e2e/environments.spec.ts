@@ -74,11 +74,11 @@ test("admin grants access and the user can use the environment", async ({ page, 
   await dialog.getByRole("checkbox", { name: "local" }).check()
   await dialog.getByRole("button", { name: "Save" }).click()
   await expect(dialog).toBeHidden()
-  await expect(page.getByTestId(`user-envs-${VIEWER.username}`)).toHaveText("local")
+  await expect(page.getByTestId(`user-envs-${VIEWER.username}`)).toHaveText("local operator")
 
   // The environments page shows who has access.
   await page.goto("/environments")
-  await expect(page.getByTestId("env-access-local")).toHaveText(VIEWER.username)
+  await expect(page.getByTestId("env-access-local")).toHaveText(`${VIEWER.username} operator`)
 
   const { context, page: viewer } = await viewerPage(browser)
   await expect(viewer.locator('[data-sidebar="header"]')).toContainText("local")

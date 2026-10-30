@@ -7,7 +7,8 @@ import { StackActions } from "@/components/gantry/stack-actions"
 import { StackEditor } from "@/components/gantry/stack-editor"
 import { GitSourceDialog, WebhookPanel } from "@/components/gantry/stack-git"
 import { StackStatusBadge } from "@/components/gantry/stacks-table"
-import { DockerUnavailable, Mono, PageBody, StateBadge } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, Mono, StateBadge } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatDate, timeAgo } from "@/lib/format"
 import { shortSha } from "@/lib/git-stacks"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { getStack, isStackBusy, PROJECT_LABEL } from "@/lib/server/stacks"
 import { getStackGit, publicGitInfo, type GitStackInfo } from "@/lib/server/stacks/git-records"
 import { summarizeProject } from "@/lib/server/stacks/views"
@@ -36,6 +37,8 @@ const ACTION_LABELS: Record<string, string> = {
 
 export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
   const user = await requireUser()
+  const isManager = (await getPermissions()).manage
+  // Git credentials and webhook secrets stay with global administrators.
   const isAdmin = user.role === "admin"
   const { id } = await params
   if (!/^\d{1,10}$/.test(id)) notFound()
@@ -94,13 +97,14 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
             {timeAgo(stack.updated_at)}
           </p>
         </div>
-        {isAdmin && result.error === undefined ? (
+        {isManager && result.error === undefined ? (
           <StackActions
             id={stack.id}
             name={stack.name}
             running={summary.running}
             total={summary.total}
             git={git !== null}
+            canSaveTemplate={user.role === "admin"}
           />
         ) : null}
       </div>
@@ -200,8 +204,8 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
               )}
             </CardDescription>
           </CardHeader>
-          {/* compose's output can quote the compose file (e.g. interpolation errors): admins only. */}
-          {stack.last_output && isAdmin ? (
+          {/* compose's output can quote the compose file (e.g. interpolation errors): managers only. */}
+          {stack.last_output && isManager ? (
             <CardContent>
               <pre
                 data-testid="stack-output"
@@ -225,7 +229,7 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
           </Card>
         ) : null}
 
-        {isAdmin ? (
+        {isManager ? (
           <Card>
             <CardHeader>
               <CardTitle>Configuration</CardTitle>

@@ -2,7 +2,8 @@ import type { Metadata } from "next"
 
 import { HelmReleasesTable } from "@/components/gantry/kubernetes/helm"
 import { KubeUnavailable, loadKubePage, NamespaceFilter } from "@/components/gantry/kubernetes/page"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 import { tryKube } from "@/lib/server/kubernetes"
 import { listReleases } from "@/lib/server/kubernetes/helm"
 

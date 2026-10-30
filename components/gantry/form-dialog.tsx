@@ -4,6 +4,7 @@ import * as React from "react"
 import { useActionState } from "react"
 import { toast } from "sonner"
 
+import { EnvironmentField } from "@/components/gantry/environment-scope"
 import { submitKeepingValues } from "@/components/gantry/use-action"
 import { Button } from "@/components/ui/button"
 import {
@@ -93,6 +94,7 @@ function DialogForm({
 
   return (
     <form method="post" onSubmit={submitKeepingValues(formAction)} className="flex flex-col gap-5">
+      <EnvironmentField />
       {children(state.fieldErrors ?? {})}
       {state.error && !state.fieldErrors ? <FieldError>{state.error}</FieldError> : null}
       <DialogFooter>

@@ -348,6 +348,7 @@ describe("pod exec over WebSocket (fake API server)", () => {
     try {
       const sid = await openPodExecSession({
         userId: 4242,
+        environmentId: 1,
         target: { server, token: "tok", ca: fx.ca },
         namespace: "web",
         pod: "api-1",
@@ -401,7 +402,7 @@ describe("console sessions", () => {
   it("belong to their user, buffer output until read and report the exit code", async () => {
     let written = ""
     let sink!: { data(chunk: Buffer): void; closed(): void }
-    const sid = await registerSession(77, (s) => {
+    const sid = await registerSession(77, 1, (s) => {
       sink = s
       s.data(Buffer.from("early "))
       return { write: (d) => void (written += d), resize: async () => {}, destroy: () => {}, exitCode: async () => 0 }

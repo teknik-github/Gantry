@@ -4,8 +4,8 @@ import { z } from "zod"
 
 import { containerNameField, imageField, RESTART_POLICIES } from "@/lib/container-form"
 import { BULK_LIMIT, uniqueBy } from "@/lib/bulk"
-import { runAction, runBulkAction, UserError } from "@/lib/server/action"
-import { getCurrentUser } from "@/lib/server/auth/dal"
+import { ENVIRONMENT_FIELD } from "@/lib/permissions"
+import { authorize, expectedEnvironment, inEnvironment, runAction, runBulkAction, UserError } from "@/lib/server/action"
 import {
   editsFromForm,
   formValuesFromInspect,
@@ -62,9 +62,10 @@ const FIELD_LABELS: Record<keyof ContainerEdits, string> = {
 
 /** Edit form: recreates the container with the changed settings. */
 export async function editContainer(_prev: RecreateState, formData: FormData): Promise<RecreateState> {
-  const user = await getCurrentUser()
-  if (!user) return { error: "Your session has expired. Please sign in again." }
-  if (user.role !== "admin") return { error: "Only administrators can do this." }
+  // Reading the container (env values included) needs the right first.
+  const scope = inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD)))
+  const auth = await authorize(scope)
+  if ("error" in auth) return { error: auth.error }
 
   const parsed = editSchema.safeParse({
     ...Object.fromEntries(formData),
@@ -76,7 +77,7 @@ export async function editContainer(_prev: RecreateState, formData: FormData): P
 
   // Compare against the container as it is now, not as the form saw it.
   const current = await tryDocker(async () => {
-    const api = await getDocker()
+    const api = await getDocker(scope.environmentId)
     const c = (await api.inspectContainer(id)) as unknown as RecreateInspect
     const known = submitted.networks && networksEditable(c) ? (await api.listNetworks()).map((n) => n.Name) : []
     return { c, known }
@@ -92,7 +93,7 @@ export async function editContainer(_prev: RecreateState, formData: FormData): P
   const name = c.Name.replace(/^\//, "")
   const target = `${name} (${changed.map((k) => FIELD_LABELS[k]).join(", ") || "pull"})`
   let containerId: string | undefined
-  const res = await runAction("admin", "container.edit", target, async ({ docker }) =>
+  const res = await runAction(scope, "container.edit", target, async ({ docker }) =>
     asUserError(async () => {
       const result = await recreateContainer(await docker(), {
         id: c.Id,
@@ -108,12 +109,12 @@ export async function editContainer(_prev: RecreateState, formData: FormData): P
 }
 
 /** Pulls the container's image reference and recreates it if the image changed. */
-export async function pullAndRecreateContainer(id: string): Promise<RecreateState> {
+export async function pullAndRecreateContainer(id: string, environmentId?: number): Promise<RecreateState> {
   const parsed = idSchema.safeParse(id)
   if (!parsed.success) return { error: "Invalid container id" }
 
   let containerId: string | undefined
-  const res = await runAction("admin", "container.pull-recreate", id.slice(0, 12), async ({ docker }) =>
+  const res = await runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "container.pull-recreate", id.slice(0, 12), async ({ docker }) =>
     asUserError(async () => {
       const result = await pullAndRecreate(await docker(), { id: parsed.data, self: selfContainerIds() })
       if (!result.updated) {
@@ -131,7 +132,7 @@ export async function pullAndRecreateContainer(id: string): Promise<RecreateStat
  * "Pull & recreate" for several containers. Two at a time: each one pulls and
  * swaps containers, which is slow and heavy on the daemon.
  */
-export async function bulkPullAndRecreate(targets: { id: string; name: string }[]): Promise<ActionState> {
+export async function bulkPullAndRecreate(targets: { id: string; name: string }[], environmentId?: number): Promise<ActionState> {
   const parsed = z
     .array(z.object({ id: idSchema, name: z.string().max(255) }))
     .min(1)
@@ -140,7 +141,7 @@ export async function bulkPullAndRecreate(targets: { id: string; name: string }[
   if (!parsed.success) return { error: "Invalid request" }
 
   return runBulkAction(
-    "admin",
+    inEnvironment("manage", expectedEnvironment(environmentId)),
     "container.pull-recreate",
     uniqueBy(parsed.data, (t) => t.id),
     { verb: "Updated", noun: "container", label: (t) => t.name || t.id.slice(0, 12), auditTarget: (t) => t.id.slice(0, 12), concurrency: 2 },
@@ -151,8 +152,8 @@ export async function bulkPullAndRecreate(targets: { id: string; name: string }[
 }
 
 /** Asks the registries which containers run an outdated image (no pull). */
-export async function checkForUpdates(): Promise<ActionState> {
-  return runAction("operate", "image.check-updates", "all", async ({ docker }) => {
+export async function checkForUpdates(environmentId?: number): Promise<ActionState> {
+  return runAction(inEnvironment("operate", expectedEnvironment(environmentId)), "image.check-updates", "all", async ({ docker }) => {
     const env = await getCurrentEnvironment()
     if (!env) throw new UserError("No Docker environment configured")
     const api = await docker()

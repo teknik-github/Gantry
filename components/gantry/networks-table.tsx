@@ -7,6 +7,7 @@ import { createNetwork, removeNetwork, removeNetworks } from "@/app/(app)/networ
 import { columnHelperFor, DataTable, SortHeader, type TableSelection } from "@/components/data-table"
 import { BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
+import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
@@ -35,7 +36,7 @@ export type NetworkRow = {
 
 const helper = columnHelperFor<NetworkRow>()
 
-function buildColumns(isAdmin: boolean) {
+function buildColumns(canManage: boolean, environmentId: number | undefined) {
   return helper.columns([
     helper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -73,13 +74,13 @@ function buildColumns(isAdmin: boolean) {
     helper.display({
       id: "actions",
       cell: ({ row }) =>
-        isAdmin && !row.original.builtin ? (
+        canManage && !row.original.builtin ? (
           <div className="flex justify-end">
             <ConfirmAction
               title={`Remove network ${row.original.name}?`}
               description="Containers must be disconnected from the network first."
               confirmLabel="Remove"
-              onConfirm={() => removeNetwork(row.original.id, row.original.name)}
+              onConfirm={() => removeNetwork(row.original.id, row.original.name, environmentId)}
             >
               <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Remove network">
                 <Trash2Icon />
@@ -92,7 +93,7 @@ function buildColumns(isAdmin: boolean) {
   ])
 }
 
-const networkSelection: TableSelection<NetworkRow> = {
+const networkSelection = (environmentId: number | undefined): TableSelection<NetworkRow> => ({
   canSelect: (r) => !r.builtin,
   rowLabel: (r) => r.name,
   actions: (selected, clear) => {
@@ -105,27 +106,29 @@ const networkSelection: TableSelection<NetworkRow> = {
         description="Containers must be disconnected from a network before it can be removed."
         names={selected.map((r) => r.name)}
         warning={attached ? `${attached} of them still have containers attached and will fail.` : null}
-        onConfirm={() => removeNetworks(selected.map((r) => ({ id: r.id, name: r.name })))}
+        onConfirm={() => removeNetworks(selected.map((r) => ({ id: r.id, name: r.name })), environmentId)}
         onDone={clear}
       />
     )
   },
-}
+})
 
-export function NetworksTable({ data, isAdmin }: { data: NetworkRow[]; isAdmin: boolean }) {
-  const columns = React.useMemo(() => buildColumns(isAdmin), [isAdmin])
+export function NetworksTable({ data, canManage }: { data: NetworkRow[]; canManage: boolean }) {
+  const environmentId = useEnvironmentId()
+  const columns = React.useMemo(() => buildColumns(canManage, environmentId), [canManage, environmentId])
+  const selection = React.useMemo(() => (canManage ? networkSelection(environmentId) : undefined), [canManage, environmentId])
   return (
     <DataTable
       data={data}
       columns={columns}
       getRowId={(r) => r.id}
-      selection={isAdmin ? networkSelection : undefined}
+      selection={selection}
       searchText={(r) => `${r.name} ${r.driver} ${r.subnet}`}
       searchPlaceholder="Search networks…"
       emptyMessage="No networks."
       pageSize={20}
       toolbar={
-        isAdmin ? (
+        canManage ? (
           <FormDialog
             trigger={
               <Button size="sm">

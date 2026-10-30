@@ -16,9 +16,11 @@ import { assertCapacity, registerSession } from "@/lib/server/exec-sessions"
 // handlers (app/api/exec/[sid]) import it from here.
 export {
   closeSession,
+  closeUserExecSessions,
   ExecSessionError,
   openOutputStream,
   resizeSession,
+  sessionEnvironment,
   writeInput,
 } from "@/lib/server/exec-sessions"
 
@@ -73,6 +75,8 @@ function hijack(target: DockerTarget, path: string, body: unknown): Promise<Dupl
 
 export async function openExecSession(opts: {
   userId: number
+  /** Environment the console runs in (access is re-checked against it). */
+  environmentId: number
   target: DockerTarget
   containerId: string
   cmd: string[]
@@ -105,7 +109,7 @@ export async function openExecSession(opts: {
     ConsoleSize: [opts.rows, opts.cols],
   })
 
-  return registerSession(opts.userId, (sink) => {
+  return registerSession(opts.userId, opts.environmentId, (sink) => {
     socket.on("data", (chunk: Buffer) => sink.data(chunk))
     socket.on("close", () => sink.closed())
     socket.on("error", () => sink.closed())

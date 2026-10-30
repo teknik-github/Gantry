@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
 
 import { RegistriesTable } from "@/components/gantry/registries-table"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 import { timeAgo } from "@/lib/format"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { listRegistries } from "@/lib/server/registries"

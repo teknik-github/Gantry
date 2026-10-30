@@ -3,7 +3,8 @@
 import { z } from "zod"
 
 import { BULK_LIMIT } from "@/lib/bulk"
-import { runAction, runBulkAction } from "@/lib/server/action"
+import { ENVIRONMENT_FIELD } from "@/lib/permissions"
+import { expectedEnvironment, inEnvironment, runAction, runBulkAction } from "@/lib/server/action"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const nameSchema = z
@@ -19,28 +20,28 @@ export async function createVolume(_prev: ActionState, formData: FormData): Prom
     .safeParse({ name: formData.get("name"), driver: formData.get("driver") || undefined })
   if (!parsed.success) return fieldErrors(parsed.error)
 
-  return runAction("admin", "volume.create", parsed.data.name, async ({ docker }) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), "volume.create", parsed.data.name, async ({ docker }) => {
     await (await docker()).createVolume(parsed.data.name, parsed.data.driver)
     return `Volume ${parsed.data.name} created`
   })
 }
 
-export async function removeVolume(name: string): Promise<ActionState> {
+export async function removeVolume(name: string, environmentId?: number): Promise<ActionState> {
   const parsed = nameSchema.safeParse(name)
   if (!parsed.success) return { error: "Invalid volume name" }
 
-  return runAction("admin", "volume.remove", name, async ({ docker }) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "volume.remove", name, async ({ docker }) => {
     await (await docker()).removeVolume(parsed.data)
     return "Volume removed"
   })
 }
 
-export async function removeVolumes(names: string[]): Promise<ActionState> {
+export async function removeVolumes(names: string[], environmentId?: number): Promise<ActionState> {
   const parsed = z.array(nameSchema).min(1).max(BULK_LIMIT).safeParse(names)
   if (!parsed.success) return { error: "Invalid request" }
 
   return runBulkAction(
-    "admin",
+    inEnvironment("manage", expectedEnvironment(environmentId)),
     "volume.remove",
     [...new Set(parsed.data)],
     { verb: "Removed", noun: "volume", label: (n) => n },

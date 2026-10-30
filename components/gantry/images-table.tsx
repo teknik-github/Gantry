@@ -7,6 +7,7 @@ import { pruneImages, pullImage, removeImage, removeImages } from "@/app/(app)/i
 import { columnHelperFor, DataTable, SortHeader, type TableSelection } from "@/components/data-table"
 import { BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
+import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
@@ -29,7 +30,7 @@ export type ImageRow = {
 
 const helper = columnHelperFor<ImageRow>()
 
-function buildColumns(isAdmin: boolean) {
+function buildColumns(canManage: boolean) {
   return helper.columns([
     helper.accessor((r) => r.tags[0] ?? "<none>", {
       id: "tags",
@@ -73,32 +74,33 @@ function buildColumns(isAdmin: boolean) {
     }),
     helper.display({
       id: "actions",
-      cell: ({ row }) => (isAdmin ? <RemoveImage row={row.original} /> : null),
+      cell: ({ row }) => (canManage ? <RemoveImage row={row.original} /> : null),
       enableHiding: false,
     }),
   ])
 }
 
-export function ImagesTable({ data, isAdmin }: { data: ImageRow[]; isAdmin: boolean }) {
-  const columns = React.useMemo(() => buildColumns(isAdmin), [isAdmin])
+export function ImagesTable({ data, canManage }: { data: ImageRow[]; canManage: boolean }) {
+  const environmentId = useEnvironmentId()
+  const columns = React.useMemo(() => buildColumns(canManage), [canManage])
   return (
     <DataTable
       data={data}
       columns={columns}
       getRowId={(r) => r.id}
-      selection={isAdmin ? imageSelection : undefined}
+      selection={canManage ? imageSelection : undefined}
       searchText={(r) => `${r.tags.join(" ")} ${r.shortId}`}
       searchPlaceholder="Search images…"
       emptyMessage="No images."
       pageSize={20}
       toolbar={
-        isAdmin ? (
+        canManage ? (
           <>
             <ConfirmAction
               title="Prune dangling images?"
               description="Untagged images that no container uses will be deleted."
               confirmLabel="Prune"
-              onConfirm={pruneImages}
+              onConfirm={() => pruneImages(environmentId)}
             >
               <Button size="sm" variant="outline">
                 <EraserIcon data-icon="inline-start" />
@@ -121,6 +123,7 @@ const imageSelection: TableSelection<ImageRow> = {
 }
 
 function BulkRemoveImages({ selected, clear }: { selected: ImageRow[]; clear: () => void }) {
+  const environmentId = useEnvironmentId()
   const [force, setForce] = React.useState(false)
   const inUse = selected.filter((r) => r.inUse > 0).length
   const multiTag = selected.filter((r) => r.tags.length > 1).length
@@ -136,7 +139,7 @@ function BulkRemoveImages({ selected, clear }: { selected: ImageRow[]; clear: ()
       description="These images will be deleted from this environment."
       names={selected.map(imageName)}
       warning={warnings.length ? `Some may fail: ${warnings.join(", ")}.` : null}
-      onConfirm={() => removeImages(selected.map((r) => ({ id: r.id, name: imageName(r) })), force)}
+      onConfirm={() => removeImages(selected.map((r) => ({ id: r.id, name: imageName(r) })), force, environmentId)}
       onDone={clear}
       extra={
         <Label className="font-normal">
@@ -149,6 +152,7 @@ function BulkRemoveImages({ selected, clear }: { selected: ImageRow[]; clear: ()
 }
 
 function RemoveImage({ row }: { row: ImageRow }) {
+  const environmentId = useEnvironmentId()
   const [force, setForce] = React.useState(false)
   return (
     <div className="flex justify-end">
@@ -156,7 +160,7 @@ function RemoveImage({ row }: { row: ImageRow }) {
         title={`Remove ${row.tags[0] ?? row.shortId}?`}
         description="The image will be deleted from this environment."
         confirmLabel="Remove"
-        onConfirm={() => removeImage(row.id, force)}
+        onConfirm={() => removeImage(row.id, force, environmentId)}
         extra={
           <Label className="font-normal">
             <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />

@@ -3,8 +3,8 @@
 import { z } from "zod"
 
 import { checkHost, checkSettings } from "@/lib/proxy"
-import { runAction, UserError } from "@/lib/server/action"
-import { getCurrentUser } from "@/lib/server/auth/dal"
+import { ENVIRONMENT_FIELD } from "@/lib/permissions"
+import { authorize, expectedEnvironment, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import type { DockerApi } from "@/lib/server/docker/api"
 import { getCurrentEnvironment } from "@/lib/server/environments"
 import {
@@ -49,7 +49,7 @@ export async function saveSettings(_prev: ActionState, formData: FormData): Prom
   const checked = checkSettings(values)
   if (!checked.settings) return fieldState(checked.errors, values)
   const settings = checked.settings
-  return runAction("admin", "proxy.settings", settings.mode, async ({ docker }) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), "proxy.settings", settings.mode, async ({ docker }) => {
     const environmentId = await currentEnvironmentId()
     await saveProxySettings(environmentId, settings)
     const label = { off: "Proxy turned off", internal: "Built-in proxy configured", external: "External proxy configured" }[settings.mode]
@@ -64,15 +64,17 @@ export async function saveHost(_prev: ActionState, formData: FormData): Promise<
   const id = rawId ? idSchema.safeParse(rawId) : null
   if (id && !id.success) return { error: "Invalid host" }
   // Checking for duplicate domains reads the stored hosts: authorize first.
-  if ((await getCurrentUser())?.role !== "admin") return { error: "Only administrators can do this." }
-  const env = await getCurrentEnvironment()
+  const scope = inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD)))
+  const auth = await authorize(scope)
+  if ("error" in auth) return { error: auth.error }
+  const env = auth.environment
   if (!env) return { error: "No Docker environment configured" }
   const others = await listProxyHosts(env.id)
   const checked = checkHost(values, others, id?.data)
   if (!checked.host) return fieldState(checked.errors, values)
   const host = { ...checked.host, enabled: formData.get("enabled") === "on" }
 
-  return runAction("admin", id ? "proxy.host.update" : "proxy.host.create", host.domains.join(", "), async ({ docker }) => {
+  return runAction(scope, id ? "proxy.host.update" : "proxy.host.create", host.domains.join(", "), async ({ docker }) => {
     if (id && !others.some((o) => o.id === id.data)) throw new UserError("Host not found")
     await saveProxyHost(env.id, host, id?.data)
     const { settings } = await getProxySettings(env.id)
@@ -82,10 +84,10 @@ export async function saveHost(_prev: ActionState, formData: FormData): Promise<
   })
 }
 
-export async function setHostEnabled(id: number, enabled: boolean): Promise<ActionState> {
+export async function setHostEnabled(id: number, enabled: boolean, environmentId?: number): Promise<ActionState> {
   const parsed = idSchema.safeParse(id)
   if (!parsed.success) return { error: "Invalid host" }
-  return runAction("admin", enabled ? "proxy.host.enable" : "proxy.host.disable", `#${parsed.data}`, async ({ docker }) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), enabled ? "proxy.host.enable" : "proxy.host.disable", `#${parsed.data}`, async ({ docker }) => {
     const environmentId = await currentEnvironmentId()
     const host = (await listProxyHosts(environmentId)).find((h) => h.id === parsed.data)
     if (!host) throw new UserError("Host not found")
@@ -96,10 +98,10 @@ export async function setHostEnabled(id: number, enabled: boolean): Promise<Acti
   })
 }
 
-export async function deleteHost(id: number): Promise<ActionState> {
+export async function deleteHost(id: number, environmentId?: number): Promise<ActionState> {
   const parsed = idSchema.safeParse(id)
   if (!parsed.success) return { error: "Invalid host" }
-  return runAction("admin", "proxy.host.delete", `#${parsed.data}`, async ({ docker }) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "proxy.host.delete", `#${parsed.data}`, async ({ docker }) => {
     const environmentId = await currentEnvironmentId()
     await deleteProxyHost(environmentId, parsed.data)
     const { settings } = await getProxySettings(environmentId)
@@ -108,8 +110,8 @@ export async function deleteHost(id: number): Promise<ActionState> {
 }
 
 /** Re-applies the configuration (e.g. after the proxy container was removed by hand). */
-export async function reapplyProxy(): Promise<ActionState> {
-  return runAction("admin", "proxy.apply", "manual", async ({ docker }) => {
+export async function reapplyProxy(environmentId?: number): Promise<ActionState> {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "proxy.apply", "manual", async ({ docker }) => {
     const environmentId = await currentEnvironmentId()
     return applyOrExplain(await docker(), environmentId, "Proxy configuration applied")
   })

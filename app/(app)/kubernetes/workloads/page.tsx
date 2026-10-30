@@ -2,7 +2,8 @@ import type { Metadata } from "next"
 
 import { KubeUnavailable, loadKubePage, NamespaceFilter } from "@/components/gantry/kubernetes/page"
 import { WorkloadsTable } from "@/components/gantry/kubernetes/tables"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 import { WORKLOAD_KINDS } from "@/lib/kubernetes/names"
 import { toWorkloadRows } from "@/lib/kubernetes/rows"
 import { tryKube } from "@/lib/server/kubernetes"
@@ -41,7 +42,8 @@ export default async function WorkloadsPage() {
         <WorkloadsTable
           data={result.data}
           environmentId={page.env.id}
-          isAdmin={page.user.role === "admin"}
+          canOperate={page.can.operate}
+          canManage={page.can.manage}
           showNamespace={!page.namespace}
         />
       )}

@@ -6,7 +6,8 @@ import { ContainerActions, LogViewer } from "@/components/gantry/container-detai
 import { ExposeContainerDialog } from "@/components/gantry/proxy-ui"
 import type { RecreateInfo } from "@/components/gantry/container-edit-dialog"
 import { ExecConsole } from "@/components/gantry/exec-console"
-import { DockerUnavailable, Mono, PageBody, StateBadge } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, Mono, StateBadge } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -22,13 +23,13 @@ import {
   type RecreateInspect,
 } from "@/lib/server/docker/recreate"
 import { selfContainerIds } from "@/lib/server/docker/self"
-import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { updatesFor } from "@/lib/server/image-updates"
 import { getProxySettings, listProxyHosts } from "@/lib/server/proxy"
 import { tryDocker } from "@/lib/server/views"
 
 export default async function ContainerPage({ params, searchParams }: PageProps<"/containers/[id]">) {
-  const user = await requireUser()
+  await requireUser()
   const { id } = await params
   const { tab } = await searchParams
   if (!/^[a-f0-9]{12,64}$/.test(id)) notFound()
@@ -57,8 +58,8 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
   const [proxy, proxyHosts] = env ? await Promise.all([getProxySettings(env.id), listProxyHosts(env.id)]) : [null, []]
   const domains = proxyHosts.filter((h) => h.target === name)
   const exposedPorts = [...new Set(Object.keys(c.Config.ExposedPorts ?? {}).map((p) => Number(p.split("/")[0])))].filter(Boolean)
-  const isAdmin = user.role === "admin"
-  const recreate = isAdmin ? await recreateInfo(c as unknown as RecreateInspect) : undefined
+  const can = await getPermissions()
+  const recreate = can.manage ? await recreateInfo(c as unknown as RecreateInspect) : undefined
   const ports = Object.entries(c.HostConfig.PortBindings ?? {}).flatMap(([container, binds]) =>
     (binds ?? []).map((b) => `${b.HostIp ? `${b.HostIp}:` : ""}${b.HostPort} → ${container}`)
   )
@@ -80,10 +81,10 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
           <Mono className="text-muted-foreground">{shortId(c.Id)}</Mono>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {isAdmin ? (
+          {can.manage ? (
             <ExposeContainerDialog target={name} ports={exposedPorts} proxyOff={!proxy || proxy.settings.mode === "off"} />
           ) : null}
-          <ContainerActions id={c.Id} name={name} state={c.State.Status} isAdmin={isAdmin} recreate={recreate} />
+          <ContainerActions id={c.Id} name={name} state={c.State.Status} can={can} recreate={recreate} />
         </div>
       </div>
 
@@ -193,8 +194,8 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
                   return (
                     <div key={e} className="grid grid-cols-[minmax(8rem,16rem)_1fr] gap-3 break-all">
                       <span className="font-medium">{key}</span>
-                      {/* Values may hold secrets; only administrators see them. */}
-                      <span className="text-muted-foreground">{isAdmin ? rest.join("=") : "••••••"}</span>
+                      {/* Values may hold secrets; only managers (and administrators) see them. */}
+                      <span className="text-muted-foreground">{can.manage ? rest.join("=") : "••••••"}</span>
                     </div>
                   )
                 })}
@@ -207,7 +208,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
       </div>
 
       <div className="px-4 lg:px-6">
-        {isAdmin ? (
+        {can.manage ? (
           <Tabs defaultValue={tab === "console" ? "console" : "logs"} className="gap-4">
             <TabsList>
               <TabsTrigger value="logs">
@@ -227,15 +228,19 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
               <ExecConsole containerId={c.Id} running={c.State.Running && !c.State.Paused} />
             </TabsContent>
           </Tabs>
-        ) : (
+        ) : can.operate ? (
           <LogViewer id={c.Id} />
+        ) : (
+          <p className="text-sm text-muted-foreground" data-testid="logs-hidden">
+            Logs need the operator role in this environment.
+          </p>
         )}
       </div>
     </PageBody>
   )
 }
 
-/** Prefilled edit form and guards. Includes env values: administrators only. */
+/** Prefilled edit form and guards. Includes env values: managers only. */
 async function recreateInfo(c: RecreateInspect): Promise<RecreateInfo> {
   const editable = networksEditable(c)
   const networks = editable ? await tryDocker(async () => (await getDocker()).listNetworks()) : null

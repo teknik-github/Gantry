@@ -10,7 +10,8 @@ import { ENV_COOKIE } from "@/lib/server/auth/token"
 import { getDb } from "@/lib/server/db"
 import { docker } from "@/lib/server/docker/api"
 import type { DockerTarget, DockerTls } from "@/lib/server/docker/client"
-import { setEnvironmentUsers } from "@/lib/server/environment-access"
+import { closeUserExecSessions } from "@/lib/server/docker/exec"
+import { parseGrants, setEnvironmentUsers } from "@/lib/server/environment-access"
 import { decryptTls, encryptTls, parseTls } from "@/lib/server/environment-target"
 import { listEnvironments } from "@/lib/server/environments"
 import { kube } from "@/lib/server/kubernetes/api"
@@ -288,22 +289,22 @@ export async function deleteEnvironment(id: number): Promise<ActionState> {
   })
 }
 
-/** Sets which standard users may use an environment (checkboxes named "user"). */
+/** Sets which standard users may use an environment, and their role ("user" values "<id>:<role>"). */
 export async function setEnvironmentAccess(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const parsed = z
-    .object({
-      id: z.coerce.number().int().positive(),
-      users: z.array(z.coerce.number().int().positive()).max(10_000),
-    })
-    .safeParse({ id: formData.get("id"), users: formData.getAll("user") })
-  if (!parsed.success) return { error: "Invalid request" }
-  const { id, users } = parsed.data
+  const parsed = z.coerce.number().int().positive().safeParse(formData.get("id"))
+  const grants = parseGrants(formData.getAll("user"))
+  if (!parsed.success || !grants || grants.length > 10_000) return { error: "Invalid request" }
+  const id = parsed.data
+  const summary = grants.map((g) => `${g.id}=${g.role}`).join(",") || "admins only"
 
-  return runAction("admin", "environment.access", `${id}: ${users.join(",") || "admins only"}`, async () => {
+  return runAction("admin", "environment.access", `${id}: ${summary}`, async () => {
     const db = await getDb()
     const env = await db.selectFrom("environments").select("name").where("id", "=", id).executeTakeFirst()
     if (!env) throw new UserError("Environment not found")
-    await setEnvironmentUsers(db, id, users)
+    const before = await db.selectFrom("environment_access").select("user_id").where("environment_id", "=", id).execute()
+    await setEnvironmentUsers(db, id, grants)
+    // Consoles need the manager role; affected users reopen them under the new grants.
+    for (const uid of new Set([...before.map((r) => r.user_id), ...grants.map((g) => g.id)])) closeUserExecSessions(uid)
     return `Access to "${env.name}" updated`
   })
 }

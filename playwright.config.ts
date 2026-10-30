@@ -3,6 +3,8 @@ import path from "node:path"
 import { defineConfig, devices } from "@playwright/test"
 
 const PORT = Number(process.env.E2E_PORT ?? 3100)
+// The fake OpenID provider tests/e2e/sso.spec.ts starts (tests/helpers/fake-oidc.ts).
+const OIDC_PORT = Number(process.env.E2E_OIDC_PORT ?? PORT + 1)
 // Point at an already running, freshly set up Gantry instead of starting one.
 const external = process.env.E2E_BASE_URL
 const baseURL = external ?? `http://127.0.0.1:${PORT}`
@@ -69,6 +71,14 @@ export default defineConfig({
           UPDATE_CHECK_INTERVAL_HOURS: "0",
           // git-stacks.spec.ts serves its repository over http on 127.0.0.1.
           GANTRY_TEST_ALLOW_HTTP_GIT: "1",
+          // Single sign-on against the fake provider sso.spec.ts runs on OIDC_PORT;
+          // nothing contacts it until a test clicks "Sign in with SSO".
+          GANTRY_URL: baseURL,
+          OIDC_ISSUER: `http://127.0.0.1:${OIDC_PORT}`,
+          OIDC_CLIENT_ID: "gantry-e2e",
+          OIDC_CLIENT_SECRET: "gantry-e2e-oidc-secret",
+          OIDC_AUTO_CREATE: "true",
+          OIDC_ADMIN_GROUPS: "gantry-admins",
         },
       },
 })

@@ -7,7 +7,8 @@ import { NoEnvironment, WrongEnvironmentKind } from "@/components/gantry/ui"
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { requireUser, type CurrentUser } from "@/lib/server/auth/dal"
 import type { Environment } from "@/lib/server/db/schema"
-import { getCurrentEnvironment } from "@/lib/server/environments"
+import type { Permissions } from "@/lib/permissions"
+import { getCurrentEnvironment, getPermissions } from "@/lib/server/environments"
 import { selectedNamespace } from "@/lib/server/kubernetes"
 import { kube, type KubeApi } from "@/lib/server/kubernetes/api"
 import { KubeError } from "@/lib/server/kubernetes/client"
@@ -15,6 +16,8 @@ import { kubeTarget } from "@/lib/server/kubernetes/target"
 
 export type KubePage = {
   user: CurrentUser
+  /** What the user may do in this cluster (lib/permissions.ts). */
+  can: Permissions
   env: Environment
   api: KubeApi
   /** Selected namespace, null = all. */
@@ -36,7 +39,7 @@ export async function loadKubePage(): Promise<{ page: KubePage; blocked?: never 
   }
   if (env.type !== "kubernetes") return { blocked: <WrongEnvironmentKind kind="docker" /> }
   try {
-    return { page: { user, env, api: kube(kubeTarget(env)), namespace: await selectedNamespace(env) } }
+    return { page: { user, can: await getPermissions(), env, api: kube(kubeTarget(env)), namespace: await selectedNamespace(env) } }
   } catch (err) {
     if (err instanceof KubeError) return { blocked: <KubeUnavailable message={err.message} /> }
     throw err

@@ -12,6 +12,7 @@ import { templates } from "@/lib/server/db/migrations/007_templates"
 import { notifications } from "@/lib/server/db/migrations/008_notifications"
 import { kubernetes } from "@/lib/server/db/migrations/009_kubernetes"
 import { proxy } from "@/lib/server/db/migrations/010_proxy"
+import { auth } from "@/lib/server/db/migrations/011_auth"
 import { gitStacks } from "@/lib/server/db/migrations/013_git_stacks"
 
 // One file per migration, written with Kysely's schema builder only so the
@@ -28,7 +29,8 @@ const migrations: Record<string, Migration> = {
   "008_notifications": notifications,
   "009_kubernetes": kubernetes,
   "010_proxy": proxy,
-  // 011 and 012 are taken by other branches.
+  "011_auth": auth,
+  // 012 was reserved for Kubernetes and not needed.
   "013_git_stacks": gitStacks,
 }
 

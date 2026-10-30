@@ -13,17 +13,20 @@ export function checkRateLimit(key: string, limit: number): number {
   return bucket.count >= limit ? Math.ceil((bucket.resetAt - now) / 1000) : 0
 }
 
-export function recordFailure(key: string, windowMs: number) {
+/** Counts a failure; returns the number of failures in the current window. */
+export function recordFailure(key: string, windowMs: number): number {
   const now = Date.now()
-  const bucket = buckets.get(key)
+  let bucket = buckets.get(key)
   if (!bucket || bucket.resetAt <= now) {
-    buckets.set(key, { count: 1, resetAt: now + windowMs })
+    bucket = { count: 1, resetAt: now + windowMs }
+    buckets.set(key, bucket)
   } else {
     bucket.count++
   }
   if (buckets.size > 10_000) {
     for (const [k, b] of buckets) if (b.resetAt <= now) buckets.delete(k)
   }
+  return bucket.count
 }
 
 export function clearFailures(key: string) {

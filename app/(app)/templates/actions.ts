@@ -6,10 +6,10 @@ import { z } from "zod"
 
 import { customTemplateId, customTemplateKey, checkVariables, generatePassword, mergeVariables, renderDotenv, templateDefaultsFromEnv } from "@/lib/templates"
 import { composeContainerName, composeServicePorts } from "@/lib/compose-ports"
+import { ENVIRONMENT_FIELD } from "@/lib/permissions"
 import { checkHost, type ProxyHost } from "@/lib/proxy"
-import { runAction, UserError } from "@/lib/server/action"
+import { authorize, expectedEnvironment, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
-import { getCurrentUser } from "@/lib/server/auth/dal"
 import { applyProxy, getProxySettings, listProxyHosts, saveProxyHost } from "@/lib/server/proxy"
 import { getStack } from "@/lib/server/stacks"
 import { createStackInCurrentEnvironment } from "@/lib/server/stacks/create"
@@ -60,9 +60,10 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
   let expose: Omit<ProxyHost, "enabled"> | null = null
   let environmentId: number | null = null
   if (values.domains.trim() && name.success) {
-    // Checking the domains reads the stored proxy hosts: authorize first.
-    if ((await getCurrentUser())?.role !== "admin") return { error: "Only administrators can do this." }
-    const environment = await getCurrentEnvironment()
+    // Checking the domains reads the stored proxy hosts: authorize first (same scope as the deploy).
+    const auth = await authorize(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))))
+    if ("error" in auth) return { error: auth.error, values }
+    const environment = auth.environment
     if (!environment) return { error: "No Docker environment configured" }
     environmentId = environment.id
     const [service = "", port = ""] = values.expose.split(":")
@@ -83,7 +84,9 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
 
   const env = renderDotenv(template.variables, check.values)
   let createdId = 0
-  const res = await runAction("admin", "template.deploy", `${template.title} → ${name.data}`, async (ctx) => {
+  // Deploying is a stack in the current environment: managers can; editing templates is global (admins).
+  const scope = inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD)))
+  const res = await runAction(scope, "template.deploy", `${template.title} → ${name.data}`, async (ctx) => {
     createdId = await createStackInCurrentEnvironment(ctx, {
       name: name.data,
       compose: template.compose,

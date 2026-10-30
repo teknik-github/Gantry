@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { createStack, updateStack } from "@/app/(app)/stacks/actions"
 import { updateGitStackEnv } from "@/app/(app)/stacks/git-actions"
+import { EnvironmentField } from "@/components/gantry/environment-scope"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -54,6 +55,7 @@ export function StackEditor({
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
+      <EnvironmentField />
       {stack ? <input type="hidden" name="id" value={stack.id} /> : null}
       <FieldGroup>
         {isNew ? (

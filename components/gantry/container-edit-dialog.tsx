@@ -5,6 +5,7 @@ import { CloudDownloadIcon, PencilIcon, TriangleAlertIcon } from "lucide-react"
 
 import { editContainer, pullAndRecreateContainer } from "@/app/(app)/containers/recreate-actions"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
+import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -205,6 +206,7 @@ export function PullRecreateConfirm({
   onDone?: (newId: string) => void
   children?: React.ReactNode
 }) {
+  const environmentId = useEnvironmentId()
   return (
     <ConfirmAction
       open={open}
@@ -220,7 +222,7 @@ export function PullRecreateConfirm({
       confirmLabel="Pull & recreate"
       destructive={false}
       onConfirm={async () => {
-        const res = await pullAndRecreateContainer(id)
+        const res = await pullAndRecreateContainer(id, environmentId)
         if (res.ok && res.containerId && res.containerId !== id) onDone?.(res.containerId)
         return res
       }}

@@ -39,6 +39,20 @@ services:
       METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-7}
       # Image update checks against the registries (hours; 0 = on demand only).
       UPDATE_CHECK_INTERVAL_HOURS: ${UPDATE_CHECK_INTERVAL_HOURS:-6}
+      # Public URL (OIDC callback: $GANTRY_URL/auth/oidc/callback).
+      GANTRY_URL: ${GANTRY_URL:-}
+      # Single sign-on (OpenID Connect); off unless issuer and client id are set.
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      OIDC_AUTO_CREATE: ${OIDC_AUTO_CREATE:-false}
+      OIDC_ADMIN_GROUPS: ${OIDC_ADMIN_GROUPS:-}
+      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-}
+      OIDC_USERNAME_CLAIM: ${OIDC_USERNAME_CLAIM:-}
+      # "admins": with SSO on, only administrators may sign in with a password (break-glass).
+      PASSWORD_LOGIN: ${PASSWORD_LOGIN:-all}
     # Group that owns /var/run/docker.sock on the host: stat -c '%g' /var/run/docker.sock
     group_add:
       - "${DOCKER_GID:-999}"

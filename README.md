@@ -42,7 +42,10 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
   and keys only), warning events, **Helm releases** (values, manifest,
   uninstall) and **Apply manifest** (multi-document YAML, server-side apply);
   pages update live from Kubernetes watches
-- Users with `admin` / `user` roles, plus an activity log
+- Users: global `admin` / standard roles plus **per-environment roles**
+  (viewer, operator, manager), and an activity log
+- **Two-factor authentication** (TOTP authenticator apps, recovery codes),
+  **single sign-on** (OpenID Connect) and personal **API tokens** for scripts
 - Database: **SQLite** (default) or **MySQL**, chosen with `DB_DRIVER`
 
 ## Run with Docker Compose
@@ -88,7 +91,8 @@ pnpm test:e2e    # E2E (Playwright) against a production build
 ```
 
 `pnpm test:e2e` builds the app, starts the standalone server on port 3100 with
-a fresh SQLite database, and runs the login suite first (it creates the admin
+a fresh SQLite database (single sign-on pointed at a fake OpenID provider that
+`tests/e2e/sso.spec.ts` starts on the next port, `E2E_OIDC_PORT`), and runs the login suite first (it creates the admin
 the other suites use). The Docker-backed suites (console, stacks, recreate,
 topology, live updates, environments) create throwaway `gantry-test-*`
 containers/networks/volumes labelled `gantry.e2e=true` and remove them
@@ -152,6 +156,16 @@ against the same throwaway cluster.
 | `METRICS_INTERVAL_SECONDS` | `60` | How often the dashboard history is sampled (minimum 10) |
 | `METRICS_RETENTION_DAYS` | `7` | How long history is kept |
 | `UPDATE_CHECK_INTERVAL_HOURS` | `6` | How often registries are asked about newer images (`0` = only on demand) |
+| `GANTRY_URL` | | Public URL of Gantry (e.g. `https://gantry.example.com`); the OIDC callback is `$GANTRY_URL/auth/oidc/callback` |
+| `OIDC_ISSUER` | | OpenID provider (issuer URL); single sign-on is off unless this and `OIDC_CLIENT_ID` are set |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | Client registered at the provider (confidential client; the secret is optional for public clients, PKCE is always used) |
+| `OIDC_REDIRECT_URL` | `$GANTRY_URL/auth/oidc/callback` | Callback URL, if it differs |
+| `OIDC_SCOPES` | `openid profile email` | Requested scopes (`openid` is always added) |
+| `OIDC_AUTO_CREATE` | `false` | `true`: the first SSO login of an unknown identity creates a standard user |
+| `OIDC_ADMIN_GROUPS` | | Comma-separated groups whose members are administrators; when set, the role follows the claim on every SSO login |
+| `OIDC_GROUPS_CLAIM` | `groups` | Claim holding the groups (ID token, or userinfo if absent there) |
+| `OIDC_USERNAME_CLAIM` | `preferred_username` | Claim used for new usernames (then the email's local part, then the name) |
+| `PASSWORD_LOGIN` | `all` | `admins`: with SSO configured, only administrators may use the password form (break-glass access) |
 
 ## Features in more detail
 
@@ -385,8 +399,93 @@ its services (pick the service and port, a domain and the TLS mode).
   them again. The private key is never shown again after saving.
 - Administrators can use every environment. Standard users only see the
   environments granted to them (Users page, or an environment's Access
-  dialog). New users and environments start without grants; existing standard
-  users kept access to all existing environments when this was introduced.
+  dialog), with a role per environment (see [Roles](#roles-and-permissions)).
+  New users and environments start without grants; existing standard users
+  kept access to all existing environments when this was introduced, and
+  those grants became `operator` when roles were added (what they allowed).
+  Promoting a user to administrator drops their grants, so a later demotion
+  starts from no access.
+
+### Roles and permissions
+
+Global roles: **administrators** manage Gantry itself (users, environments,
+registries, notifications, templates, the auto-update schedule, the activity
+log) and have every right in every environment. **Standard users** only work
+in environments they were given, with one of these roles each:
+
+| | viewer | operator | manager |
+| --- | :-: | :-: | :-: |
+| Lists, details, dashboard, resource usage, live updates | ✓ | ✓ | ✓ |
+| Start / stop / restart / pause / kill containers, rollout restart (Kubernetes) | | ✓ | ✓ |
+| Container and pod logs, image update checks | | ✓ | ✓ |
+| Create / remove / prune containers, images, volumes, networks | | | ✓ |
+| Container environment variable values, edit & recreate, pull & recreate, console | | | ✓ |
+| Stacks (create, edit, deploy, start/stop, delete), deploy templates | | | ✓ |
+| Proxy, per-container auto-update | | | ✓ |
+| Kubernetes: scale, delete, namespaces, apply manifests | | | ✓ |
+| Import external compose projects, save a stack as template, users, environments, registries, notifications, auto-update schedule | | | admins |
+
+Every Server Action and route handler checks the role for the **current**
+environment on the server (`lib/server/action.ts` `authorize()`,
+`lib/server/api-auth.ts`); hiding buttons is only a convenience. Pages send
+the id of the environment they were rendered for, and an action is refused
+("switched in another tab") when the selected environment changed since.
+
+### Two-factor authentication
+
+On the Account page, *Set up two-factor* asks for the password, shows a QR
+code (and the key) for any TOTP app (SHA-1, 30 s, 6 digits) and turns on once
+a code is confirmed. Ten one-time recovery codes are shown once (stored as
+SHA-256 hashes); they can be regenerated with password + code. The secret is
+stored encrypted and never sent again. Login then has a second step: a code
+(one step of clock drift either way, each step accepted once) or a recovery
+code, rate-limited like passwords. Turning it off needs the password and a
+code; administrators can reset a user's 2FA on the Users page (audited, signs
+the user out everywhere). SSO logins skip it: the identity provider handles MFA.
+
+### Single sign-on (OpenID Connect)
+
+Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `GANTRY_URL`,
+and register `$GANTRY_URL/auth/oidc/callback` as redirect URI at the
+provider (Keycloak, Authentik, Entra ID, Google...). The login page then shows
+*Sign in with SSO*: authorization code flow with PKCE (S256), `state` and
+`nonce`, endpoints from `/.well-known/openid-configuration`, and the ID token
+verified against the provider's JWKS (issuer, audience, expiry, nonce).
+
+- Users are linked by issuer + subject only, never by username or email. With
+  `OIDC_AUTO_CREATE=true` an unknown identity gets a new standard user (a
+  free username from the claims, no password); otherwise it is refused.
+  Existing local users link their account themselves on the Account page
+  (*Link SSO account*, while signed in).
+- Administrator rights come only from `OIDC_ADMIN_GROUPS`: when set, the role
+  follows the groups claim at every SSO login (the last administrator is never
+  demoted). Environment roles are still granted in Gantry.
+- `PASSWORD_LOGIN=admins` reserves the password form for local administrators,
+  as break-glass access when the provider is down; everyone else must use SSO.
+
+### API tokens
+
+Personal tokens for scripts, created on the Account page (name, expiry 30/90/365
+days or never). The token (`gtk_` + 43 characters) is shown once; only its
+SHA-256 hash is stored, with the last use. Tokens act with the user's current
+permissions on `/api/*` route handlers only; they never open pages or run
+Server Actions, and the console refuses them. Revoked or expired tokens get
+`401`. Pick the environment with `X-Gantry-Environment: <id>` (default: the
+first one the user may use).
+
+```bash
+TOKEN=gtk_...
+# Containers of an environment (read-only JSON; any role)
+curl -H "Authorization: Bearer $TOKEN" -H "X-Gantry-Environment: 1" https://gantry.example.com/api/v1/containers
+# Live CPU/memory of running containers (any role)
+curl -H "Authorization: Bearer $TOKEN" https://gantry.example.com/api/stats
+# Recorded usage history: range=1h|24h|7d (any role)
+curl -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/metrics?range=24h"
+# Docker events as Server-Sent Events (any role)
+curl -N -H "Authorization: Bearer $TOKEN" https://gantry.example.com/api/events
+# Last 200 log lines of a container (operator or manager)
+curl -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/containers/<id>/logs?tail=200"
+```
 
 ### Kubernetes environments
 
@@ -494,24 +593,48 @@ image pull secrets).
 ## Security model
 
 - `proxy.ts` sits in front of everything. Every `/api/*` route needs a valid
-  signed session (anything else gets `401`, including unknown routes), and
-  only `/api/health` is public — plus `POST` (only) to exactly
-  `/api/webhooks/stacks/<32-character id>`, which authenticates each delivery
-  with the stack's webhook secret, refuses bodies over 1 MB, is limited to 30
-  deliveries per minute per webhook and audits every delivery. Pages without
-  a session redirect to `/login`.
+  signed session or a well-formed API token (anything else gets `401`,
+  including unknown routes), and only `/api/health` is public — plus `POST`
+  (only) to exactly `/api/webhooks/stacks/<32-character id>`, which
+  authenticates each delivery with the stack's webhook secret, refuses bodies
+  over 1 MB, is limited to 30 deliveries per minute per webhook and audits
+  every delivery. Pages without a session redirect to `/login`; `/auth/*` (SSO
+  and clearing stale cookies) is reachable without one.
 - Route handlers and Server Actions re-check the user against the database,
-  so deleted users and role changes take effect immediately.
-- Passwords are hashed with scrypt. Failed logins are limited per account
-  (10 per 5 minutes, regardless of client address) and, with `TRUST_PROXY=true`,
-  per client address too. Forwarding headers are ignored unless trusted.
-- Standard users can view resources and start/stop/restart containers.
-  Creating and removing things, and managing users and environments, is
-  limited to administrators. Container environment variable values are
-  shown to administrators only.
-- The console (`/api/exec/*`) is admin-only. Sessions are bound to the user
-  who opened them, use unguessable ids, are audited, and close when the page
-  is left or nobody reads them for 20 seconds.
+  so deleted users and role changes take effect immediately. API tokens are
+  only honoured on `/api/*` route handlers: `proxy.ts` marks such requests
+  with a header derived from the secret (stripping any copy the client sent)
+  and Server Actions are never token-authenticated, so the cookie's SameSite
+  protection and Next's origin check still guard every mutation.
+- Sessions carry a per-user version; *Sign out everywhere*, changing or
+  resetting a password, enabling/disabling/resetting 2FA and changing a role
+  bump it, which ends every other session (and open consoles) at once.
+- Passwords are hashed with scrypt, at most two verifications run at once
+  (excess attempts are refused), so a flood of logins can't exhaust the CPU.
+  Failed logins are limited per account (10 per 5 minutes, regardless of
+  client address) and, with `TRUST_PROXY=true`, per client address too.
+  A browser that completed a login before holds a signed device cookie and
+  counts against its own bucket, so someone hammering an account can't lock
+  its owner out. Failed attempts are audited once per window (and never with
+  a username that doesn't exist, which may be a mistyped password).
+- Two-factor codes: 5 failures per 5 minutes per account, constant-time
+  comparison, each time step accepted once. The state between password and
+  code is a signed 5-minute cookie, not a session.
+- Permissions per environment: see [Roles and permissions](#roles-and-permissions).
+  Container environment variable values are shown to managers and
+  administrators only.
+- The console (`/api/exec/*`) needs the manager role in the environment it
+  runs in, re-checked on every request; it refuses API tokens. Sessions are
+  bound to the user who opened them, use unguessable ids, are audited, close
+  when the page is left or nobody reads them for 20 seconds, and are closed
+  when the user's role or access changes.
+- The "at least one administrator" rule is enforced atomically (row locks on
+  MySQL), so two admins demoting or deleting each other can't leave none.
+- `next=` after login only accepts same-origin paths (no `//`, backslashes,
+  control characters or whitespace).
+- Secrets never reach the browser after they were entered: TOTP secrets after
+  enrolment, API tokens after creation, the OIDC client secret, registry and
+  TLS credentials.
 - A fresh instance can only be claimed with the setup token from the server
   log / data directory; it is deleted once the admin exists.
 - Access to the Docker socket is equivalent to root on the host, and a

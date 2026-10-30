@@ -13,7 +13,7 @@ import {
   WORKLOAD_KINDS,
   type WorkloadKind,
 } from "@/lib/kubernetes/names"
-import { runAction, UserError } from "@/lib/server/action"
+import { inEnvironment, runAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
 import { getCurrentUser } from "@/lib/server/auth/dal"
 import type { ApplyResult } from "@/lib/server/kubernetes/api"
@@ -23,7 +23,8 @@ import { fieldErrors, type ActionState } from "@/lib/validation"
 
 // Every action names the environment the page was rendered for; getKube()
 // refuses if the current one differs (switched in another tab), so nothing
-// lands on the wrong cluster.
+// lands on the wrong cluster. Restarting a workload is an operator action
+// (like restarting a container); everything else needs the manager role.
 
 const envIdSchema = z.number().int().positive()
 const objectSchema = z.object({
@@ -73,7 +74,7 @@ export async function scaleWorkload(ref: WorkloadRef, replicas: number): Promise
   const n = z.number().int().min(0).max(MAX_REPLICAS).safeParse(replicas)
   if (!n.success) return { error: `Replicas must be a whole number from 0 to ${MAX_REPLICAS}` }
 
-  return runAction("admin", "kubernetes.scale", `${label(w)} → ${n.data}`, async () => {
+  return runAction(inEnvironment("manage", w.environmentId), "kubernetes.scale", `${label(w)} → ${n.data}`, async () => {
     const { api } = await getKube(w.environmentId)
     await api.scaleWorkload(w.kind, w.namespace, w.name, n.data)
     return `${w.name} scaled to ${n.data}`
@@ -83,7 +84,7 @@ export async function scaleWorkload(ref: WorkloadRef, replicas: number): Promise
 export async function restartWorkload(ref: WorkloadRef): Promise<ActionState> {
   const w = parseRef(workloadSchema, ref)
   if (!w) return { error: "Invalid workload" }
-  return runAction("admin", "kubernetes.restart", label(w), async () => {
+  return runAction(inEnvironment("operate", w.environmentId), "kubernetes.restart", label(w), async () => {
     const { api } = await getKube(w.environmentId)
     await api.restartWorkload(w.kind, w.namespace, w.name)
     return `Restarting ${w.name}`
@@ -93,7 +94,7 @@ export async function restartWorkload(ref: WorkloadRef): Promise<ActionState> {
 export async function deleteWorkload(ref: WorkloadRef): Promise<ActionState> {
   const w = parseRef(workloadSchema, ref)
   if (!w) return { error: "Invalid workload" }
-  return runAction("admin", "kubernetes.delete", label(w), async () => {
+  return runAction(inEnvironment("manage", w.environmentId), "kubernetes.delete", label(w), async () => {
     const { api } = await getKube(w.environmentId)
     await api.deleteWorkload(w.kind, w.namespace, w.name)
     return `${w.kind} ${w.name} deleted`
@@ -103,7 +104,7 @@ export async function deleteWorkload(ref: WorkloadRef): Promise<ActionState> {
 export async function deletePod(ref: ObjectRef): Promise<ActionState> {
   const p = parseRef(objectSchema, ref)
   if (!p) return { error: "Invalid pod" }
-  return runAction("admin", "kubernetes.delete", label({ ...p, kind: "Pod" }), async () => {
+  return runAction(inEnvironment("manage", p.environmentId), "kubernetes.delete", label({ ...p, kind: "Pod" }), async () => {
     const { api } = await getKube(p.environmentId)
     await api.deletePod(p.namespace, p.name)
     return `Pod ${p.name} deleted`
@@ -118,7 +119,7 @@ export async function createNamespace(_prev: ActionState, formData: FormData): P
   if (!parsed.success) return fieldErrors(parsed.error)
   const { environment, name } = parsed.data
 
-  return runAction("admin", "kubernetes.namespace.create", name, async () => {
+  return runAction(inEnvironment("manage", environment), "kubernetes.namespace.create", name, async () => {
     const { api } = await getKube(environment)
     try {
       await api.createNamespace(name)
@@ -135,7 +136,7 @@ export async function deleteNamespace(environmentId: number, name: string): Prom
   if (!parsed.success) return { error: "Invalid namespace" }
   if (PROTECTED_NAMESPACES.has(parsed.data.name)) return { error: `The ${parsed.data.name} namespace can't be deleted` }
 
-  return runAction("admin", "kubernetes.namespace.delete", parsed.data.name, async () => {
+  return runAction(inEnvironment("manage", parsed.data.environmentId), "kubernetes.namespace.delete", parsed.data.name, async () => {
     const { api } = await getKube(parsed.data.environmentId)
     await api.deleteNamespace(parsed.data.name)
     return `Deleting namespace ${parsed.data.name} and everything in it`
@@ -147,7 +148,7 @@ export type ApplyState = ActionState & { results?: ApplyResult[] }
 /**
  * Server-side apply of a multi-document manifest into a namespace. The
  * manifest is echoed back in `values` (it may contain Secrets, but only the
- * administrator who submitted it sees it); results carry no object content.
+ * user who submitted it sees it); results carry no object content.
  */
 export async function applyManifest(_prev: ApplyState, formData: FormData): Promise<ApplyState> {
   const parsed = z
@@ -174,7 +175,7 @@ export async function applyManifest(_prev: ApplyState, formData: FormData): Prom
   let results: ApplyResult[] = []
   const summary = manifest.objects.map((o) => `${o.kind}/${o.name}`).join(", ")
   const res = await runAction(
-    "admin",
+    inEnvironment("manage", v.environment),
     v.dry_run ? "kubernetes.apply.dry-run" : "kubernetes.apply",
     `${v.namespace}: ${summary}`.slice(0, 250),
     async ({ user }) => {

@@ -529,7 +529,7 @@ test("a standard user with a read-only token can look but not change", async ({ 
   await expect(viewer.getByTestId("kube-error")).toContainText("forbidden")
   await expect(viewer.getByRole("button", { name: "Create namespace" })).toHaveCount(0)
   await viewer.goto("/kubernetes/apply")
-  await expect(viewer.getByText("Only administrators can apply manifests.")).toBeVisible()
+  await expect(viewer.getByText("Applying manifests needs the manager role in this environment.")).toBeVisible()
   await context.close()
 
   await page.goto("/environments")

@@ -4,18 +4,21 @@ import { ArrowLeftIcon } from "lucide-react"
 
 import { StackEditor } from "@/components/gantry/stack-editor"
 import { GitStackForm } from "@/components/gantry/stack-git"
-import { DockerUnavailable, PageBody } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { requireAdmin } from "@/lib/server/auth/dal"
+import { requirePermission } from "@/lib/server/action"
 import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
 import { getCurrentEnvironment } from "@/lib/server/environments"
 
 export const metadata: Metadata = { title: "New stack" }
 
 export default async function NewStackPage() {
-  await requireAdmin()
+  const user = await requirePermission("manage")
+  // Git stacks store repository credentials: global administrators only.
+  const canUseGit = user.role === "admin"
   const env = await getCurrentEnvironment()
 
   return (
@@ -39,7 +42,7 @@ export default async function NewStackPage() {
           <Tabs defaultValue="editor">
             <TabsList>
               <TabsTrigger value="editor">Web editor</TabsTrigger>
-              <TabsTrigger value="git">Git repository</TabsTrigger>
+              {canUseGit ? <TabsTrigger value="git">Git repository</TabsTrigger> : null}
             </TabsList>
             <TabsContent value="editor">
               <Card>
@@ -48,13 +51,15 @@ export default async function NewStackPage() {
                 </CardContent>
               </Card>
             </TabsContent>
-            <TabsContent value="git">
-              <Card>
-                <CardContent>
-                  <GitStackForm />
-                </CardContent>
-              </Card>
-            </TabsContent>
+            {canUseGit ? (
+              <TabsContent value="git">
+                <Card>
+                  <CardContent>
+                    <GitStackForm />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            ) : null}
           </Tabs>
         </div>
       ) : (

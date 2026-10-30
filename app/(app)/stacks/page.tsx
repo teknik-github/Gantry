@@ -6,10 +6,11 @@ import {
   type ExternalProjectRow,
   type StackRow,
 } from "@/components/gantry/stacks-table"
-import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { timeAgo } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { groupByProject, listStacks } from "@/lib/server/stacks"
 import { gitStackIds } from "@/lib/server/stacks/git-records"
 import { summarizeProject } from "@/lib/server/stacks/views"
@@ -21,7 +22,7 @@ export const metadata: Metadata = { title: "Stacks" }
 
 export default async function StacksPage() {
   const user = await requireUser()
-  const isAdmin = user.role === "admin"
+  const can = await getPermissions()
   const env = await getCurrentEnvironment()
   if (!env) {
     return (
@@ -95,14 +96,15 @@ export default async function StacksPage() {
         }.`}
       />
       {result.error !== undefined ? <DockerUnavailable message={result.error} /> : null}
-      <StacksTable data={rows} isAdmin={isAdmin} />
+      <StacksTable data={rows} canManage={can.manage} />
       {result.error === undefined ? (
         <>
           <PageHeader
             title="External projects"
             description="Compose projects running on this environment that Gantry doesn't manage (read-only)."
           />
-          <ExternalProjectsTable data={external} isAdmin={isAdmin} />
+          {/* Importing reads a file path named by container labels: administrators only. */}
+          <ExternalProjectsTable data={external} canImport={user.role === "admin"} />
         </>
       ) : null}
     </PageBody>

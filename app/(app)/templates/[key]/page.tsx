@@ -5,13 +5,14 @@ import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react"
 
 import { TemplateAdminActions } from "@/components/gantry/template-admin-actions"
 import { TemplateDeployForm } from "@/components/gantry/template-deploy-form"
-import { DockerUnavailable, PageBody } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { requireUser } from "@/lib/server/auth/dal"
 import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
-import { getCurrentEnvironment } from "@/lib/server/environments"
+import { getCurrentEnvironment, getPermissions } from "@/lib/server/environments"
 import { getTemplate } from "@/lib/server/templates"
 import { composeServicePorts } from "@/lib/compose-ports"
 import { getProxySettings } from "@/lib/server/proxy"
@@ -28,6 +29,8 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
   const isAdmin = user.role === "admin"
   const env = await getCurrentEnvironment()
   const proxyMode = env ? (await getProxySettings(env.id)).settings.mode : "off"
+  // Deploying creates a stack in the current environment; editing templates is global.
+  const canDeploy = (await getPermissions()).manage
 
   return (
     <PageBody>
@@ -66,7 +69,7 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
       </div>
 
       <div className="grid gap-4 px-4 lg:px-6 @5xl/main:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        {isAdmin ? (
+        {canDeploy ? (
           env && env.type !== "kubernetes" ? (
             <Card>
               <CardHeader>
@@ -93,7 +96,7 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
           <Card>
             <CardHeader>
               <CardTitle>Deploy</CardTitle>
-              <CardDescription>Only administrators can deploy templates.</CardDescription>
+              <CardDescription>Deploying a template needs the manager role in this environment.</CardDescription>
             </CardHeader>
           </Card>
         )}

@@ -6,7 +6,8 @@ import { refresh } from "next/cache"
 import { redirect } from "next/navigation"
 import { z } from "zod"
 
-import { runAction, UserError } from "@/lib/server/action"
+import { ENVIRONMENT_FIELD } from "@/lib/permissions"
+import { expectedEnvironment, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
 import {
   CONFIG_FILES_LABEL,
@@ -20,7 +21,8 @@ import {
   updateStackContent,
   WORKING_DIR_LABEL,
 } from "@/lib/server/stacks"
-import { auditName, currentEnvironmentId, loadStack, operate } from "@/lib/server/stacks/action-helpers"
+import { auditName, loadStack, operate } from "@/lib/server/stacks/action-helpers"
+import { getCurrentEnvironment } from "@/lib/server/environments"
 import { createStackInCurrentEnvironment } from "@/lib/server/stacks/create"
 import { getStackGit } from "@/lib/server/stacks/git-records"
 import { shortSha } from "@/lib/git-stacks"
@@ -64,7 +66,7 @@ export async function createStack(_prev: ActionState, formData: FormData): Promi
   }
 
   let createdId = 0
-  const res = await runAction("admin", "stack.create", name.data, async (ctx) => {
+  const res = await runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), "stack.create", name.data, async (ctx) => {
     createdId = await createStackInCurrentEnvironment(ctx, { name: name.data, compose, env, deploy })
     return `Stack ${name.data} created`
   })
@@ -87,7 +89,7 @@ export async function updateStack(_prev: ActionState, formData: FormData): Promi
   if (Object.keys(fieldErrors).length) return { error: "Please fix the highlighted fields", fieldErrors, values }
 
   // runAction audits the deploy; the save is audited separately so it's recorded even if the deploy fails.
-  const res = await runAction("admin", deploy ? "stack.deploy" : "stack.update", await auditName(id.data), async (ctx) => {
+  const res = await runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), deploy ? "stack.deploy" : "stack.update", await auditName(id.data), async (ctx) => {
     const stack = await loadStack(id.data)
     if (await getStackGit(stack.id)) throw new UserError("This stack's compose file comes from its Git repository")
     await updateStackContent(stack.id, compose, env)
@@ -114,14 +116,15 @@ const operationSchema = z.object({
 export async function stackOperation(
   id: number,
   op: StackOperation,
-  opts: { removeVolumes?: boolean; force?: boolean } = {}
+  opts: { removeVolumes?: boolean; force?: boolean } = {},
+  environmentId?: number
 ): Promise<ActionState> {
   const parsed = operationSchema.safeParse({ id, op, removeVolumes: opts.removeVolumes, force: opts.force })
   if (!parsed.success) return { error: "Invalid request" }
   const { removeVolumes, force } = parsed.data
 
   const target = `${await auditName(parsed.data.id)}${removeVolumes ? " (with volumes)" : ""}${force ? " (forced)" : ""}`
-  return runAction("admin", `stack.${parsed.data.op}`, target, async (ctx) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), `stack.${parsed.data.op}`, target, async (ctx) => {
     const stack = await loadStack(parsed.data.id)
     const run = await operate(stack, parsed.data.op, ctx, { removeVolumes: removeVolumes === true, force: force === true })
     if (run.skipped) return `${stack.name} is already at ${shortSha(run.commit?.sha)} with the same .env; nothing to redeploy`
@@ -131,12 +134,16 @@ export async function stackOperation(
 }
 
 /** Takes the stack down (optionally with its volumes), then forgets it. */
-export async function deleteStack(id: number, opts: { removeVolumes?: boolean } = {}): Promise<ActionState> {
+export async function deleteStack(
+  id: number,
+  opts: { removeVolumes?: boolean } = {},
+  environmentId?: number
+): Promise<ActionState> {
   const parsed = idSchema.safeParse(id)
   if (!parsed.success) return { error: "Invalid stack" }
 
   const target = `${await auditName(parsed.data)}${opts.removeVolumes ? " (with volumes)" : ""}`
-  return runAction("admin", "stack.delete", target, async (ctx) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "stack.delete", target, async (ctx) => {
     const stack = await loadStack(parsed.data)
     const api = await ctx.docker()
     let run
@@ -170,7 +177,9 @@ export async function deleteStack(id: number, opts: { removeVolumes?: boolean } 
 /**
  * Creates a stack record for a compose project that was started outside
  * Gantry, from the compose file recorded in its container labels. Only works
- * when that file is readable from where Gantry runs.
+ * when that file is readable from where Gantry runs. Administrators only:
+ * it reads a path named by container labels, which anyone who can create
+ * containers controls.
  */
 export async function importProject(project: string): Promise<ActionState> {
   const name = stackNameSchema.safeParse(project)

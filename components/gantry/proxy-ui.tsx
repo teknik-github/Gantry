@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { deleteHost, reapplyProxy, saveHost, saveSettings, setHostEnabled } from "@/app/(app)/proxy/actions"
 import { columnHelperFor, DataTable } from "@/components/data-table"
+import { EnvironmentField, useEnvironmentId } from "@/components/gantry/environment-scope"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono, StateBadge } from "@/components/gantry/ui"
@@ -65,6 +66,7 @@ export function ProxySettingsCard({
   const values = state.values ?? {}
   const errs = state.fieldErrors ?? {}
   const [mode, setMode] = React.useState<ProxyMode>((values.mode as ProxyMode) || settings.mode)
+  const environmentId = useEnvironmentId()
   const [reapplying, run] = useRunAction()
   const uid = React.useId()
 
@@ -105,6 +107,7 @@ export function ProxySettingsCard({
           ) : null}
           {/* No automatic form reset: Radix Select/Checkbox would jump back to their first values. */}
           <form method="post" onSubmit={submitKeepingValues(formAction)} className="flex flex-col gap-4">
+            <EnvironmentField />
             <FieldGroup className="gap-4">
               <Field className="max-w-sm">
                 <FieldLabel htmlFor={`${uid}-mode`}>Mode</FieldLabel>
@@ -174,7 +177,7 @@ export function ProxySettingsCard({
                 {pending ? "Applying…" : "Save & apply"}
               </Button>
               {settings.mode !== "off" ? (
-                <Button type="button" variant="outline" disabled={reapplying} onClick={() => run(reapplyProxy)}>
+                <Button type="button" variant="outline" disabled={reapplying} onClick={() => run(() => reapplyProxy(environmentId))}>
                   <RefreshCwIcon data-icon="inline-start" />
                   Re-apply
                 </Button>
@@ -202,7 +205,7 @@ export type ProxyHostRow = {
 
 const helper = columnHelperFor<ProxyHostRow>()
 
-function buildColumns(mode: ProxyMode, containers: ContainerOption[]) {
+function buildColumns(mode: ProxyMode, containers: ContainerOption[], environmentId: number | undefined) {
   return helper.columns([
     helper.accessor((r) => r.domains.join(" "), {
       id: "domains",
@@ -277,7 +280,7 @@ function buildColumns(mode: ProxyMode, containers: ContainerOption[]) {
             title={`Remove ${row.original.domains[0]}?`}
             description="The proxy stops serving these domains. The container isn't touched."
             confirmLabel="Remove"
-            onConfirm={() => deleteHost(row.original.id)}
+            onConfirm={() => deleteHost(row.original.id, environmentId)}
           >
             <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Remove ${row.original.domains[0]}`}>
               <Trash2Icon />
@@ -298,7 +301,8 @@ export function ProxyHostsTable({
   mode: ProxyMode
   containers: ContainerOption[]
 }) {
-  const columns = React.useMemo(() => buildColumns(mode, containers), [mode, containers])
+  const environmentId = useEnvironmentId()
+  const columns = React.useMemo(() => buildColumns(mode, containers, environmentId), [mode, containers, environmentId])
   return (
     <DataTable
       data={data}
@@ -329,13 +333,14 @@ export function ProxyHostsTable({
 }
 
 function HostSwitch({ row }: { row: ProxyHostRow }) {
+  const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   return (
     <Switch
       checked={row.enabled}
       disabled={pending}
       aria-label={`${row.domains[0]} enabled`}
-      onCheckedChange={(on) => run(() => setHostEnabled(row.id, on))}
+      onCheckedChange={(on) => run(() => setHostEnabled(row.id, on, environmentId))}
     />
   )
 }

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useTheme } from "next-themes"
 
-import { logout } from "@/app/(auth)/actions"
+import { logout, logoutEverywhere } from "@/app/(auth)/actions"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -24,6 +24,7 @@ import {
   EllipsisVerticalIcon,
   CircleUserRoundIcon,
   LogOutIcon,
+  MonitorOffIcon,
   MoonIcon,
   SunIcon,
 } from "lucide-react"
@@ -86,6 +87,10 @@ export function NavUser({ user }: { user: { username: string; role: string } }) 
             <DropdownMenuItem onSelect={() => logout()}>
               <LogOutIcon />
               Log out
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => logoutEverywhere()}>
+              <MonitorOffIcon />
+              Sign out everywhere
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

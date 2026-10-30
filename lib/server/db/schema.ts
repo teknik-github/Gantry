@@ -1,5 +1,7 @@
 import type { Generated, Insertable, Selectable } from "kysely"
 
+import type { EnvironmentRole } from "@/lib/permissions"
+
 export type Role = "admin" | "user"
 export type EnvironmentType = "socket" | "tcp" | "kubernetes"
 /** Environment types that talk to a Docker Engine. */
@@ -11,6 +13,17 @@ export interface UsersTable {
   password_hash: string
   role: Role
   created_at: string
+  /** TOTP secret (base32), encrypted at rest. Set while enrolling, kept once enabled. */
+  totp_secret: string | null
+  /** 1 once a code was verified; login then asks for a code. */
+  totp_enabled: Generated<number>
+  /** Last accepted TOTP time step, so a code can't be used twice. */
+  totp_last_step: number | null
+  /** Carried in session tokens; bumping it signs the user out everywhere. */
+  session_version: Generated<number>
+  /** OIDC identity this user signs in with (issuer + subject); null = local only. */
+  oidc_issuer: string | null
+  oidc_subject: string | null
 }
 
 export interface EnvironmentsTable {
@@ -35,11 +48,33 @@ export interface EnvironmentsTable {
   kube_insecure: Generated<number>
 }
 
-/** Environments a standard user may see and use. Admins can use all of them. */
+/** Environments a standard user may see and use, with their role there. Admins can use all of them. */
 export interface EnvironmentAccessTable {
   user_id: number
   environment_id: number
   created_at: string
+  role: Generated<EnvironmentRole>
+}
+
+/** One-time two-factor recovery codes (SHA-256 hashes). */
+export interface RecoveryCodesTable {
+  id: Generated<number>
+  user_id: number
+  code_hash: string
+  used_at: string | null
+  created_at: string
+}
+
+/** Personal API tokens (SHA-256 hashes; the token is only shown once). */
+export interface ApiTokensTable {
+  id: Generated<number>
+  user_id: number
+  name: string
+  token_hash: string
+  prefix: string
+  created_at: string
+  expires_at: string | null
+  last_used_at: string | null
 }
 
 export interface AuditLogsTable {
@@ -229,6 +264,8 @@ export interface Database {
   settings: SettingsTable
   proxy_settings: ProxySettingsTable
   proxy_hosts: ProxyHostsTable
+  recovery_codes: RecoveryCodesTable
+  api_tokens: ApiTokensTable
 }
 
 export type User = Selectable<UsersTable>

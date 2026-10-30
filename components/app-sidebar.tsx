@@ -105,3 +105,10 @@ export function KubernetesNav() {
 export function AdminNav() {
   return <NavMain items={navAdmin} label="Administration" />
 }
+
+// Environment-level settings a manager (not administrator) of the current Docker environment may change.
+const navManager = navAdmin.filter((i) => i.url === "/auto-update" || i.url === "/proxy")
+
+export function ManagerNav() {
+  return <NavMain items={navManager} label="Environment" />
+}

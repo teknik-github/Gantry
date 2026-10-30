@@ -131,7 +131,7 @@ export function NodesTable({ data }: { data: NodeRow[] }) {
 
 const podHelper = columnHelperFor<PodRow>()
 
-function podColumns(environmentId: number, isAdmin: boolean, showNamespace: boolean) {
+function podColumns(environmentId: number, canManage: boolean, showNamespace: boolean) {
   return podHelper.columns([
     podHelper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -173,7 +173,7 @@ function podColumns(environmentId: number, isAdmin: boolean, showNamespace: bool
                 <ScrollTextIcon />
               </Link>
             </IconButton>
-            {isAdmin ? (
+            {canManage ? (
               <ConfirmAction
                 title={`Delete pod ${p.name}?`}
                 description={`Pod ${p.namespace}/${p.name} is stopped and removed. If a controller (Deployment, StatefulSet, ...) owns it, a replacement is started.`}
@@ -196,15 +196,15 @@ function podColumns(environmentId: number, isAdmin: boolean, showNamespace: bool
 export function PodsTable({
   data,
   environmentId,
-  isAdmin,
+  canManage,
   showNamespace,
 }: {
   data: PodRow[]
   environmentId: number
-  isAdmin: boolean
+  canManage: boolean
   showNamespace: boolean
 }) {
-  const columns = React.useMemo(() => podColumns(environmentId, isAdmin, showNamespace), [environmentId, isAdmin, showNamespace])
+  const columns = React.useMemo(() => podColumns(environmentId, canManage, showNamespace), [environmentId, canManage, showNamespace])
   return (
     <DataTable
       data={data}
@@ -293,7 +293,7 @@ function ScaleDialog({ row, environmentId }: { row: WorkloadRow; environmentId: 
 
 const workloadHelper = columnHelperFor<WorkloadRow>()
 
-function workloadColumns(environmentId: number, isAdmin: boolean, showNamespace: boolean) {
+function workloadColumns(environmentId: number, can: { operate: boolean; manage: boolean }, showNamespace: boolean) {
   return workloadHelper.columns([
     workloadHelper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -335,11 +335,12 @@ function workloadColumns(environmentId: number, isAdmin: boolean, showNamespace:
       id: "actions",
       cell: ({ row }) => {
         const w = row.original
-        if (!isAdmin) return null
+        // Restart is an operator action (like restarting a container); scale and delete need manager.
+        if (!can.operate) return null
         const ref = { environmentId, kind: w.kind, namespace: w.namespace, name: w.name }
         return (
           <div className="flex justify-end gap-1">
-            {w.kind !== "DaemonSet" ? <ScaleDialog row={w} environmentId={environmentId} /> : null}
+            {can.manage && w.kind !== "DaemonSet" ? <ScaleDialog row={w} environmentId={environmentId} /> : null}
             <ConfirmAction
               title={`Restart ${w.name}?`}
               description={`Like kubectl rollout restart: the pods of ${w.kind} ${w.namespace}/${w.name} are replaced one by one.`}
@@ -351,16 +352,18 @@ function workloadColumns(environmentId: number, isAdmin: boolean, showNamespace:
                 <RotateCwIcon />
               </IconButton>
             </ConfirmAction>
-            <ConfirmAction
-              title={`Delete ${w.kind} ${w.name}?`}
-              description={`${w.kind} ${w.namespace}/${w.name} and its pods are deleted. This can't be undone.`}
-              confirmLabel="Delete"
-              onConfirm={() => deleteWorkload(ref)}
-            >
-              <IconButton label="Delete">
-                <Trash2Icon />
-              </IconButton>
-            </ConfirmAction>
+            {can.manage ? (
+              <ConfirmAction
+                title={`Delete ${w.kind} ${w.name}?`}
+                description={`${w.kind} ${w.namespace}/${w.name} and its pods are deleted. This can't be undone.`}
+                confirmLabel="Delete"
+                onConfirm={() => deleteWorkload(ref)}
+              >
+                <IconButton label="Delete">
+                  <Trash2Icon />
+                </IconButton>
+              </ConfirmAction>
+            ) : null}
           </div>
         )
       },
@@ -372,17 +375,19 @@ function workloadColumns(environmentId: number, isAdmin: boolean, showNamespace:
 export function WorkloadsTable({
   data,
   environmentId,
-  isAdmin,
+  canOperate,
+  canManage,
   showNamespace,
 }: {
   data: WorkloadRow[]
   environmentId: number
-  isAdmin: boolean
+  canOperate: boolean
+  canManage: boolean
   showNamespace: boolean
 }) {
   const columns = React.useMemo(
-    () => workloadColumns(environmentId, isAdmin, showNamespace),
-    [environmentId, isAdmin, showNamespace]
+    () => workloadColumns(environmentId, { operate: canOperate, manage: canManage }, showNamespace),
+    [environmentId, canOperate, canManage, showNamespace]
   )
   return (
     <DataTable
@@ -474,7 +479,7 @@ export function IngressesTable({ data, showNamespace }: { data: IngressRow[]; sh
 
 const namespaceHelper = columnHelperFor<NamespaceRow>()
 
-function namespaceColumns(environmentId: number, isAdmin: boolean) {
+function namespaceColumns(environmentId: number, canManage: boolean) {
   return namespaceHelper.columns([
     namespaceHelper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -489,7 +494,7 @@ function namespaceColumns(environmentId: number, isAdmin: boolean) {
     namespaceHelper.display({
       id: "actions",
       cell: ({ row }) =>
-        isAdmin && !PROTECTED_NAMESPACES.has(row.original.name) && row.original.status !== "Terminating" ? (
+        canManage && !PROTECTED_NAMESPACES.has(row.original.name) && row.original.status !== "Terminating" ? (
           <div className="flex justify-end">
             <ConfirmAction
               title={`Delete namespace ${row.original.name}?`}
@@ -508,8 +513,8 @@ function namespaceColumns(environmentId: number, isAdmin: boolean) {
   ])
 }
 
-export function NamespacesTable({ data, environmentId, isAdmin }: { data: NamespaceRow[]; environmentId: number; isAdmin: boolean }) {
-  const columns = React.useMemo(() => namespaceColumns(environmentId, isAdmin), [environmentId, isAdmin])
+export function NamespacesTable({ data, environmentId, canManage }: { data: NamespaceRow[]; environmentId: number; canManage: boolean }) {
+  const columns = React.useMemo(() => namespaceColumns(environmentId, canManage), [environmentId, canManage])
   return (
     <DataTable
       data={data}
@@ -520,7 +525,7 @@ export function NamespacesTable({ data, environmentId, isAdmin }: { data: Namesp
       emptyMessage="No namespaces."
       pageSize={20}
       toolbar={
-        isAdmin ? (
+        canManage ? (
           <FormDialog
             trigger={
               <Button size="sm">

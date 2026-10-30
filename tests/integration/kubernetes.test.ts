@@ -105,6 +105,7 @@ spec:
     // Exec: run a command, read its output and exit code.
     const sid = await openPodExecSession({
       userId: 1,
+      environmentId: 1,
       target: api.target,
       namespace: NS,
       pod: "ticker",

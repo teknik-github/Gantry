@@ -40,6 +40,7 @@ export async function startPodExecSession(
     const env = await getKubeEnvironment(v.environmentId)
     const sid = await openPodExecSession({
       userId: user.id,
+      environmentId: env.id,
       target: kubeTarget(env),
       namespace: v.namespace,
       pod: v.pod,

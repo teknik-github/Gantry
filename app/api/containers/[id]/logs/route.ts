@@ -1,13 +1,13 @@
 import type { NextRequest } from "next/server"
 
-import { getCurrentUser } from "@/lib/server/auth/dal"
+import { authorizeRequest } from "@/lib/server/api-auth"
 import { DockerError } from "@/lib/server/docker/client"
 import { getDocker } from "@/lib/server/environments"
 
+// Logs may contain secrets: operators and up (viewers only see the lists).
 export async function GET(request: NextRequest, ctx: RouteContext<"/api/containers/[id]/logs">) {
-  if (!(await getCurrentUser())) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const auth = await authorizeRequest("operate")
+  if (auth.response) return auth.response
 
   const { id } = await ctx.params
   if (!/^[a-f0-9]{12,64}$/.test(id)) {

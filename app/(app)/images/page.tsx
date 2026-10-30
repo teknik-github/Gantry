@@ -1,16 +1,18 @@
 import type { Metadata } from "next"
 
 import { ImagesTable, type ImageRow } from "@/components/gantry/images-table"
-import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { formatBytes, shortId, timeAgo } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getDocker } from "@/lib/server/environments"
+import { getDocker, getPermissions } from "@/lib/server/environments"
 import { tryDocker } from "@/lib/server/views"
 
 export const metadata: Metadata = { title: "Images" }
 
 export default async function ImagesPage() {
-  const user = await requireUser()
+  await requireUser()
+  const can = await getPermissions()
   const result = await tryDocker(async () => {
     const api = await getDocker()
     const [images, containers] = await Promise.all([api.listImages(), api.listContainers(true)])
@@ -48,7 +50,7 @@ export default async function ImagesPage() {
   return (
     <PageBody>
       <PageHeader title="Images" description={`${rows.length} image(s) using ${formatBytes(total)}`} />
-      <ImagesTable data={rows} isAdmin={user.role === "admin"} />
+      <ImagesTable data={rows} canManage={can.manage} />
     </PageBody>
   )
 }

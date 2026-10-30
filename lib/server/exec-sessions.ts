@@ -39,6 +39,8 @@ type Reader = (chunk: Buffer | null) => void
 type Session = {
   id: string
   userId: number
+  /** Environment the console runs in; access is re-checked against it on every request. */
+  environmentId: number
   backend: ExecBackend | null
   buffer: Buffer[]
   bufferedBytes: number
@@ -118,11 +120,16 @@ export function assertCapacity(userId: number) {
  * can arrive (attach the connection's listeners synchronously) and returns
  * the backend. Returns the session id.
  */
-export async function registerSession(userId: number, start: (sink: ExecSink) => Promise<ExecBackend> | ExecBackend): Promise<string> {
+export async function registerSession(
+  userId: number,
+  environmentId: number,
+  start: (sink: ExecSink) => Promise<ExecBackend> | ExecBackend
+): Promise<string> {
   assertCapacity(userId)
   const session: Session = {
     id: crypto.randomBytes(24).toString("base64url"),
     userId,
+    environmentId,
     backend: null,
     buffer: [],
     bufferedBytes: 0,
@@ -144,6 +151,26 @@ function owned(sid: string, userId: number) {
     throw new ExecSessionError("Console session not found", 404)
   }
   return session
+}
+
+/** The environment a session of this user runs in (404 for anyone else). */
+export function sessionEnvironment(sid: string, userId: number): number {
+  return owned(sid, userId).environmentId
+}
+
+/**
+ * Ends every console of a user, e.g. after their role, environment access or
+ * sessions changed. Returns how many were open.
+ */
+export function closeUserExecSessions(userId: number): number {
+  let n = 0
+  for (const s of sessions.values()) {
+    if (s.userId !== userId) continue
+    if (!s.closedAt) n++
+    s.reader?.(null)
+    destroy(s)
+  }
+  return n
 }
 
 /**

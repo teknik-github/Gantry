@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server"
 
 import { DNS_LABEL_RE, namespaceSchema, objectNameSchema } from "@/lib/kubernetes/names"
-import { getCurrentUser } from "@/lib/server/auth/dal"
+import { authorizeRequest } from "@/lib/server/api-auth"
 import { getKube, KubeError } from "@/lib/server/kubernetes"
 
 /** Followed log streams open on this server; each holds one API connection. */
@@ -26,12 +26,11 @@ function failure(err: unknown) {
  *   &follow=1     keep streaming new lines until the client disconnects
  *   &download=1   the whole log (up to 20 MB) as an attachment
  *
- * Viewing logs needs only access to the environment, like Docker container logs.
+ * Like Docker container logs, this needs the operator role or more.
  */
 export async function GET(request: NextRequest, ctx: RouteContext<"/api/kubernetes/pods/[namespace]/[name]/logs">) {
-  if (!(await getCurrentUser())) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const auth = await authorizeRequest("operate")
+  if (auth.response) return auth.response
 
   const { namespace, name } = await ctx.params
   const params = request.nextUrl.searchParams

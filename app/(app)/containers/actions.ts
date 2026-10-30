@@ -4,34 +4,42 @@ import { z } from "zod"
 
 import { containerNameField, imageField, parseEnv, parsePorts, parseVolumes, splitArgs } from "@/lib/container-form"
 import { BULK_LIMIT, uniqueBy } from "@/lib/bulk"
-import { runAction, runBulkAction, UserError } from "@/lib/server/action"
+import { ENVIRONMENT_FIELD } from "@/lib/permissions"
+import { authorize, expectedEnvironment, inEnvironment, runAction, runBulkAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
-import { getCurrentUser } from "@/lib/server/auth/dal"
 import { CONTAINER_ACTIONS, type ContainerAction } from "@/lib/server/docker/api"
 import { DockerError } from "@/lib/server/docker/client"
 import { ExecSessionError, openExecSession } from "@/lib/server/docker/exec"
 import { isSelfContainer } from "@/lib/server/docker/recreate"
 import { selfContainerIds } from "@/lib/server/docker/self"
-import { environmentTarget, getCurrentEnvironment } from "@/lib/server/environments"
+import { environmentTarget } from "@/lib/server/environments"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const idSchema = z.string().regex(/^[a-f0-9]{12,64}$/, "Invalid container id")
 
-export async function containerAction(id: string, action: ContainerAction): Promise<ActionState> {
+// Every action takes the id of the environment the page was rendered for
+// (components/gantry/environment-scope.tsx); it is refused if the selected
+// environment changed since.
+
+export async function containerAction(id: string, action: ContainerAction, environmentId?: number): Promise<ActionState> {
   const parsed = z.object({ id: idSchema, action: z.enum(CONTAINER_ACTIONS) }).safeParse({ id, action })
   if (!parsed.success) return { error: "Invalid request" }
 
-  return runAction("operate", `container.${action}`, id, async ({ docker }) => {
+  return runAction(inEnvironment("operate", expectedEnvironment(environmentId)), `container.${action}`, id, async ({ docker }) => {
     if (parsed.data.action !== "start" && parsed.data.action !== "unpause") refuseSelf(parsed.data.id)
     await (await docker()).containerAction(parsed.data.id, parsed.data.action)
   })
 }
 
-export async function removeContainer(id: string, opts: { force?: boolean; volumes?: boolean } = {}): Promise<ActionState> {
+export async function removeContainer(
+  id: string,
+  opts: { force?: boolean; volumes?: boolean } = {},
+  environmentId?: number
+): Promise<ActionState> {
   const parsed = idSchema.safeParse(id)
   if (!parsed.success) return { error: "Invalid container id" }
 
-  return runAction("admin", "container.remove", id, async ({ docker }) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "container.remove", id, async ({ docker }) => {
     await (await docker()).removeContainer(parsed.data, {
       force: opts.force === true,
       volumes: opts.volumes === true,
@@ -61,13 +69,17 @@ function refuseSelf(id: string) {
   if (isSelfContainer({ Id: id }, selfContainerIds())) throw new UserError("Gantry runs in this container; do it on its own")
 }
 
-export async function bulkContainerAction(targets: BulkTarget[], action: ContainerAction): Promise<ActionState> {
+export async function bulkContainerAction(
+  targets: BulkTarget[],
+  action: ContainerAction,
+  environmentId?: number
+): Promise<ActionState> {
   const parsed = z.object({ targets: targetsSchema, action: z.enum(CONTAINER_ACTIONS) }).safeParse({ targets, action })
   if (!parsed.success) return { error: "Invalid request" }
   const { action: act } = parsed.data
 
   return runBulkAction(
-    "operate",
+    inEnvironment("operate", expectedEnvironment(environmentId)),
     `container.${act}`,
     uniqueBy(parsed.data.targets, (t) => t.id),
     { verb: PAST[act], noun: "container", label: (t) => t.name || t.id.slice(0, 12), auditTarget: (t) => t.id },
@@ -80,13 +92,14 @@ export async function bulkContainerAction(targets: BulkTarget[], action: Contain
 
 export async function removeContainers(
   targets: BulkTarget[],
-  opts: { force?: boolean; volumes?: boolean } = {}
+  opts: { force?: boolean; volumes?: boolean } = {},
+  environmentId?: number
 ): Promise<ActionState> {
   const parsed = targetsSchema.safeParse(targets)
   if (!parsed.success) return { error: "Invalid request" }
 
   return runBulkAction(
-    "admin",
+    inEnvironment("manage", expectedEnvironment(environmentId)),
     "container.remove",
     uniqueBy(parsed.data, (t) => t.id),
     { verb: "Removed", noun: "container", label: (t) => t.name || t.id.slice(0, 12), auditTarget: (t) => t.id },
@@ -126,7 +139,7 @@ export async function createContainer(_prev: ActionState, formData: FormData): P
   if (!volumes.ok) return { error: volumes.error, fieldErrors: { volumes: [volumes.fieldError] } }
   const binds = volumes.value
 
-  return runAction("admin", "container.create", v.name || v.image, async ({ docker }) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), "container.create", v.name || v.image, async ({ docker }) => {
     const api = await docker()
     if (v.pull === "on") await api.pullImage(v.image)
 
@@ -174,11 +187,12 @@ const execSchema = z.object({
     .regex(/^([a-zA-Z0-9_.-]+(:[a-zA-Z0-9_.-]+)?)?$/, "Use user or user:group"),
   cols: z.number().int().min(10).max(500),
   rows: z.number().int().min(4).max(200),
+  environmentId: z.number().int().positive().optional(),
 })
 
 /**
  * Opens an interactive shell in a container. Exec is equivalent to full
- * control of the container, so it is limited to administrators and audited.
+ * control of the container, so it needs the manager role and is audited.
  */
 export async function startExecSession(input: {
   id: string
@@ -186,21 +200,21 @@ export async function startExecSession(input: {
   user: string
   cols: number
   rows: number
+  environmentId?: number
 }): Promise<{ sid: string; error?: never } | { sid?: never; error: string }> {
-  const user = await getCurrentUser()
-  if (!user) return { error: "Your session has expired. Please sign in again." }
-  if (user.role !== "admin") return { error: "Only administrators can open a console." }
-
   const parsed = execSchema.safeParse(input)
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid request" }
   const { id, shell, cols, rows } = parsed.data
 
-  const env = await getCurrentEnvironment()
+  const auth = await authorize(inEnvironment("manage", parsed.data.environmentId))
+  if ("error" in auth) return { error: auth.error }
+  const { user, environment: env } = auth
   if (!env) return { error: "No Docker environment configured" }
 
   try {
     const sid = await openExecSession({
       userId: user.id,
+      environmentId: env.id,
       target: environmentTarget(env),
       containerId: id,
       cmd: [...SHELLS[shell]],

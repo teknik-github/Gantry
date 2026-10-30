@@ -4,7 +4,7 @@ import { notFound } from "next/navigation"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { TemplateEditor } from "@/components/gantry/template-editor"
-import { PageBody } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { requireAdmin } from "@/lib/server/auth/dal"

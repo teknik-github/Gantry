@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
 
 import { EnvironmentsTable, type EnvironmentRow } from "@/components/gantry/admin-tables"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { getDb } from "@/lib/server/db"
 import { docker } from "@/lib/server/docker/api"
@@ -37,7 +38,9 @@ export default async function EnvironmentsPage() {
         kubeInsecure: e.type === "kubernetes" && Boolean(e.kube_insecure),
         kubeNamespace: e.kube_namespace,
         current: e.id === current?.id,
-        access: grants.filter((g) => g.environment_id === e.id).map((g) => ({ id: g.user_id, username: g.username })),
+        access: grants
+          .filter((g) => g.environment_id === e.id)
+          .map((g) => ({ id: g.user_id, username: g.username, role: g.role })),
       }
       try {
         if (e.type === "kubernetes") {
@@ -57,7 +60,7 @@ export default async function EnvironmentsPage() {
     <PageBody>
       <PageHeader
         title="Environments"
-        description="Docker hosts and Kubernetes clusters managed by Gantry. Administrators can use all of them; standard users only those they were given access to."
+        description="Docker hosts and Kubernetes clusters managed by Gantry. Administrators can use all of them; standard users only those they were given access to, as viewer, operator or manager."
       />
       <EnvironmentsTable data={rows} users={users.map(({ id, username }) => ({ id, username }))} />
     </PageBody>

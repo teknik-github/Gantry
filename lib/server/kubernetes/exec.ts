@@ -151,6 +151,8 @@ export function execRequest(namespace: string, pod: string, container: string, c
 /** Opens an interactive shell in a pod's container; returns the console session id. */
 export async function openPodExecSession(opts: {
   userId: number
+  /** Environment the console runs in (access is re-checked against it). */
+  environmentId: number
   target: KubeTarget
   namespace: string
   pod: string
@@ -166,7 +168,7 @@ export async function openPodExecSession(opts: {
     EXEC_PROTOCOLS
   )
 
-  return registerSession(opts.userId, (sink) => {
+  return registerSession(opts.userId, opts.environmentId, (sink) => {
     let exit: number | null = null
     const ws = new ClientWebSocket(socket, head, {
       onMessage({ payload }) {

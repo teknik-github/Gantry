@@ -126,7 +126,7 @@ const stackColumns = stackHelper.columns([
   }),
 ])
 
-export function StacksTable({ data, isAdmin }: { data: StackRow[]; isAdmin: boolean }) {
+export function StacksTable({ data, canManage }: { data: StackRow[]; canManage: boolean }) {
   return (
     <DataTable
       data={data}
@@ -137,7 +137,7 @@ export function StacksTable({ data, isAdmin }: { data: StackRow[]; isAdmin: bool
       emptyMessage="No stacks yet."
       pageSize={20}
       toolbar={
-        isAdmin ? (
+        canManage ? (
           <>
             <Button size="sm" variant="outline" asChild>
               <Link href="/templates">
@@ -177,7 +177,7 @@ export function ContainerList({ containers }: { containers: StackContainer[] }) 
 
 const externalHelper = columnHelperFor<ExternalProjectRow>()
 
-function externalColumns(isAdmin: boolean) {
+function externalColumns(canImport: boolean) {
   return externalHelper.columns([
     externalHelper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Project" />,
@@ -214,7 +214,7 @@ function externalColumns(isAdmin: boolean) {
     externalHelper.display({
       id: "actions",
       cell: ({ row }) =>
-        isAdmin && row.original.importable ? (
+        canImport && row.original.importable ? (
           <div className="flex justify-end">
             <ConfirmAction
               title={`Import ${row.original.name}?`}
@@ -242,8 +242,8 @@ function externalColumns(isAdmin: boolean) {
   ])
 }
 
-export function ExternalProjectsTable({ data, isAdmin }: { data: ExternalProjectRow[]; isAdmin: boolean }) {
-  const columns = React.useMemo(() => externalColumns(isAdmin), [isAdmin])
+export function ExternalProjectsTable({ data, canImport }: { data: ExternalProjectRow[]; canImport: boolean }) {
+  const columns = React.useMemo(() => externalColumns(canImport), [canImport])
   return (
     <DataTable
       data={data}

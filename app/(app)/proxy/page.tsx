@@ -1,10 +1,11 @@
 import type { Metadata } from "next"
 
 import { ProxyHostsTable, ProxySettingsCard } from "@/components/gantry/proxy-ui"
-import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { timeAgo } from "@/lib/format"
 import { externalSnippets } from "@/lib/proxy"
-import { requireAdmin } from "@/lib/server/auth/dal"
+import { requirePermission } from "@/lib/server/action"
 import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
 import { getProxySettings, listProxyHosts, PROXY_CONTAINER, PROXY_NETWORK, proxyStatus } from "@/lib/server/proxy"
 import { tryDocker } from "@/lib/server/views"
@@ -12,7 +13,7 @@ import { tryDocker } from "@/lib/server/views"
 export const metadata: Metadata = { title: "Proxy" }
 
 export default async function ProxyPage() {
-  await requireAdmin()
+  await requirePermission("manage")
   const env = await getCurrentEnvironment()
   if (!env) {
     return (

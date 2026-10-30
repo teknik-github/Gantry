@@ -1,9 +1,10 @@
 import type { Metadata } from "next"
 
 import { NetworksTable, type NetworkRow } from "@/components/gantry/networks-table"
-import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getDocker } from "@/lib/server/environments"
+import { getDocker, getPermissions } from "@/lib/server/environments"
 import { tryDocker } from "@/lib/server/views"
 
 export const metadata: Metadata = { title: "Networks" }
@@ -11,7 +12,8 @@ export const metadata: Metadata = { title: "Networks" }
 const BUILTIN = new Set(["bridge", "host", "none"])
 
 export default async function NetworksPage() {
-  const user = await requireUser()
+  await requireUser()
+  const can = await getPermissions()
   const result = await tryDocker(async () => {
     const api = await getDocker()
     const [networks, containers] = await Promise.all([api.listNetworks(), api.listContainers(true)])
@@ -50,7 +52,7 @@ export default async function NetworksPage() {
   return (
     <PageBody>
       <PageHeader title="Networks" description={`${rows.length} network(s)`} />
-      <NetworksTable data={rows} isAdmin={user.role === "admin"} />
+      <NetworksTable data={rows} canManage={can.manage} />
     </PageBody>
   )
 }

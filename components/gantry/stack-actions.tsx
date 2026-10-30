@@ -17,6 +17,7 @@ import {
 import { deleteStack, stackOperation } from "@/app/(app)/stacks/actions"
 import { saveStackAsTemplate } from "@/app/(app)/templates/actions"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
+import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { useRunAction } from "@/components/gantry/use-action"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -38,6 +39,7 @@ export function StackActions({
   running,
   total,
   git = false,
+  canSaveTemplate,
 }: {
   id: number
   name: string
@@ -45,8 +47,11 @@ export function StackActions({
   total: number
   /** Git stacks: "Pull & redeploy" fetches the repository; offer a forced redeploy too. */
   git?: boolean
+  /** Templates are global: administrators only. */
+  canSaveTemplate: boolean
 }) {
   const router = useRouter()
+  const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   const [current, setCurrent] = React.useState<StackOperation | "force" | null>(null)
   const [downVolumes, setDownVolumes] = React.useState(false)
@@ -54,11 +59,11 @@ export function StackActions({
 
   const act = (op: StackOperation) => {
     setCurrent(op)
-    return run(() => stackOperation(id, op))
+    return run(() => stackOperation(id, op, {}, environmentId))
   }
   const forceRedeploy = () => {
     setCurrent("force")
-    return run(() => stackOperation(id, "redeploy", { force: true }))
+    return run(() => stackOperation(id, "redeploy", { force: true }, environmentId))
   }
   const busy = pending
 
@@ -107,27 +112,29 @@ export function StackActions({
           Restart
         </Button>
       ) : null}
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={busy}
-        onClick={() =>
-          run(async () => {
-            const res = await saveStackAsTemplate(id)
-            if (res.href) router.push(res.href)
-            return res
-          })
-        }
-      >
-        <LayoutTemplateIcon data-icon="inline-start" />
-        Save as template
-      </Button>
+      {canSaveTemplate ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() =>
+            run(async () => {
+              const res = await saveStackAsTemplate(id)
+              if (res.href) router.push(res.href)
+              return res
+            })
+          }
+        >
+          <LayoutTemplateIcon data-icon="inline-start" />
+          Save as template
+        </Button>
+      ) : null}
       {total > 0 ? (
         <ConfirmAction
           title={`Take ${name} down?`}
           description="Stops and removes the stack's containers and networks (docker compose down). The stack stays in Gantry and can be deployed again."
           confirmLabel="Down"
-          onConfirm={() => stackOperation(id, "down", { removeVolumes: downVolumes })}
+          onConfirm={() => stackOperation(id, "down", { removeVolumes: downVolumes }, environmentId)}
           extra={
             <Label className="font-normal">
               <Checkbox checked={downVolumes} onCheckedChange={(v) => setDownVolumes(v === true)} />
@@ -146,7 +153,7 @@ export function StackActions({
         description="Runs docker compose down, then removes the stack and its files from Gantry. This cannot be undone."
         confirmLabel="Delete"
         onConfirm={async () => {
-          const res = await deleteStack(id, { removeVolumes: deleteVolumes })
+          const res = await deleteStack(id, { removeVolumes: deleteVolumes }, environmentId)
           if (res.ok) router.push("/stacks")
           return res
         }}
