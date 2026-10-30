@@ -1,6 +1,6 @@
 import { Suspense } from "react"
 
-import { AdminNav, AppSidebar, DockerNav, KubernetesNav } from "@/components/app-sidebar"
+import { AdminNav, AppSidebar, DockerNav, KubernetesNav, ManagerNav } from "@/components/app-sidebar"
 import { EnvSwitcher } from "@/components/env-switcher"
 import { LiveUpdates } from "@/components/live-updates"
 import { NavUser } from "@/components/nav-user"
@@ -8,7 +8,7 @@ import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getCurrentEnvironment, listEnvironments } from "@/lib/server/environments"
+import { getCurrentEnvironment, getPermissions, listEnvironments } from "@/lib/server/environments"
 
 // Every page below reads the session and live Docker state, so nothing here
 // can be prefetched into an instant App Shell; loading.tsx streams instead.
@@ -93,7 +93,9 @@ async function LiveUpdatesForEnvironment() {
 
 async function SidebarAdmin() {
   const user = await requireUser()
-  return user.role === "admin" ? <AdminNav /> : null
+  if (user.role === "admin") return <AdminNav />
+  const [env, can] = await Promise.all([getCurrentEnvironment(), getPermissions()])
+  return can.manage && env?.type !== "kubernetes" ? <ManagerNav /> : null
 }
 
 async function SidebarUser() {

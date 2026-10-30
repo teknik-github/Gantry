@@ -1,9 +1,10 @@
 import type { Metadata } from "next"
 
 import { AutoUpdateContainers, AutoUpdateResults, AutoUpdateSchedule } from "@/components/gantry/auto-update-ui"
-import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { timeAgo } from "@/lib/format"
-import { requireAdmin } from "@/lib/server/auth/dal"
+import { requirePermission } from "@/lib/server/action"
 import {
   AUTO_UPDATE_LABEL,
   containerNameOf,
@@ -20,7 +21,10 @@ import { tryDocker } from "@/lib/server/views"
 export const metadata: Metadata = { title: "Auto-update" }
 
 export default async function AutoUpdatePage() {
-  await requireAdmin()
+  // Managers turn auto-update on per container in their environment; the
+  // schedule and the results (which span every environment) are for admins.
+  const user = await requirePermission("manage")
+  const isAdmin = user.role === "admin"
   const env = await getCurrentEnvironment()
   const [settings, lastRun] = await Promise.all([getAutoUpdateSettings(), lastAutoUpdateRun()])
   const names = env ? await enrolledNames(env.id) : new Set<string>()
@@ -39,14 +43,16 @@ export default async function AutoUpdatePage() {
         title="Auto-update"
         description={`Once a day, running containers with auto-update on are updated when their image tag has a newer image (pull & recreate, rolled back on failure). Containers can also opt in with the label ${AUTO_UPDATE_LABEL}=true.`}
       />
-      <AutoUpdateSchedule
-        enabled={settings.enabled}
-        time={settings.time}
-        serverTime={now.toTimeString().slice(0, 5)}
-        timeZone={Intl.DateTimeFormat().resolvedOptions().timeZone}
-        running={isAutoUpdateRunning()}
-      />
-      {lastRun ? (
+      {isAdmin ? (
+        <AutoUpdateSchedule
+          enabled={settings.enabled}
+          time={settings.time}
+          serverTime={now.toTimeString().slice(0, 5)}
+          timeZone={Intl.DateTimeFormat().resolvedOptions().timeZone}
+          running={isAutoUpdateRunning()}
+        />
+      ) : null}
+      {isAdmin && lastRun ? (
         <AutoUpdateResults
           trigger={lastRun.trigger}
           finishedLabel={timeAgo(lastRun.finishedAt)}

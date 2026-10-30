@@ -1,6 +1,7 @@
 "use client"
 
 import { useActionState } from "react"
+import { KeyRoundIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { login } from "@/app/(auth)/actions"
@@ -11,15 +12,27 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  FieldSeparator,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import type { ActionState } from "@/lib/validation"
 
 export function LoginForm({
   next,
+  sso = false,
+  ssoMessage,
+  passwordForAdminsOnly = false,
   className,
   ...props
-}: React.ComponentProps<"form"> & { next?: string }) {
+}: React.ComponentProps<"form"> & {
+  next?: string
+  /** Show "Sign in with SSO" (OIDC configured). */
+  sso?: boolean
+  /** Outcome of a failed single sign-on attempt. */
+  ssoMessage?: string
+  /** PASSWORD_LOGIN=admins: the password form is the administrators' break-glass access. */
+  passwordForAdminsOnly?: boolean
+}) {
   const [state, action, pending] = useActionState<ActionState, FormData>(login, {})
 
   return (
@@ -28,9 +41,16 @@ export function LoginForm({
         <div className="flex flex-col items-center gap-1 text-center">
           <h1 className="text-2xl font-bold">Login to Gantry</h1>
           <p className="text-sm text-balance text-muted-foreground">
-            Enter your username and password to continue
+            {passwordForAdminsOnly
+              ? "Sign in with SSO. The password form is for administrators only."
+              : "Enter your username and password to continue"}
           </p>
         </div>
+        {ssoMessage ? (
+          <p role="alert" className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
+            {ssoMessage}
+          </p>
+        ) : null}
         {next ? <input type="hidden" name="next" value={next} /> : null}
         <Field>
           <FieldLabel htmlFor="username">Username</FieldLabel>
@@ -66,6 +86,20 @@ export function LoginForm({
             Forgot your password? Ask a Gantry administrator to reset it.
           </FieldDescription>
         </Field>
+        {sso ? (
+          <>
+            <FieldSeparator>Or</FieldSeparator>
+            <Field>
+              {/* A plain link: the route redirects to the identity provider. */}
+              <Button variant="outline" asChild>
+                <a href={`/auth/oidc/login${next ? `?next=${encodeURIComponent(next)}` : ""}`}>
+                  <KeyRoundIcon data-icon="inline-start" />
+                  Sign in with SSO
+                </a>
+              </Button>
+            </Field>
+          </>
+        ) : null}
       </FieldGroup>
     </form>
   )

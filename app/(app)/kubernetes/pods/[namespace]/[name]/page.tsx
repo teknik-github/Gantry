@@ -6,7 +6,8 @@ import { PodActions } from "@/components/gantry/kubernetes/pod-actions"
 import { PodLogViewer } from "@/components/gantry/kubernetes/pod-logs"
 import { KubeUnavailable, loadKubePage } from "@/components/gantry/kubernetes/page"
 import { Age, KubeStatus } from "@/components/gantry/kubernetes/tables"
-import { Mono, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { Mono, PageHeader } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -89,7 +90,7 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
         actions={
           <>
             {back}
-            {page.user.role === "admin" ? <PodActions environmentId={page.env.id} namespace={namespace} name={name} /> : null}
+            {page.can.manage ? <PodActions environmentId={page.env.id} namespace={namespace} name={name} /> : null}
           </>
         }
       />
@@ -129,12 +130,18 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
         </Card>
       </div>
       <div className="px-4 lg:px-6">
-        <PodLogViewer
-          environmentId={page.env.id}
-          namespace={namespace}
-          name={name}
-          containers={containers.map((c) => c.name)}
-        />
+        {page.can.operate ? (
+          <PodLogViewer
+            environmentId={page.env.id}
+            namespace={namespace}
+            name={name}
+            containers={containers.map((c) => c.name)}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground" data-testid="logs-hidden">
+            Logs need the operator role in this environment.
+          </p>
+        )}
       </div>
     </PageBody>
   )

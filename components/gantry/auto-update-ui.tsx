@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { runAutoUpdateNow, saveSchedule, setContainerAutoUpdate } from "@/app/(app)/auto-update/actions"
 import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
+import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { Mono, StateBadge } from "@/components/gantry/ui"
 import { submitKeepingValues, useRunAction } from "@/components/gantry/use-action"
 import { Badge } from "@/components/ui/badge"
@@ -151,6 +152,7 @@ export type AutoUpdateContainerRow = {
 }
 
 function EnrolSwitch({ row }: { row: AutoUpdateContainerRow }) {
+  const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   if (row.enrolment === "label") {
     return (
@@ -164,7 +166,7 @@ function EnrolSwitch({ row }: { row: AutoUpdateContainerRow }) {
       checked={row.enrolment === "rule"}
       disabled={pending}
       aria-label={`Auto-update ${row.name}`}
-      onCheckedChange={(on) => run(() => setContainerAutoUpdate(row.name, on))}
+      onCheckedChange={(on) => run(() => setContainerAutoUpdate(row.name, on, environmentId))}
     />
   )
 }

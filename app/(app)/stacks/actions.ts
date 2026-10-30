@@ -6,7 +6,8 @@ import { refresh } from "next/cache"
 import { redirect } from "next/navigation"
 import { z } from "zod"
 
-import { runAction, UserError } from "@/lib/server/action"
+import { ENVIRONMENT_FIELD } from "@/lib/permissions"
+import { expectedEnvironment, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
 import type { CurrentUser } from "@/lib/server/auth/dal"
 import type { Stack } from "@/lib/server/db/schema"
@@ -118,7 +119,7 @@ export async function createStack(_prev: ActionState, formData: FormData): Promi
   }
 
   let createdId = 0
-  const res = await runAction("admin", "stack.create", name.data, async (ctx) => {
+  const res = await runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), "stack.create", name.data, async (ctx) => {
     createdId = await createStackInCurrentEnvironment(ctx, { name: name.data, compose, env, deploy })
     return `Stack ${name.data} created`
   })
@@ -141,7 +142,7 @@ export async function updateStack(_prev: ActionState, formData: FormData): Promi
   if (Object.keys(fieldErrors).length) return { error: "Please fix the highlighted fields", fieldErrors, values }
 
   // runAction audits the deploy; the save is audited separately so it's recorded even if the deploy fails.
-  const res = await runAction("admin", deploy ? "stack.deploy" : "stack.update", await auditName(id.data), async (ctx) => {
+  const res = await runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), deploy ? "stack.deploy" : "stack.update", await auditName(id.data), async (ctx) => {
     const stack = await loadStack(id.data)
     await updateStackContent(stack.id, compose, env)
     if (!deploy) return `Stack ${stack.name} saved`
@@ -161,14 +162,15 @@ const operationSchema = z.object({
 export async function stackOperation(
   id: number,
   op: StackOperation,
-  opts: { removeVolumes?: boolean } = {}
+  opts: { removeVolumes?: boolean } = {},
+  environmentId?: number
 ): Promise<ActionState> {
   const parsed = operationSchema.safeParse({ id, op, removeVolumes: opts.removeVolumes })
   if (!parsed.success) return { error: "Invalid request" }
   const { removeVolumes } = parsed.data
 
   const target = `${await auditName(parsed.data.id)}${removeVolumes ? " (with volumes)" : ""}`
-  return runAction("admin", `stack.${parsed.data.op}`, target, async (ctx) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), `stack.${parsed.data.op}`, target, async (ctx) => {
     const stack = await loadStack(parsed.data.id)
     await operate(stack, parsed.data.op, ctx, { removeVolumes: removeVolumes === true })
     return `${stack.name} ${OP_LABELS[parsed.data.op]}`
@@ -176,12 +178,16 @@ export async function stackOperation(
 }
 
 /** Takes the stack down (optionally with its volumes), then forgets it. */
-export async function deleteStack(id: number, opts: { removeVolumes?: boolean } = {}): Promise<ActionState> {
+export async function deleteStack(
+  id: number,
+  opts: { removeVolumes?: boolean } = {},
+  environmentId?: number
+): Promise<ActionState> {
   const parsed = idSchema.safeParse(id)
   if (!parsed.success) return { error: "Invalid stack" }
 
   const target = `${await auditName(parsed.data)}${opts.removeVolumes ? " (with volumes)" : ""}`
-  return runAction("admin", "stack.delete", target, async (ctx) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "stack.delete", target, async (ctx) => {
     const stack = await loadStack(parsed.data)
     const api = await ctx.docker()
     let run
@@ -215,7 +221,9 @@ export async function deleteStack(id: number, opts: { removeVolumes?: boolean } 
 /**
  * Creates a stack record for a compose project that was started outside
  * Gantry, from the compose file recorded in its container labels. Only works
- * when that file is readable from where Gantry runs.
+ * when that file is readable from where Gantry runs. Administrators only:
+ * it reads a path named by container labels, which anyone who can create
+ * containers controls.
  */
 export async function importProject(project: string): Promise<ActionState> {
   const name = stackNameSchema.safeParse(project)

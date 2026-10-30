@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server"
 
-import { getCurrentUser } from "@/lib/server/auth/dal"
+import { authorizeRequest } from "@/lib/server/api-auth"
 import { getDb } from "@/lib/server/db"
 import { getCurrentEnvironment } from "@/lib/server/environments"
 import {
@@ -25,9 +25,8 @@ const MAX_POINTS = 300
 
 /** Recorded resource usage of the current environment: GET /api/metrics?range=1h|24h|7d */
 export async function GET(request: NextRequest) {
-  if (!(await getCurrentUser())) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const auth = await authorizeRequest("view")
+  if (auth.response) return auth.response
 
   const range = request.nextUrl.searchParams.get("range") ?? "1h"
   if (!isMetricRange(range)) {

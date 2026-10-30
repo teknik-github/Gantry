@@ -6,14 +6,15 @@ import { ArrowLeftIcon } from "lucide-react"
 import { StackActions } from "@/components/gantry/stack-actions"
 import { StackEditor } from "@/components/gantry/stack-editor"
 import { StackStatusBadge } from "@/components/gantry/stacks-table"
-import { DockerUnavailable, Mono, PageBody, StateBadge } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, Mono, StateBadge } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { formatDate, timeAgo } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { getStack, isStackBusy, PROJECT_LABEL } from "@/lib/server/stacks"
 import { summarizeProject } from "@/lib/server/stacks/views"
 import { tryDocker } from "@/lib/server/views"
@@ -33,7 +34,7 @@ const ACTION_LABELS: Record<string, string> = {
 
 export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
   const user = await requireUser()
-  const isAdmin = user.role === "admin"
+  const isManager = (await getPermissions()).manage
   const { id } = await params
   if (!/^\d{1,10}$/.test(id)) notFound()
 
@@ -88,8 +89,14 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
             {timeAgo(stack.updated_at)}
           </p>
         </div>
-        {isAdmin && result.error === undefined ? (
-          <StackActions id={stack.id} name={stack.name} running={summary.running} total={summary.total} />
+        {isManager && result.error === undefined ? (
+          <StackActions
+            id={stack.id}
+            name={stack.name}
+            running={summary.running}
+            total={summary.total}
+            canSaveTemplate={user.role === "admin"}
+          />
         ) : null}
       </div>
 
@@ -198,7 +205,7 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
           ) : null}
         </Card>
 
-        {isAdmin ? (
+        {isManager ? (
           <Card>
             <CardHeader>
               <CardTitle>Configuration</CardTitle>

@@ -4,7 +4,8 @@ import { CuboidIcon, FolderTreeIcon, ServerIcon, TriangleAlertIcon } from "lucid
 
 import { KubeUnavailable, loadKubePage, NamespaceFilter } from "@/components/gantry/kubernetes/page"
 import { NodesTable } from "@/components/gantry/kubernetes/tables"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardAction, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { podsByPhase, toNodeRows } from "@/lib/kubernetes/rows"

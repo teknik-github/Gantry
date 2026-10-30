@@ -10,6 +10,7 @@ import {
   ServerIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
+  ShieldOffIcon,
   ShipWheelIcon,
   Trash2Icon,
   UploadIcon,
@@ -22,7 +23,7 @@ import {
   setEnvironmentAccess,
   updateEnvironment,
 } from "@/app/(app)/environments/actions"
-import { createUser, deleteUser, resetPassword, setUserAccess, setUserRole } from "@/app/(app)/users/actions"
+import { createUser, deleteUser, resetPassword, resetTwoFactor, setUserAccess, setUserRole } from "@/app/(app)/users/actions"
 import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { FormDialog } from "@/components/gantry/form-dialog"
@@ -43,6 +44,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ENVIRONMENT_ROLES, ROLE_LABELS, type EnvironmentRole } from "@/lib/permissions"
 import type { ActionState } from "@/lib/validation"
 import { cn } from "@/lib/utils"
 
@@ -51,10 +53,13 @@ type Errors = Record<string, string[] | undefined>
 // ------------------------------------------------------------- Access dialogs
 
 type AccessOption = { id: number; label: string }
+type AccessGrant = { id: number; role: EnvironmentRole }
 
 /**
- * Checkbox list bound to a Server Action: submits `id` plus one `fieldName`
- * value per checked option.
+ * Checkbox list with a role per checked option, bound to a Server Action:
+ * submits `id` plus one `fieldName` value "<option id>:<role>" per checked
+ * option. New grants start as operator, what every grant allowed before
+ * roles existed.
  */
 function AccessDialog({
   trigger,
@@ -74,7 +79,7 @@ function AccessDialog({
   id: number
   fieldName: string
   options: AccessOption[]
-  selected: number[]
+  selected: AccessGrant[]
   emptyMessage: string
 }) {
   return (
@@ -82,13 +87,7 @@ function AccessDialog({
       {() => (
         <>
           <input type="hidden" name="id" value={id} />
-          <AccessChecklist
-            idPrefix={`${fieldName}-${id}`}
-            fieldName={fieldName}
-            options={options}
-            initial={selected}
-            emptyMessage={emptyMessage}
-          />
+          <AccessChecklist fieldName={fieldName} options={options} initial={selected} emptyMessage={emptyMessage} />
         </>
       )}
     </FormDialog>
@@ -96,43 +95,74 @@ function AccessDialog({
 }
 
 function AccessChecklist({
-  idPrefix,
   fieldName,
   options,
   initial,
   emptyMessage,
 }: {
-  idPrefix: string
   fieldName: string
   options: AccessOption[]
-  initial: number[]
+  initial: AccessGrant[]
   emptyMessage: string
 }) {
-  const [checked, setChecked] = React.useState(() => new Set(initial))
+  // Unique ids: Next keeps recently visited pages hidden in the DOM.
+  const uid = React.useId()
+  const [roles, setRoles] = React.useState(() => new Map(initial.map((g) => [g.id, g.role])))
   if (options.length === 0) return <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+  const update = (id: number, role: EnvironmentRole | null) =>
+    setRoles((prev) => {
+      const next = new Map(prev)
+      if (role) next.set(id, role)
+      else next.delete(id)
+      return next
+    })
   return (
-    <div className="flex max-h-72 flex-col gap-3 overflow-y-auto" role="group" aria-label="Access">
-      {options.map((o) => (
-        <Field key={o.id} orientation="horizontal">
-          <Checkbox
-            id={`${idPrefix}-${o.id}`}
-            checked={checked.has(o.id)}
-            onCheckedChange={(value) =>
-              setChecked((prev) => {
-                const next = new Set(prev)
-                if (value === true) next.add(o.id)
-                else next.delete(o.id)
-                return next
-              })
-            }
-          />
-          <FieldLabel htmlFor={`${idPrefix}-${o.id}`} className="font-normal">
-            {o.label}
-          </FieldLabel>
-          {checked.has(o.id) ? <input type="hidden" name={fieldName} value={o.id} /> : null}
-        </Field>
-      ))}
+    <div className="flex max-h-80 flex-col gap-3 overflow-y-auto" role="group" aria-label="Access">
+      {options.map((o) => {
+        const role = roles.get(o.id)
+        return (
+          <Field key={o.id} orientation="horizontal" className="min-h-8">
+            <Checkbox
+              id={`${uid}-${o.id}`}
+              checked={role !== undefined}
+              onCheckedChange={(value) => update(o.id, value === true ? (role ?? "operator") : null)}
+            />
+            <FieldLabel htmlFor={`${uid}-${o.id}`} className="font-normal">
+              {o.label}
+            </FieldLabel>
+            {role ? (
+              <>
+                <Select value={role} onValueChange={(r) => update(o.id, r as EnvironmentRole)}>
+                  <SelectTrigger size="sm" className="ml-auto w-32" aria-label={`Role for ${o.label}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ENVIRONMENT_ROLES.map((r) => (
+                      <SelectItem key={r} value={r}>
+                        {ROLE_LABELS[r]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <input type="hidden" name={fieldName} value={`${o.id}:${role}`} />
+              </>
+            ) : null}
+          </Field>
+        )
+      })}
+      <FieldDescription>
+        Viewer: read-only. Operator: start, stop, restart, logs. Manager: everything in the environment.
+      </FieldDescription>
     </div>
+  )
+}
+
+function RoleBadge({ name, role }: { name: string; role: EnvironmentRole }) {
+  return (
+    <Badge variant="secondary" className="gap-1">
+      {name}{" "}
+      <span className="font-normal text-muted-foreground">{ROLE_LABELS[role].toLowerCase()}</span>
+    </Badge>
   )
 }
 
@@ -154,8 +184,8 @@ export type EnvironmentRow = {
   version: string | null
   error: string | null
   current: boolean
-  /** Standard users granted access (administrators can always use it). */
-  access: { id: number; username: string }[]
+  /** Standard users granted access, with their role (administrators can always use it). */
+  access: { id: number; username: string; role: EnvironmentRole }[]
 }
 
 type UserOption = { id: number; username: string }
@@ -228,9 +258,7 @@ function environmentColumns(users: UserOption[]) {
         row.original.access.length ? (
           <div className="flex max-w-72 flex-wrap gap-1" data-testid={`env-access-${row.original.name}`}>
             {row.original.access.map((u) => (
-              <Badge key={u.id} variant="secondary">
-                {u.username}
-              </Badge>
+              <RoleBadge key={u.id} name={u.username} role={u.role} />
             ))}
           </div>
         ) : (
@@ -250,12 +278,12 @@ function environmentColumns(users: UserOption[]) {
               </Button>
             }
             title={`Access to ${row.original.name}`}
-            description="Standard users who can see and use this environment. Administrators always can."
+            description="Standard users who can use this environment, and what they may do. Administrators always can."
             action={setEnvironmentAccess}
             id={row.original.id}
             fieldName="user"
             options={users.map((u) => ({ id: u.id, label: u.username }))}
-            selected={row.original.access.map((u) => u.id)}
+            selected={row.original.access.map((u) => ({ id: u.id, role: u.role }))}
             emptyMessage="There are no standard users yet."
           />
           <EditEnvironmentDialog row={row.original} />
@@ -723,8 +751,11 @@ export type UserRow = {
   role: "admin" | "user"
   createdLabel: string
   self: boolean
-  /** Environments a standard user was granted (ignored for administrators). */
-  environmentIds: number[]
+  /** Environments a standard user was granted, with the role (ignored for administrators). */
+  grants: { id: number; role: EnvironmentRole }[]
+  twoFactor: boolean
+  /** Linked to a single sign-on identity. */
+  sso: boolean
 }
 
 type EnvironmentOption = { id: number; name: string }
@@ -740,6 +771,16 @@ function userColumns(environments: EnvironmentOption[]) {
         <div className="flex items-center gap-2 font-medium">
           {row.original.username}
           {row.original.self ? <Badge variant="secondary">you</Badge> : null}
+          {row.original.twoFactor ? (
+            <Badge variant="outline" className="text-muted-foreground" title="Two-factor authentication is on">
+              2FA
+            </Badge>
+          ) : null}
+          {row.original.sso ? (
+            <Badge variant="outline" className="text-muted-foreground" title="Linked to single sign-on">
+              SSO
+            </Badge>
+          ) : null}
         </div>
       ),
       enableHiding: false,
@@ -760,13 +801,14 @@ function userColumns(environments: EnvironmentOption[]) {
             </span>
           )
         }
-        const granted = row.original.environmentIds.map((id) => names.get(id)).filter(Boolean)
+        const granted = row.original.grants.flatMap((g) => {
+          const name = names.get(g.id)
+          return name ? [{ ...g, name }] : []
+        })
         return granted.length ? (
           <div className="flex max-w-72 flex-wrap gap-1" data-testid={testId}>
-            {granted.map((name) => (
-              <Badge key={name} variant="secondary">
-                {name}
-              </Badge>
+            {granted.map((g) => (
+              <RoleBadge key={g.id} name={g.name} role={g.role} />
             ))}
           </div>
         ) : (
@@ -797,16 +839,33 @@ function userColumns(environments: EnvironmentOption[]) {
                 </Button>
               }
               title={`Environments for ${row.original.username}`}
-              description="Which Docker environments this user can see and use."
+              description="Which environments this user can use, and what they may do there."
               action={setUserAccess}
               id={row.original.id}
               fieldName="env"
               options={environments.map((e) => ({ id: e.id, label: e.name }))}
-              selected={row.original.environmentIds}
+              selected={row.original.grants}
               emptyMessage="There are no environments yet."
             />
           ) : null}
           <ResetPasswordDialog row={row.original} />
+          {row.original.twoFactor ? (
+            <ConfirmAction
+              title={`Reset two-factor authentication of ${row.original.username}?`}
+              description="Their authenticator and recovery codes stop working and they are signed out everywhere. They can sign in with their password alone and set it up again."
+              confirmLabel="Reset"
+              onConfirm={() => resetTwoFactor(row.original.id)}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 text-muted-foreground"
+                aria-label={`Reset two-factor for ${row.original.username}`}
+              >
+                <ShieldOffIcon />
+              </Button>
+            </ConfirmAction>
+          ) : null}
           {!row.original.self ? (
             <ConfirmAction
               title={`Delete user ${row.original.username}?`}
@@ -888,7 +947,7 @@ export function UsersTable({ data, environments }: { data: UserRow[]; environmen
             </Button>
           }
           title="Add user"
-          description="New standard users can't use any environment until you give them access."
+          description="New standard users can't use any environment until you give them access. Promoting a user to administrator drops their environment grants."
           submitLabel="Create"
           action={createUser}
         >

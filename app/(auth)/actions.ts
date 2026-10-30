@@ -1,19 +1,37 @@
 "use server"
 
-import { headers } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { z } from "zod"
 
 import { audit } from "@/lib/server/audit"
 import { getCurrentUser, hasAnyUser } from "@/lib/server/auth/dal"
-import { getDummyHash, hashPassword, verifyPassword } from "@/lib/server/auth/password"
-import { createSession, destroySession } from "@/lib/server/auth/session"
+import {
+  DEVICE_COOKIE,
+  PENDING_2FA_COOKIE,
+  PENDING_2FA_TTL_SECONDS,
+  signPending2fa,
+  verifyDevice,
+  verifyPending2fa,
+} from "@/lib/server/auth/flow-tokens"
+import { passwordLoginAllowed } from "@/lib/server/auth/oidc"
+import { getDummyHash, hashPassword, PasswordBusyError, verifyPassword } from "@/lib/server/auth/password"
+import { destroySession, setAuthCookie, signIn } from "@/lib/server/auth/session"
+import { verifySecondFactor } from "@/lib/server/auth/two-factor"
 import { getDb } from "@/lib/server/db"
 import { checkRateLimit, clearFailures, recordFailure } from "@/lib/server/rate-limit"
-import { clientAddress, LOGIN_WINDOW_MS, loginRateKeys } from "@/lib/server/login-limits"
+import {
+  auditedLoginName,
+  clientAddress,
+  LOGIN_WINDOW_MS,
+  loginRateKeys,
+  shouldAuditFailure,
+  TWO_FACTOR_LIMIT,
+} from "@/lib/server/login-limits"
 import { config } from "@/lib/server/config"
 import { safeNext } from "@/lib/safe-redirect"
 import { clearSetupToken, verifySetupToken } from "@/lib/server/setup-token"
+import { invalidateSessions } from "@/lib/server/users"
 import {
   fieldErrors,
   passwordSchema,
@@ -23,6 +41,15 @@ import {
 
 
 const SETUP_LIMIT = 20
+/** Failed-login audit rows written per minute at most, whatever the accounts. */
+const FAILED_LOGIN_AUDITS_PER_MINUTE = 30
+
+/** Audits a failed attempt unless the log already got enough of them. */
+async function auditFailure(action: string, target: string, count: number, limit: number) {
+  if (!shouldAuditFailure(count, limit)) return
+  if (recordFailure("audit:auth-failures", 60_000) > FAILED_LOGIN_AUDITS_PER_MINUTE) return
+  await audit(null, action, count >= limit ? `${target} (locked for now)` : target)
+}
 
 export async function login(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const values = { username: String(formData.get("username") ?? "").slice(0, 64) }
@@ -32,28 +59,86 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
   if (!parsed.success) return { error: "Enter your username and password", values }
 
   const { username, password } = parsed.data
-  const limits = loginRateKeys(username, clientAddress(await headers(), config.trustProxy))
-  const wait = Math.max(...limits.map((l) => checkRateLimit(l.key, l.limit)))
-  if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.`, values }
-
   const db = await getDb()
   const user = await db
     .selectFrom("users")
-    .selectAll()
+    .select(["id", "username", "role", "password_hash", "totp_enabled"])
     .where("username", "=", username)
     .executeTakeFirst()
 
-  const valid = await verifyPassword(password, user?.password_hash ?? (await getDummyHash()))
+  // A browser that completed a login for this account before has its own bucket.
+  const device = await verifyDevice((await cookies()).get(DEVICE_COOKIE)?.value)
+  const deviceId = device && user && device.uid === user.id ? device.id : null
+  const limits = loginRateKeys(username, clientAddress(await headers(), config.trustProxy), deviceId)
+  const wait = Math.max(...limits.map((l) => checkRateLimit(l.key, l.limit)))
+  if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.`, values }
+
+  let valid: boolean
+  try {
+    valid = await verifyPassword(password, user?.password_hash ?? (await getDummyHash()))
+  } catch (err) {
+    if (err instanceof PasswordBusyError) return { error: err.message, values }
+    throw err
+  }
   if (!user || !valid) {
-    for (const l of limits) recordFailure(l.key, LOGIN_WINDOW_MS)
-    await audit(null, "auth.login_failed", username)
+    const counts = limits.map((l) => recordFailure(l.key, LOGIN_WINDOW_MS))
+    await auditFailure("auth.login_failed", auditedLoginName(username, Boolean(user)), counts[0], limits[0].limit)
     return { error: "Invalid username or password", values }
   }
 
   for (const l of limits) clearFailures(l.key)
-  await createSession({ uid: user.id, role: user.role })
+  const next = safeNext(formData.get("next"))
+  if (!passwordLoginAllowed(user.role)) {
+    await audit({ id: user.id, username: user.username }, "auth.login_refused", "password sign-in is limited to administrators")
+    return { error: "Sign in with SSO. Password sign-in is reserved for administrators.", values }
+  }
+
+  if (Number(user.totp_enabled) === 1) {
+    // Not a session yet: only proves the password for a few minutes.
+    await setAuthCookie(PENDING_2FA_COOKIE, await signPending2fa({ uid: user.id, next }), PENDING_2FA_TTL_SECONDS)
+    redirect("/login/two-factor")
+  }
+
+  await signIn(user.id)
   await audit({ id: user.id, username: user.username, role: user.role }, "auth.login", user.username)
-  redirect(safeNext(formData.get("next")))
+  redirect(next)
+}
+
+/** Second login step: a TOTP code or a recovery code for the user whose password was just accepted. */
+export async function verifyLoginCode(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const jar = await cookies()
+  const pending = await verifyPending2fa(jar.get(PENDING_2FA_COOKIE)?.value)
+  if (!pending) return { error: "This sign-in has expired. Start again with your password." }
+
+  const code = String(formData.get("code") ?? "").trim().slice(0, 32)
+  if (!code) return { error: "Enter a code", fieldErrors: { code: ["Enter a code"] } }
+
+  const key = `2fa:${pending.uid}`
+  const wait = checkRateLimit(key, TWO_FACTOR_LIMIT)
+  if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.` }
+
+  const db = await getDb()
+  const user = await db.selectFrom("users").select(["id", "username", "role"]).where("id", "=", pending.uid).executeTakeFirst()
+  const check = user ? await verifySecondFactor(db, user.id, code) : { ok: false as const }
+  if (!user || !check.ok) {
+    const count = recordFailure(key, LOGIN_WINDOW_MS)
+    await auditFailure("auth.2fa_failed", user?.username ?? "(deleted user)", count, TWO_FACTOR_LIMIT)
+    return { error: "Invalid code", fieldErrors: { code: ["Invalid code"] } }
+  }
+
+  clearFailures(key)
+  jar.delete(PENDING_2FA_COOKIE)
+  await signIn(user.id)
+  const actor = { id: user.id, username: user.username, role: user.role }
+  if (check.method === "recovery") await audit(actor, "auth.2fa_recovery_used", user.username)
+  await audit(actor, "auth.login", `${user.username} (2FA)`)
+  redirect(safeNext(pending.next))
+}
+
+/** Abandons a pending two-factor login. */
+export async function cancelTwoFactor() {
+  ;(await cookies()).delete(PENDING_2FA_COOKIE)
+  redirect("/login")
 }
 
 export async function setupAdmin(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -75,11 +160,14 @@ export async function setupAdmin(_prev: ActionState, formData: FormData): Promis
   // The first account can only be created while no user exists, and only by
   // someone who can read the server log / data directory (the setup token).
   if (await hasAnyUser()) return { error: "Gantry is already set up. Please sign in." }
-  const wait = checkRateLimit("setup", SETUP_LIMIT)
-  if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.`, values }
+  // The token is checked before the limit: it has far too much entropy to be
+  // guessed, so the limit only slows down noise and never locks out the
+  // person who has the real token.
   if (!verifySetupToken(String(formData.get("token") ?? ""))) {
-    recordFailure("setup", LOGIN_WINDOW_MS)
-    await audit(null, "auth.setup_failed", "invalid setup token")
+    const count = recordFailure("setup", LOGIN_WINDOW_MS)
+    await auditFailure("auth.setup_failed", "invalid setup token", count, SETUP_LIMIT)
+    const wait = checkRateLimit("setup", SETUP_LIMIT)
+    if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.`, values }
     return { error: "Invalid setup token", fieldErrors: { token: ["Invalid setup token"] }, values }
   }
 
@@ -96,7 +184,8 @@ export async function setupAdmin(_prev: ActionState, formData: FormData): Promis
 
   const id = Number(result.insertId)
   clearSetupToken()
-  await createSession({ uid: id, role: "admin" })
+  clearFailures("setup")
+  await signIn(id)
   await audit({ id, username: parsed.data.username, role: "admin" }, "auth.setup", parsed.data.username)
   redirect("/dashboard")
 }
@@ -104,6 +193,17 @@ export async function setupAdmin(_prev: ActionState, formData: FormData): Promis
 export async function logout() {
   const user = await getCurrentUser()
   if (user) await audit(user, "auth.logout", user.username)
+  await destroySession()
+  redirect("/login")
+}
+
+/** Ends every session of the signed-in user, in all browsers (API tokens stay valid). */
+export async function logoutEverywhere() {
+  const user = await getCurrentUser()
+  if (user?.via === "session") {
+    await invalidateSessions(await getDb(), user.id)
+    await audit(user, "auth.logout_everywhere", user.username)
+  }
   await destroySession()
   redirect("/login")
 }

@@ -6,6 +6,7 @@ import { PauseIcon, PlayIcon, RefreshCwIcon, RotateCwIcon, SquareIcon, Trash2Ico
 
 import { containerAction, removeContainer } from "@/app/(app)/containers/actions"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
+import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { EditContainerDialog, PullRecreateButton, type RecreateInfo } from "@/components/gantry/container-edit-dialog"
 import { useRunAction } from "@/components/gantry/use-action"
 import { Button } from "@/components/ui/button"
@@ -25,24 +26,67 @@ export function ContainerActions({
   id,
   name,
   state,
-  isAdmin,
+  can,
   recreate,
 }: {
   id: string
   name: string
   state: string
-  isAdmin: boolean
-  /** Edit / pull & recreate (administrators only). */
+  can: { operate: boolean; manage: boolean }
+  /** Edit / pull & recreate (managers only). */
   recreate?: RecreateInfo
 }) {
   const router = useRouter()
+  const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   const running = state === "running"
   const paused = state === "paused"
-  const act = (action: ContainerAction, label: string) => run(() => containerAction(id, action), `${name}: ${label}`)
+  const act = (action: ContainerAction, label: string) =>
+    run(() => containerAction(id, action, environmentId), `${name}: ${label}`)
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {can.operate ? <OperateButtons running={running} paused={paused} pending={pending} act={act} /> : null}
+      {can.manage && recreate ? (
+        <>
+          <EditContainerDialog id={id} name={name} info={recreate} />
+          <PullRecreateButton id={id} name={name} image={recreate.values.image} info={recreate} />
+        </>
+      ) : null}
+      {can.manage ? (
+        <ConfirmAction
+          title={`Remove ${name}?`}
+          description="The container will be stopped and deleted. This cannot be undone."
+          confirmLabel="Remove"
+          onConfirm={async () => {
+            const res = await removeContainer(id, { force: true }, environmentId)
+            if (res.ok) router.push("/containers")
+            return res
+          }}
+        >
+          <Button size="sm" variant="destructive" disabled={pending}>
+            <Trash2Icon data-icon="inline-start" />
+            Remove
+          </Button>
+        </ConfirmAction>
+      ) : null}
+    </div>
+  )
+}
+
+function OperateButtons({
+  running,
+  paused,
+  pending,
+  act,
+}: {
+  running: boolean
+  paused: boolean
+  pending: boolean
+  act: (action: ContainerAction, label: string) => void
+}) {
+  return (
+    <>
       {!running && !paused ? (
         <Button size="sm" disabled={pending} onClick={() => act("start", "started")}>
           <PlayIcon data-icon="inline-start" />
@@ -77,30 +121,7 @@ export function ContainerActions({
           Kill
         </Button>
       ) : null}
-      {isAdmin && recreate ? (
-        <>
-          <EditContainerDialog id={id} name={name} info={recreate} />
-          <PullRecreateButton id={id} name={name} image={recreate.values.image} info={recreate} />
-        </>
-      ) : null}
-      {isAdmin ? (
-        <ConfirmAction
-          title={`Remove ${name}?`}
-          description="The container will be stopped and deleted. This cannot be undone."
-          confirmLabel="Remove"
-          onConfirm={async () => {
-            const res = await removeContainer(id, { force: true })
-            if (res.ok) router.push("/containers")
-            return res
-          }}
-        >
-          <Button size="sm" variant="destructive" disabled={pending}>
-            <Trash2Icon data-icon="inline-start" />
-            Remove
-          </Button>
-        </ConfirmAction>
-      ) : null}
-    </div>
+    </>
   )
 }
 

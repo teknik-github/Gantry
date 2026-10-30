@@ -1,4 +1,4 @@
-import { getCurrentUser } from "@/lib/server/auth/dal"
+import { authorizeRequest } from "@/lib/server/api-auth"
 import { DockerError } from "@/lib/server/docker/client"
 import { getDocker } from "@/lib/server/environments"
 import { sampleHost } from "@/lib/server/metrics"
@@ -17,10 +17,10 @@ export type StatsResponse = {
 const MAX_CONTAINERS = 30
 
 // Live resource usage of running containers, polled by the dashboard chart.
+// Any role in the environment (viewers see the dashboard too).
 export async function GET() {
-  if (!(await getCurrentUser())) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const auth = await authorizeRequest("view")
+  if (auth.response) return auth.response
 
   try {
     const usage = await sampleHost(await getDocker(), {

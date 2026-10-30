@@ -10,7 +10,7 @@ import { findStackByName, getStack, insertStack, PROJECT_LABEL, runStackOperatio
 /**
  * Creates a stack in the current environment and optionally deploys it (the
  * deploy output is stored on the stack, success or not). Call inside
- * runAction("admin", ...). Returns the new stack's id.
+ * runAction with the manager role. Returns the new stack's id.
  */
 export async function createStackInCurrentEnvironment(
   ctx: { user: CurrentUser; docker: () => Promise<DockerApi> },

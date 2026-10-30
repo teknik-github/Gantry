@@ -9,6 +9,7 @@ import type { Terminal } from "@xterm/xterm"
 import { PlugIcon, PlugZapIcon, TerminalSquareIcon } from "lucide-react"
 
 import { startExecSession, type ExecShell } from "@/app/(app)/containers/actions"
+import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -47,6 +48,7 @@ const THEME = {
  */
 export function ExecConsole({ containerId, running }: { containerId: string; running: boolean }) {
   const router = useRouter()
+  const environmentId = useEnvironmentId()
   const hostRef = React.useRef<HTMLDivElement>(null)
   const termRef = React.useRef<Terminal | null>(null)
   const fitRef = React.useRef<FitAddon | null>(null)
@@ -135,7 +137,7 @@ export function ExecConsole({ containerId, running }: { containerId: string; run
     term.reset()
     fitRef.current?.fit()
 
-    const res = await startExecSession({ id: containerId, shell, user, cols: term.cols, rows: term.rows })
+    const res = await startExecSession({ id: containerId, shell, user, cols: term.cols, rows: term.rows, environmentId })
     if (res.error !== undefined) {
       setStatus("error")
       setError(res.error)

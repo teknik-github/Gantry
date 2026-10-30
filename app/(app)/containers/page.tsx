@@ -1,16 +1,18 @@
 import type { Metadata } from "next"
 
 import { ContainersTable } from "@/components/gantry/containers-table"
-import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { lastChecked, updatesFor } from "@/lib/server/image-updates"
 import { toContainerRows, tryDocker } from "@/lib/server/views"
 
 export const metadata: Metadata = { title: "Containers" }
 
 export default async function ContainersPage() {
-  const user = await requireUser()
+  await requireUser()
+  const can = await getPermissions()
   const env = await getCurrentEnvironment()
   const result = await tryDocker(async () => {
     const api = await getDocker()
@@ -26,7 +28,7 @@ export default async function ContainersPage() {
       ) : (
         <ContainersTable
           data={toContainerRows(result.data.containers, { updates: result.data.updates, refs: result.data.refs })}
-          isAdmin={user.role === "admin"}
+          can={can}
           pageSize={20}
           lastUpdateCheck={env ? lastChecked(env.id) : null}
         />

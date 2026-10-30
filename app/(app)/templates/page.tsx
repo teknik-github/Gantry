@@ -3,10 +3,11 @@ import Link from "next/link"
 import { PlusIcon } from "lucide-react"
 
 import { TemplatesGallery } from "@/components/gantry/templates-gallery"
-import { PageBody, PageHeader, WrongEnvironmentKind } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader, WrongEnvironmentKind } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getCurrentEnvironment } from "@/lib/server/environments"
+import { getCurrentEnvironment, getPermissions } from "@/lib/server/environments"
 import { listTemplates } from "@/lib/server/templates"
 import { validateCompose } from "@/lib/stacks"
 
@@ -14,16 +15,16 @@ export const metadata: Metadata = { title: "Templates" }
 
 export default async function TemplatesPage() {
   const user = await requireUser()
-  const [templates, env] = await Promise.all([listTemplates(), getCurrentEnvironment()])
+  const [templates, env, can] = await Promise.all([listTemplates(), getCurrentEnvironment(), getPermissions()])
 
   return (
     <PageBody>
       <PageHeader
         title="Templates"
         description={
-          user.role === "admin"
+          can.manage
             ? "Ready-made compose stacks. Pick one, fill in a few values and it is deployed as a stack you can edit later."
-            : "Ready-made compose stacks. Ask an administrator to deploy one."
+            : "Ready-made compose stacks. Deploying one needs the manager role in this environment."
         }
         actions={
           user.role === "admin" ? (

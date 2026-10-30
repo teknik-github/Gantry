@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
 
 import { ActivityTable } from "@/components/gantry/admin-tables"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 import { formatDate } from "@/lib/format"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { getDb } from "@/lib/server/db"

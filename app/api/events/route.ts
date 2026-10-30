@@ -1,7 +1,6 @@
 import type { NextRequest } from "next/server"
 
-import { getCurrentUser } from "@/lib/server/auth/dal"
-import { getCurrentEnvironment } from "@/lib/server/environments"
+import { authorizeRequest } from "@/lib/server/api-auth"
 import { subscribeToEnvironment } from "@/lib/server/live-events"
 
 const HEARTBEAT_MS = 25_000
@@ -19,11 +18,15 @@ const MAX_STREAM_MS = 10 * 60_000
  * session, for clients whose EventSource failed and need to know why.
  */
 export async function GET(request: NextRequest) {
-  const user = await getCurrentUser()
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
+  const auth = await authorizeRequest("view")
+  if (auth.response) {
+    // The probe only asks whether the session is still valid.
+    if (auth.response.status !== 401 && request.nextUrl.searchParams.has("probe")) return new Response(null, { status: 204 })
+    return auth.response
+  }
   if (request.nextUrl.searchParams.has("probe")) return new Response(null, { status: 204 })
 
-  const env = await getCurrentEnvironment()
+  const env = auth.environment
   if (!env) return Response.json({ error: "No Docker environment configured" }, { status: 404 })
   // Live updates follow Docker events; Kubernetes environments have none.
   if (env.type === "kubernetes") {

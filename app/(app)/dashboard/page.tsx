@@ -2,18 +2,20 @@ import type { Metadata } from "next"
 
 import { ChartAreaInteractive } from "@/components/chart-area-interactive"
 import { ContainersTable } from "@/components/gantry/containers-table"
-import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { SectionCards } from "@/components/section-cards"
 import { formatBytes } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
+import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { updatesFor } from "@/lib/server/image-updates"
 import { toContainerRows, tryDocker } from "@/lib/server/views"
 
 export const metadata: Metadata = { title: "Dashboard" }
 
 export default async function DashboardPage() {
-  const user = await requireUser()
+  await requireUser()
+  const can = await getPermissions()
   const env = await getCurrentEnvironment()
 
   const result = await tryDocker(async () => {
@@ -76,7 +78,7 @@ export default async function DashboardPage() {
       </div>
       <ContainersTable
         data={toContainerRows(containers, { refs, updates })}
-        isAdmin={user.role === "admin"}
+        can={can}
       />
     </PageBody>
   )

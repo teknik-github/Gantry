@@ -9,8 +9,10 @@ import { migrationProvider } from "@/lib/server/db/migrations"
 import type { Database } from "@/lib/server/db/schema"
 import { openSqlite } from "@/lib/server/db/sqlite"
 import {
+  environmentRoleFor,
   environmentsForUser,
   listGrants,
+  parseGrants,
   setEnvironmentUsers,
   setUserEnvironments,
 } from "@/lib/server/environment-access"
@@ -44,7 +46,26 @@ if (mysqlUrl) {
     async open() {
       const { createPool } = await import("mysql2")
       const db = new Kysely<Database>({ dialect: new MysqlDialect({ pool: createPool({ uri: mysqlUrl, connectionLimit: 4 }) }) })
-      for (const t of ["environment_access", "audit_logs", "environments", "users", "kysely_migration", "kysely_migration_lock"]) {
+      for (const t of [
+        "environment_access",
+        "recovery_codes",
+        "api_tokens",
+        "audit_logs",
+        "stacks",
+        "metrics",
+        "auto_update_rules",
+        "alerts",
+        "proxy_settings",
+        "proxy_hosts",
+        "registries",
+        "templates",
+        "notification_channels",
+        "settings",
+        "environments",
+        "users",
+        "kysely_migration",
+        "kysely_migration_lock",
+      ]) {
         await sql`drop table if exists ${sql.table(t)}`.execute(db)
       }
       return { db, cleanup: () => db.destroy() }
@@ -96,6 +117,13 @@ describe.each(setups)("environment access ($name)", { timeout: 300_000 }, ({ ope
     await cleanup?.()
   })
 
+  it("adds the auth columns with safe defaults", async () => {
+    const user = await db.selectFrom("users").selectAll().where("id", "=", ids.alice).executeTakeFirstOrThrow()
+    expect(user).toMatchObject({ totp_secret: null, totp_last_step: null, oidc_issuer: null, oidc_subject: null })
+    expect(Number(user.totp_enabled)).toBe(0)
+    expect(Number(user.session_version)).toBe(0)
+  })
+
   it("adds nullable TLS columns", async () => {
     const env = await db.selectFrom("environments").selectAll().where("id", "=", ids.remote).executeTakeFirstOrThrow()
     expect(env).toMatchObject({ tls_ca: null, tls_cert: null, tls_key: null })
@@ -106,11 +134,18 @@ describe.each(setups)("environment access ($name)", { timeout: 300_000 }, ({ ope
     await db.updateTable("environments").set({ tls_ca: null, tls_cert: null, tls_key: null }).where("id", "=", ids.remote).execute()
   })
 
-  it("grants existing standard users every existing environment", async () => {
+  it("grants existing standard users every existing environment, as operator", async () => {
     const grants = await listGrants(db)
-    expect(grants.map((g) => `${g.username}:${g.environment_id}`).sort()).toEqual(
-      [`alice:${ids.local}`, `alice:${ids.remote}`, `bob:${ids.local}`, `bob:${ids.remote}`].sort()
+    expect(grants.map((g) => `${g.username}:${g.environment_id}:${g.role}`).sort()).toEqual(
+      [
+        `alice:${ids.local}:operator`,
+        `alice:${ids.remote}:operator`,
+        `bob:${ids.local}:operator`,
+        `bob:${ids.remote}:operator`,
+      ].sort()
     )
+    expect(await environmentRoleFor(db, ids.alice, ids.local)).toBe("operator")
+    expect(await environmentRoleFor(db, ids.admin, ids.local)).toBeNull()
   })
 
   it("lets administrators see every environment", async () => {
@@ -125,8 +160,14 @@ describe.each(setups)("environment access ($name)", { timeout: 300_000 }, ({ ope
 
   it("replaces a user's environments, ignoring unknown ids", async () => {
     const staging = (await db.selectFrom("environments").select("id").where("name", "=", "staging").executeTakeFirstOrThrow()).id
-    await setUserEnvironments(db, ids.alice, [staging, staging, 999_999])
+    await setUserEnvironments(db, ids.alice, [
+      { id: staging, role: "viewer" },
+      { id: staging, role: "manager" },
+      { id: 999_999, role: "viewer" },
+    ])
     expect(await names({ id: ids.alice, role: "user" })).toEqual(["staging"])
+    // The last role given for an id wins.
+    expect(await environmentRoleFor(db, ids.alice, staging)).toBe("manager")
     await setUserEnvironments(db, ids.alice, [])
     expect(await names({ id: ids.alice, role: "user" })).toEqual([])
     // A user's grants don't leak to another user.
@@ -134,11 +175,22 @@ describe.each(setups)("environment access ($name)", { timeout: 300_000 }, ({ ope
   })
 
   it("replaces an environment's users, ignoring administrators", async () => {
-    await setEnvironmentUsers(db, ids.local, [ids.alice, ids.admin])
+    await setEnvironmentUsers(db, ids.local, [
+      { id: ids.alice, role: "viewer" },
+      { id: ids.admin, role: "manager" },
+    ])
     expect(await names({ id: ids.alice, role: "user" })).toEqual(["local"])
+    expect(await environmentRoleFor(db, ids.alice, ids.local)).toBe("viewer")
     expect(await names({ id: ids.bob, role: "user" })).toEqual(["remote"])
     const grants = await db.selectFrom("environment_access").selectAll().where("user_id", "=", ids.admin).execute()
     expect(grants).toEqual([])
+  })
+
+  it("treats an unknown stored role as no access", async () => {
+    await db.updateTable("environment_access").set({ role: "superuser" as never }).where("user_id", "=", ids.alice).execute()
+    expect(await environmentRoleFor(db, ids.alice, ids.local)).toBeNull()
+    expect((await listGrants(db)).some((g) => g.user_id === ids.alice)).toBe(false)
+    await db.updateTable("environment_access").set({ role: "viewer" }).where("user_id", "=", ids.alice).execute()
   })
 
   it("rejects duplicate grants", async () => {
@@ -158,5 +210,27 @@ describe.each(setups)("environment access ($name)", { timeout: 300_000 }, ({ ope
     await expect(
       db.insertInto("environment_access").values({ user_id: 999_999, environment_id: ids.local, created_at: now }).execute()
     ).rejects.toThrow()
+  })
+})
+
+describe("grant form values", () => {
+  it("parses <id>:<role> and defaults a bare id to operator", () => {
+    expect(parseGrants(["3:viewer", "4:manager", "5"])).toEqual([
+      { id: 3, role: "viewer" },
+      { id: 4, role: "manager" },
+      { id: 5, role: "operator" },
+    ])
+    expect(parseGrants([])).toEqual([])
+  })
+
+  it.each([["3:admin"], ["x:viewer"], ["3:viewer:1"], ["0:viewer"], ["-1:viewer"], ["1.5:viewer"], [" 3:viewer"]])(
+    "rejects %s",
+    (value) => {
+      expect(parseGrants([value])).toBeNull()
+    }
+  )
+
+  it("rejects non-string values (files)", () => {
+    expect(parseGrants([new Blob(["x"])])).toBeNull()
   })
 })

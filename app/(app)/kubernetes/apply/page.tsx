@@ -2,7 +2,8 @@ import type { Metadata } from "next"
 
 import { ApplyForm } from "@/components/gantry/kubernetes/apply-form"
 import { loadKubePage } from "@/components/gantry/kubernetes/page"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 
 export const metadata: Metadata = { title: "Apply manifest" }
 
@@ -22,11 +23,11 @@ export default async function ApplyPage() {
       </PageBody>
     )
   }
-  if (page.user.role !== "admin") {
+  if (!page.can.manage) {
     return (
       <PageBody>
         {header}
-        <p className="px-4 text-sm text-muted-foreground lg:px-6">Only administrators can apply manifests.</p>
+        <p className="px-4 text-sm text-muted-foreground lg:px-6">Applying manifests needs the manager role in this environment.</p>
       </PageBody>
     )
   }

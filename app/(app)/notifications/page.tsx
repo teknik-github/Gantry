@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
 
 import { AlertsTable, ChannelsTable } from "@/components/gantry/notifications-ui"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 import { timeAgo } from "@/lib/format"
 import { channelFields, channelTarget, CHANNEL_TYPES } from "@/lib/notifications"
 import { requireAdmin } from "@/lib/server/auth/dal"

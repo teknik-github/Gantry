@@ -22,10 +22,40 @@ export function clientAddress(headers: HeaderGetter, trustProxy: boolean): strin
  * Rate-limit buckets a login attempt counts against. The per-account bucket
  * can't be dodged by rotating headers; the per-client bucket only exists when
  * the address can be trusted and lets one noisy client be stopped earlier.
+ *
+ * A browser holding a device cookie for this account (`deviceId`, set by an
+ * earlier complete login) counts against its own bucket instead of the
+ * account's: an attacker filling the account bucket can't lock the owner out,
+ * and still gets only ACCOUNT_LIMIT guesses per window without such a cookie.
  */
-export function loginRateKeys(username: string, address: string | null) {
+export function loginRateKeys(username: string, address: string | null, deviceId: string | null = null) {
   const account = username.trim().toLowerCase()
-  const keys = [{ key: `login:account:${account}`, limit: ACCOUNT_LIMIT }]
+  const keys = [
+    deviceId
+      ? { key: `login:device:${deviceId}:${account}`, limit: ACCOUNT_LIMIT }
+      : { key: `login:account:${account}`, limit: ACCOUNT_LIMIT },
+  ]
   if (address) keys.push({ key: `login:client:${address}:${account}`, limit: CLIENT_LIMIT })
   return keys
+}
+
+/** Failed second-factor codes allowed per account per window (6 digits: keep it small). */
+export const TWO_FACTOR_LIMIT = 5
+
+/**
+ * Failed logins are audited on the first failure of a bucket's window and
+ * when it locks, not on every attempt, so a password-guessing run can't grow
+ * the audit log without bound.
+ */
+export function shouldAuditFailure(count: number, limit: number) {
+  return count === 1 || count === limit
+}
+
+/**
+ * What the audit log records for a failed login: the username only when it
+ * belongs to an account. Anything else may well be a password typed into the
+ * wrong field.
+ */
+export function auditedLoginName(username: string, exists: boolean) {
+  return exists ? username.trim().slice(0, 64) : "(unknown user)"
 }

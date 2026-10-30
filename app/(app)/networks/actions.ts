@@ -3,7 +3,8 @@
 import { z } from "zod"
 
 import { BULK_LIMIT, uniqueBy } from "@/lib/bulk"
-import { runAction, runBulkAction, UserError } from "@/lib/server/action"
+import { ENVIRONMENT_FIELD } from "@/lib/permissions"
+import { expectedEnvironment, inEnvironment, runAction, runBulkAction, UserError } from "@/lib/server/action"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const BUILTIN = new Set(["bridge", "host", "none"])
@@ -22,24 +23,24 @@ export async function createNetwork(_prev: ActionState, formData: FormData): Pro
     .safeParse({ name: formData.get("name"), driver: formData.get("driver") || undefined })
   if (!parsed.success) return fieldErrors(parsed.error)
 
-  return runAction("admin", "network.create", parsed.data.name, async ({ docker }) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), "network.create", parsed.data.name, async ({ docker }) => {
     await (await docker()).createNetwork(parsed.data.name, parsed.data.driver)
     return `Network ${parsed.data.name} created`
   })
 }
 
-export async function removeNetwork(id: string, name: string): Promise<ActionState> {
+export async function removeNetwork(id: string, name: string, environmentId?: number): Promise<ActionState> {
   const parsed = z.string().regex(/^[a-f0-9]{12,64}$/).safeParse(id)
   if (!parsed.success) return { error: "Invalid network id" }
 
-  return runAction("admin", "network.remove", name, async ({ docker }) => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "network.remove", name, async ({ docker }) => {
     if (BUILTIN.has(name)) throw new UserError("Built-in networks cannot be removed")
     await (await docker()).removeNetwork(parsed.data)
     return "Network removed"
   })
 }
 
-export async function removeNetworks(targets: { id: string; name: string }[]): Promise<ActionState> {
+export async function removeNetworks(targets: { id: string; name: string }[], environmentId?: number): Promise<ActionState> {
   const parsed = z
     .array(z.object({ id: z.string().regex(/^[a-f0-9]{12,64}$/), name: z.string().max(255) }))
     .min(1)
@@ -48,7 +49,7 @@ export async function removeNetworks(targets: { id: string; name: string }[]): P
   if (!parsed.success) return { error: "Invalid request" }
 
   return runBulkAction(
-    "admin",
+    inEnvironment("manage", expectedEnvironment(environmentId)),
     "network.remove",
     uniqueBy(parsed.data, (t) => t.id),
     { verb: "Removed", noun: "network", label: (t) => t.name || t.id.slice(0, 12) },

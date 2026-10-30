@@ -1,16 +1,18 @@
 import type { Metadata } from "next"
 
 import { VolumesTable, type VolumeRow } from "@/components/gantry/volumes-table"
-import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { timeAgo } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
-import { getDocker } from "@/lib/server/environments"
+import { getDocker, getPermissions } from "@/lib/server/environments"
 import { tryDocker } from "@/lib/server/views"
 
 export const metadata: Metadata = { title: "Volumes" }
 
 export default async function VolumesPage() {
-  const user = await requireUser()
+  await requireUser()
+  const can = await getPermissions()
   const result = await tryDocker(async () => {
     const api = await getDocker()
     const [volumes, containers] = await Promise.all([api.listVolumes(), api.listContainers(true)])
@@ -49,7 +51,7 @@ export default async function VolumesPage() {
   return (
     <PageBody>
       <PageHeader title="Volumes" description={`${rows.length} volume(s)`} />
-      <VolumesTable data={rows} isAdmin={user.role === "admin"} />
+      <VolumesTable data={rows} canManage={can.manage} />
     </PageBody>
   )
 }

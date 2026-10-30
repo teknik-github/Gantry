@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
 
 import { TopologyView } from "@/components/gantry/topology-view"
-import { DockerUnavailable, PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { requireUser } from "@/lib/server/auth/dal"
 import type { ContainerSummary, DockerApi } from "@/lib/server/docker/api"
 import { getDocker } from "@/lib/server/environments"

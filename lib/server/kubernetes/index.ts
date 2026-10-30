@@ -2,7 +2,7 @@ import "server-only"
 
 import { cookies } from "next/headers"
 
-import { DOCKER_ENVIRONMENT, NO_ENVIRONMENT_ASSIGNED } from "@/lib/messages"
+import { DOCKER_ENVIRONMENT, ENVIRONMENT_SWITCHED, NO_ENVIRONMENT_ASSIGNED } from "@/lib/messages"
 import { getCurrentUser } from "@/lib/server/auth/dal"
 import type { Environment } from "@/lib/server/db/schema"
 import { getCurrentEnvironment } from "@/lib/server/environments"
@@ -28,7 +28,7 @@ export async function getKubeEnvironment(expectedId?: number): Promise<Environme
   }
   if (env.type !== "kubernetes") throw new KubeError(DOCKER_ENVIRONMENT, 409)
   if (expectedId !== undefined && env.id !== expectedId) {
-    throw new KubeError("The environment was switched in the meantime. Reload the page and try again.", 409)
+    throw new KubeError(ENVIRONMENT_SWITCHED, 409)
   }
   return env
 }

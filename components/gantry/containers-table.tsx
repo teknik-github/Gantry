@@ -29,6 +29,7 @@ import { bulkPullAndRecreate, checkForUpdates } from "@/app/(app)/containers/rec
 import { columnHelperFor, DataTable, SortHeader, type TableSelection } from "@/components/data-table"
 import { BulkButton, BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
+import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { PullRecreateConfirm } from "@/components/gantry/container-edit-dialog"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono, StateBadge } from "@/components/gantry/ui"
@@ -74,7 +75,7 @@ export type ContainerRow = {
 
 const helper = columnHelperFor<ContainerRow>()
 
-function buildColumns(isAdmin: boolean) {
+function buildColumns(can: ContainerRights) {
   return helper.columns([
     helper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -127,7 +128,7 @@ function buildColumns(isAdmin: boolean) {
     }),
     helper.display({
       id: "actions",
-      cell: ({ row }) => <RowActions row={row.original} isAdmin={isAdmin} />,
+      cell: ({ row }) => <RowActions row={row.original} can={can} />,
       enableHiding: false,
     }),
   ])
@@ -159,13 +160,14 @@ function UpdateBadge({ update }: { update: ContainerRow["update"] }) {
 }
 
 function CheckUpdatesButton({ lastChecked }: { lastChecked: number | null }) {
+  const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   return (
     <Button
       size="sm"
       variant="outline"
       disabled={pending}
-      onClick={() => run(checkForUpdates)}
+      onClick={() => run(() => checkForUpdates(environmentId))}
       title={lastChecked ? `Last checked ${timeAgo(new Date(lastChecked))}` : "Not checked yet"}
     >
       <RefreshCwIcon data-icon="inline-start" className={pending ? "animate-spin" : undefined} />
@@ -174,23 +176,29 @@ function CheckUpdatesButton({ lastChecked }: { lastChecked: number | null }) {
   )
 }
 
+/** What the user may do with containers here (lib/permissions.ts); the server checks again. */
+export type ContainerRights = { operate: boolean; manage: boolean }
+
 export function ContainersTable({
   data,
-  isAdmin,
+  can,
   pageSize,
   lastUpdateCheck,
 }: {
   data: ContainerRow[]
-  isAdmin: boolean
+  can: ContainerRights
   pageSize?: number
   /** Shows the "Check updates" button (undefined hides it). */
   lastUpdateCheck?: number | null
 }) {
-  const columns = React.useMemo(() => buildColumns(isAdmin), [isAdmin])
-  const selection: TableSelection<ContainerRow> = {
-    rowLabel: (r) => r.name,
-    actions: (selected, clear) => <BulkActions selected={selected} clear={clear} isAdmin={isAdmin} />,
-  }
+  const rights = React.useMemo(() => ({ operate: can.operate, manage: can.manage }), [can.operate, can.manage])
+  const columns = React.useMemo(() => buildColumns(rights), [rights])
+  const selection: TableSelection<ContainerRow> | undefined = rights.operate
+    ? {
+        rowLabel: (r) => r.name,
+        actions: (selected, clear) => <BulkActions selected={selected} clear={clear} canManage={rights.manage} />,
+      }
+    : undefined
   return (
     <DataTable
       data={data}
@@ -203,8 +211,8 @@ export function ContainersTable({
       pageSize={pageSize}
       toolbar={
         <>
-          {lastUpdateCheck !== undefined ? <CheckUpdatesButton lastChecked={lastUpdateCheck} /> : null}
-          {isAdmin ? <CreateContainerDialog /> : null}
+          {lastUpdateCheck !== undefined && rights.operate ? <CheckUpdatesButton lastChecked={lastUpdateCheck} /> : null}
+          {rights.manage ? <CreateContainerDialog /> : null}
         </>
       }
     />
@@ -232,7 +240,8 @@ const BULK_BUTTONS: { action: ContainerAction; label: string; icon: React.ReactN
 
 const toTarget = (r: ContainerRow) => ({ id: r.id, name: r.name })
 
-function BulkActions({ selected, clear, isAdmin }: { selected: ContainerRow[]; clear: () => void; isAdmin: boolean }) {
+function BulkActions({ selected, clear, canManage }: { selected: ContainerRow[]; clear: () => void; canManage: boolean }) {
+  const environmentId = useEnvironmentId()
   const [force, setForce] = React.useState(false)
   const [volumes, setVolumes] = React.useState(false)
   const running = selected.filter((r) => !APPLIES.start(r.state)).length
@@ -247,13 +256,13 @@ function BulkActions({ selected, clear, isAdmin }: { selected: ContainerRow[]; c
             label={label}
             icon={icon}
             count={targets.length}
-            onRun={() => bulkContainerAction(targets.map(toTarget), action)}
+            onRun={() => bulkContainerAction(targets.map(toTarget), action, environmentId)}
             onDone={clear}
           />
         )
       })}
-      {isAdmin ? <BulkUpdate selected={selected} clear={clear} /> : null}
-      {isAdmin ? (
+      {canManage ? <BulkUpdate selected={selected} clear={clear} /> : null}
+      {canManage ? (
         <BulkConfirm
           label="Remove"
           icon={<Trash2Icon data-icon="inline-start" />}
@@ -261,7 +270,7 @@ function BulkActions({ selected, clear, isAdmin }: { selected: ContainerRow[]; c
           description="These containers and their writable layers will be deleted. This cannot be undone."
           names={selected.map((r) => r.name)}
           warning={running && !force ? `${running} of them are running and will fail unless you force it.` : null}
-          onConfirm={() => removeContainers(selected.map(toTarget), { force, volumes })}
+          onConfirm={() => removeContainers(selected.map(toTarget), { force, volumes }, environmentId)}
           onDone={clear}
           extra={
             <div className="flex flex-col gap-3">
@@ -282,6 +291,7 @@ function BulkActions({ selected, clear, isAdmin }: { selected: ContainerRow[]; c
 }
 
 function BulkUpdate({ selected, clear }: { selected: ContainerRow[]; clear: () => void }) {
+  const environmentId = useEnvironmentId()
   const targets = selected.filter((r) => r.update?.status === "update")
   const compose = targets.filter((r) => r.stack).length
   return (
@@ -297,13 +307,14 @@ function BulkUpdate({ selected, clear }: { selected: ContainerRow[]; clear: () =
           : null
       }
       destructive={false}
-      onConfirm={() => bulkPullAndRecreate(targets.map(toTarget))}
+      onConfirm={() => bulkPullAndRecreate(targets.map(toTarget), environmentId)}
       onDone={clear}
     />
   )
 }
 
-function RowActions({ row, isAdmin }: { row: ContainerRow; isAdmin: boolean }) {
+function RowActions({ row, can }: { row: ContainerRow; can: ContainerRights }) {
+  const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   const [confirmRemove, setConfirmRemove] = React.useState(false)
   const [confirmPull, setConfirmPull] = React.useState(false)
@@ -313,7 +324,7 @@ function RowActions({ row, isAdmin }: { row: ContainerRow; isAdmin: boolean }) {
   const running = row.state === "running"
   const paused = row.state === "paused"
   const act = (action: ContainerAction, label: string) =>
-    run(() => containerAction(row.id, action), `${row.name}: ${label}`)
+    run(() => containerAction(row.id, action, environmentId), `${row.name}: ${label}`)
 
   return (
     <div className="flex justify-end">
@@ -328,10 +339,10 @@ function RowActions({ row, isAdmin }: { row: ContainerRow; isAdmin: boolean }) {
           <DropdownMenuItem asChild>
             <Link href={`/containers/${row.id}`}>
               <FileTextIcon />
-              Details & logs
+              {can.operate ? "Details & logs" : "Details"}
             </Link>
           </DropdownMenuItem>
-          {isAdmin && running ? (
+          {can.manage && running ? (
             <DropdownMenuItem asChild>
               <Link href={`/containers/${row.id}?tab=console`}>
                 <TerminalSquareIcon />
@@ -339,42 +350,44 @@ function RowActions({ row, isAdmin }: { row: ContainerRow; isAdmin: boolean }) {
               </Link>
             </DropdownMenuItem>
           ) : null}
-          <DropdownMenuSeparator />
-          {!running && !paused ? (
+          {can.operate ? <DropdownMenuSeparator /> : null}
+          {can.operate && !running && !paused ? (
             <DropdownMenuItem onSelect={() => act("start", "started")}>
               <PlayIcon />
               Start
             </DropdownMenuItem>
           ) : null}
-          {running ? (
+          {can.operate && running ? (
             <DropdownMenuItem onSelect={() => act("stop", "stopped")}>
               <SquareIcon />
               Stop
             </DropdownMenuItem>
           ) : null}
-          <DropdownMenuItem onSelect={() => act("restart", "restarted")}>
-            <RotateCwIcon />
-            Restart
-          </DropdownMenuItem>
-          {running ? (
+          {can.operate ? (
+            <DropdownMenuItem onSelect={() => act("restart", "restarted")}>
+              <RotateCwIcon />
+              Restart
+            </DropdownMenuItem>
+          ) : null}
+          {can.operate && running ? (
             <DropdownMenuItem onSelect={() => act("pause", "paused")}>
               <PauseIcon />
               Pause
             </DropdownMenuItem>
           ) : null}
-          {paused ? (
+          {can.operate && paused ? (
             <DropdownMenuItem onSelect={() => act("unpause", "resumed")}>
               <PlayIcon />
               Resume
             </DropdownMenuItem>
           ) : null}
-          {running ? (
+          {can.operate && running ? (
             <DropdownMenuItem onSelect={() => act("kill", "killed")}>
               <ZapIcon />
               Kill
             </DropdownMenuItem>
           ) : null}
-          {isAdmin ? (
+          {can.manage ? (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => setConfirmPull(true)}>
@@ -389,7 +402,7 @@ function RowActions({ row, isAdmin }: { row: ContainerRow; isAdmin: boolean }) {
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
-      {isAdmin ? (
+      {can.manage ? (
         <PullRecreateConfirm
           open={confirmPull}
           onOpenChange={setConfirmPull}
@@ -405,7 +418,7 @@ function RowActions({ row, isAdmin }: { row: ContainerRow; isAdmin: boolean }) {
         title={`Remove ${row.name}?`}
         description="The container and its writable layer will be deleted. This cannot be undone."
         confirmLabel="Remove"
-        onConfirm={() => removeContainer(row.id, { force, volumes })}
+        onConfirm={() => removeContainer(row.id, { force, volumes }, environmentId)}
         extra={
           <div className="flex flex-col gap-3">
             <Label className="font-normal">

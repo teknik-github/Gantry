@@ -27,10 +27,6 @@ export function PageHeader({
   )
 }
 
-export function PageBody({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">{children}</div>
-}
-
 export function DockerUnavailable({ message }: { message: string }) {
   if (message === NO_ENVIRONMENT_ASSIGNED) return <NoEnvironment />
   if (message === KUBERNETES_ENVIRONMENT) return <WrongEnvironmentKind kind="kubernetes" />
@@ -126,6 +122,6 @@ export function StateBadge({ state }: { state: string }) {
   )
 }
 
-export function Mono({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <span className={cn("font-mono text-xs", className)}>{children}</span>
+export function Mono({ className, ...props }: React.ComponentProps<"span">) {
+  return <span className={cn("font-mono text-xs", className)} {...props} />
 }

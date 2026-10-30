@@ -1,23 +1,40 @@
 import type { NextRequest } from "next/server"
 import { z } from "zod"
 
+import { allows } from "@/lib/permissions"
 import { getCurrentUser } from "@/lib/server/auth/dal"
+import { getDb } from "@/lib/server/db"
 import {
   closeSession,
   ExecSessionError,
   openOutputStream,
   resizeSession,
+  sessionEnvironment,
   writeInput,
 } from "@/lib/server/docker/exec"
+import { environmentRoleFor } from "@/lib/server/environment-access"
 
 // Console I/O for sessions opened by startExecSession (containers/actions.ts).
 // proxy.ts already requires a session for /api/*; each handler also checks the
-// user is still an administrator and owns the console session.
+// user (browser session only, no API tokens) owns the console and still has
+// the manager role in the environment it runs in. Role changes also close
+// consoles right away (lib/server/users.ts).
 
-async function requireAdmin() {
+async function requireConsole(sid: string) {
   const user = await getCurrentUser()
   if (!user) return { error: Response.json({ error: "Unauthorized" }, { status: 401 }) }
-  if (user.role !== "admin") return { error: Response.json({ error: "Forbidden" }, { status: 403 }) }
+  if (user.via !== "session") return { error: Response.json({ error: "Forbidden" }, { status: 403 }) }
+  let environmentId: number
+  try {
+    environmentId = sessionEnvironment(sid, user.id)
+  } catch (err) {
+    return { error: failure(err) }
+  }
+  const role = user.role === "admin" ? null : await environmentRoleFor(await getDb(), user.id, environmentId)
+  if (!allows(user.role, role, "manage")) {
+    await closeSession(sid, user.id).catch(() => {})
+    return { error: Response.json({ error: "Forbidden" }, { status: 403 }) }
+  }
   return { user }
 }
 
@@ -29,9 +46,9 @@ function failure(err: unknown) {
 
 /** Terminal output as a raw byte stream. */
 export async function GET(request: NextRequest, ctx: RouteContext<"/api/exec/[sid]">) {
-  const { user, error } = await requireAdmin()
-  if (error) return error
   const { sid } = await ctx.params
+  const { user, error } = await requireConsole(sid)
+  if (error) return error
 
   try {
     const stream = openOutputStream(sid, user.id, request.signal)
@@ -55,9 +72,9 @@ const inputSchema = z.union([
 
 /** Keystrokes ({ data }) or a terminal resize ({ cols, rows }). */
 export async function POST(request: NextRequest, ctx: RouteContext<"/api/exec/[sid]">) {
-  const { user, error } = await requireAdmin()
-  if (error) return error
   const { sid } = await ctx.params
+  const { user, error } = await requireConsole(sid)
+  if (error) return error
 
   const parsed = inputSchema.safeParse(await request.json().catch(() => null))
   if (!parsed.success) return Response.json({ error: "Invalid input" }, { status: 400 })
@@ -73,9 +90,9 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/exec/[s
 
 /** Ends the console; returns the exit code if the shell already finished. */
 export async function DELETE(_request: NextRequest, ctx: RouteContext<"/api/exec/[sid]">) {
-  const { user, error } = await requireAdmin()
-  if (error) return error
   const { sid } = await ctx.params
+  const { user, error } = await requireConsole(sid)
+  if (error) return error
 
   try {
     return Response.json(await closeSession(sid, user.id))

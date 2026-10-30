@@ -87,6 +87,7 @@ describe.skipIf(!available)("Docker over TLS", () => {
     const userId = 4242
     const sid = await openExecSession({
       userId,
+      environmentId: 1,
       target: target({ ca: fx.ca, ...fx.client }),
       containerId,
       cmd: ["/bin/sh"],

@@ -2,7 +2,8 @@ import type { Metadata } from "next"
 
 import { KubeUnavailable, loadKubePage, NamespaceFilter } from "@/components/gantry/kubernetes/page"
 import { IngressesTable, ServicesTable } from "@/components/gantry/kubernetes/tables"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 import { toIngressRows, toServiceRows } from "@/lib/kubernetes/rows"
 import { tryKube } from "@/lib/server/kubernetes"
 

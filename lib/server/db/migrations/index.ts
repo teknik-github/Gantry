@@ -12,6 +12,7 @@ import { templates } from "@/lib/server/db/migrations/007_templates"
 import { notifications } from "@/lib/server/db/migrations/008_notifications"
 import { kubernetes } from "@/lib/server/db/migrations/009_kubernetes"
 import { proxy } from "@/lib/server/db/migrations/010_proxy"
+import { auth } from "@/lib/server/db/migrations/011_auth"
 
 // One file per migration, written with Kysely's schema builder only so the
 // same migrations run on SQLite and MySQL. Never edit a migration that has
@@ -27,6 +28,7 @@ const migrations: Record<string, Migration> = {
   "008_notifications": notifications,
   "009_kubernetes": kubernetes,
   "010_proxy": proxy,
+  "011_auth": auth,
 }
 
 export const migrationProvider: MigrationProvider = {

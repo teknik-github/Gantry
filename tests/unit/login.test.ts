@@ -2,9 +2,17 @@ import { SignJWT } from "jose"
 import { describe, expect, it } from "vitest"
 
 import { safeNext } from "@/lib/safe-redirect"
-import { hashPassword, verifyPassword } from "@/lib/server/auth/password"
+import { hashPassword, PasswordBusyError, verifyPassword } from "@/lib/server/auth/password"
 import { signSession, verifySession } from "@/lib/server/auth/token"
-import { ACCOUNT_LIMIT, CLIENT_LIMIT, clientAddress, loginRateKeys } from "@/lib/server/login-limits"
+import { signDevice, signOidcState, signPending2fa, verifyDevice, verifyPending2fa } from "@/lib/server/auth/flow-tokens"
+import {
+  ACCOUNT_LIMIT,
+  auditedLoginName,
+  CLIENT_LIMIT,
+  clientAddress,
+  loginRateKeys,
+  shouldAuditFailure,
+} from "@/lib/server/login-limits"
 import { checkRateLimit, clearFailures, recordFailure } from "@/lib/server/rate-limit"
 
 const secret = new TextEncoder().encode(process.env.GANTRY_SECRET)
@@ -27,6 +35,17 @@ describe("password hashing", () => {
     expect(a).not.toBe(b)
   })
 
+  it("caps concurrent password checks and refuses the excess", async () => {
+    const hash = await hashPassword("pw")
+    const results = await Promise.allSettled(Array.from({ length: 40 }, () => verifyPassword("pw", hash)))
+    const busy = results.filter((r) => r.status === "rejected")
+    expect(busy.length).toBe(6) // 2 running + 32 queued
+    for (const r of busy) expect((r as PromiseRejectedResult).reason).toBeInstanceOf(PasswordBusyError)
+    expect(results.filter((r) => r.status === "fulfilled" && r.value === true)).toHaveLength(34)
+    // The queue drains completely afterwards.
+    expect(await verifyPassword("pw", hash)).toBe(true)
+  }, 60_000)
+
   it("rejects malformed stored hashes", async () => {
     expect(await verifyPassword("x", "")).toBe(false)
     expect(await verifyPassword("x", "bcrypt$whatever")).toBe(false)
@@ -35,8 +54,8 @@ describe("password hashing", () => {
 
 describe("session token", () => {
   it("round-trips a valid session", async () => {
-    const token = await signSession({ uid: 7, role: "admin" })
-    expect(await verifySession(token)).toEqual({ uid: 7, role: "admin" })
+    const token = await signSession({ uid: 7, role: "admin", ver: 3 })
+    expect(await verifySession(token)).toEqual({ uid: 7, role: "admin", ver: 3 })
   })
 
   it("returns null without a token", async () => {
@@ -46,7 +65,7 @@ describe("session token", () => {
   })
 
   it("rejects a token whose payload was tampered with", async () => {
-    const token = await signSession({ uid: 7, role: "user" })
+    const token = await signSession({ uid: 7, role: "user", ver: 0 })
     const [header, payload, sig] = token.split(".")
     const claims = JSON.parse(Buffer.from(payload, "base64url").toString())
     const forged = Buffer.from(JSON.stringify({ ...claims, role: "admin" })).toString("base64url")
@@ -105,11 +124,41 @@ describe("post-login redirect (next=)", () => {
     "https://evil.com",
     "javascript:alert(1)",
     "evil.com",
+    "/\t/evil.com",
+    "/\n/evil.com",
+    "/\r\n/evil.com",
+    "/ /evil.com",
+    "/\u0000/evil.com",
+    "/%09/evil.com/..",
+    "/foo\\bar",
     "",
     null,
     undefined,
-  ])("falls back to /dashboard for %s", (value) => {
-    expect(safeNext(value)).toBe("/dashboard")
+  ])("falls back to /dashboard for %j", (value) => {
+    const next = safeNext(value)
+    // Whatever comes back must stay on our origin when a browser resolves it.
+    expect(new URL(next, "https://gantry.example.com").origin).toBe("https://gantry.example.com")
+    if (typeof value !== "string" || !value.startsWith("/%09")) expect(next).toBe("/dashboard")
+  })
+
+  it("keeps query and hash, and normalizes dot segments", () => {
+    expect(safeNext("/containers?x=1#logs")).toBe("/containers?x=1#logs")
+    expect(safeNext("/a/../images")).toBe("/images")
+  })
+})
+
+describe("multi-step login tokens", () => {
+  it("are never accepted as sessions", async () => {
+    expect(await verifySession(await signPending2fa({ uid: 1, next: "/" }))).toBeNull()
+    expect(await verifySession(await signDevice(1))).toBeNull()
+    expect(await verifySession(await signOidcState({ state: "s", nonce: "n", verifier: "v", next: "/" }))).toBeNull()
+  })
+
+  it("can't be swapped for each other", async () => {
+    expect(await verifyPending2fa(await signDevice(1))).toBeNull()
+    expect(await verifyDevice(await signPending2fa({ uid: 1, next: "/" }))).toBeNull()
+    expect(await verifyPending2fa(await signSession({ uid: 1, role: "admin", ver: 0 }))).toBeNull()
+    expect(await verifyPending2fa(await signPending2fa({ uid: 7, next: "/x" }))).toEqual({ uid: 7, next: "/x" })
   })
 })
 
@@ -160,6 +209,24 @@ describe("login rate-limit keys", () => {
     expect(accountKey(a)).toBe("login:account:admin")
     expect(accountKey(b)).toBe(accountKey(a))
     expect(loginRateKeys("admin", null)).toEqual([{ key: "login:account:admin", limit: ACCOUNT_LIMIT }])
+  })
+
+  it("moves a browser with a device cookie to its own bucket", () => {
+    // Someone filling the account bucket can't lock the owner's browser out.
+    expect(loginRateKeys("Admin", null, "dev-1")).toEqual([{ key: "login:device:dev-1:admin", limit: ACCOUNT_LIMIT }])
+    expect(loginRateKeys("admin", "10.0.0.9", "dev-1").map((k) => k.key)).toEqual([
+      "login:device:dev-1:admin",
+      "login:client:10.0.0.9:admin",
+    ])
+  })
+
+  it("audits only the first failure and the lockout of a window", () => {
+    expect([1, 2, 5, 9, 10, 11].map((n) => shouldAuditFailure(n, 10))).toEqual([true, false, false, false, true, false])
+  })
+
+  it("never audits what may be a password typed as the username", () => {
+    expect(auditedLoginName(" admin ", true)).toBe("admin")
+    expect(auditedLoginName("hunter2-my-password", false)).toBe("(unknown user)")
   })
 
   it("adds a stricter per-client bucket only for a trusted address", () => {

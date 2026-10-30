@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
 
 import { UsersTable } from "@/components/gantry/admin-tables"
-import { PageBody, PageHeader } from "@/components/gantry/ui"
+import { PageBody } from "@/components/gantry/page-body"
+import { PageHeader } from "@/components/gantry/ui"
 import { timeAgo } from "@/lib/format"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { getDb } from "@/lib/server/db"
@@ -13,7 +14,11 @@ export default async function UsersPage() {
   const me = await requireAdmin()
   const db = await getDb()
   const [users, environments, grants] = await Promise.all([
-    db.selectFrom("users").select(["id", "username", "role", "created_at"]).orderBy("username").execute(),
+    db
+      .selectFrom("users")
+      .select(["id", "username", "role", "created_at", "totp_enabled", "oidc_subject"])
+      .orderBy("username")
+      .execute(),
     db.selectFrom("environments").select(["id", "name"]).orderBy("id").execute(),
     listGrants(db),
   ])
@@ -22,7 +27,7 @@ export default async function UsersPage() {
     <PageBody>
       <PageHeader
         title="Users"
-        description="Administrators have full control of every environment. Standard users can view resources and start, stop or restart containers in the environments they were given access to."
+        description="Administrators manage Gantry and have full control of every environment. Standard users only use the environments they were given, as viewer (read-only), operator (start, stop, restart, logs) or manager (full control of that environment)."
       />
       <UsersTable
         // Plain objects: node:sqlite rows have a null prototype.
@@ -33,7 +38,9 @@ export default async function UsersPage() {
           role: u.role,
           createdLabel: timeAgo(u.created_at),
           self: u.id === me.id,
-          environmentIds: grants.filter((g) => g.user_id === u.id).map((g) => g.environment_id),
+          grants: grants.filter((g) => g.user_id === u.id).map((g) => ({ id: g.environment_id, role: g.role })),
+          twoFactor: Number(u.totp_enabled) === 1,
+          sso: Boolean(u.oidc_subject),
         }))}
       />
     </PageBody>

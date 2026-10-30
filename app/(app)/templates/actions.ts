@@ -5,7 +5,8 @@ import { redirect } from "next/navigation"
 import { z } from "zod"
 
 import { customTemplateId, customTemplateKey, checkVariables, generatePassword, mergeVariables, renderDotenv, templateDefaultsFromEnv } from "@/lib/templates"
-import { runAction, UserError } from "@/lib/server/action"
+import { ENVIRONMENT_FIELD } from "@/lib/permissions"
+import { expectedEnvironment, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import { getStack } from "@/lib/server/stacks"
 import { createStackInCurrentEnvironment } from "@/lib/server/stacks/create"
 import {
@@ -55,7 +56,9 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
 
   const env = renderDotenv(template.variables, check.values)
   let createdId = 0
-  const res = await runAction("admin", "template.deploy", `${template.title} → ${name.data}`, async (ctx) => {
+  // Deploying is a stack in the current environment: managers can; editing templates is global (admins).
+  const scope = inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD)))
+  const res = await runAction(scope, "template.deploy", `${template.title} → ${name.data}`, async (ctx) => {
     createdId = await createStackInCurrentEnvironment(ctx, {
       name: name.data,
       compose: template.compose,

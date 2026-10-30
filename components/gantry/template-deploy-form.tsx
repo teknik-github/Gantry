@@ -6,6 +6,7 @@ import { EyeIcon, EyeOffIcon, RocketIcon, WandSparklesIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { deployTemplate } from "@/app/(app)/templates/actions"
+import { EnvironmentField } from "@/components/gantry/environment-scope"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -37,6 +38,7 @@ export function TemplateDeployForm({
 
   return (
     <form action={formAction} className="flex flex-col gap-6">
+      <EnvironmentField />
       <input type="hidden" name="template" value={templateKey} />
       <FieldGroup>
         <Field data-invalid={errs.name ? true : undefined} className="max-w-sm">

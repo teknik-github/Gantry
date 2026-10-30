@@ -2,7 +2,7 @@
 
 import { z } from "zod"
 
-import { runAction, UserError } from "@/lib/server/action"
+import { expectedEnvironment, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import {
   AutoUpdateBusyError,
   runAutoUpdate,
@@ -24,10 +24,11 @@ export async function saveSchedule(_prev: ActionState, formData: FormData): Prom
   })
 }
 
-export async function setContainerAutoUpdate(name: string, on: boolean): Promise<ActionState> {
+/** Per-container opt-in in the current environment: managers of it may change it. */
+export async function setContainerAutoUpdate(name: string, on: boolean, environmentId?: number): Promise<ActionState> {
   const parsed = z.string().min(1).max(255).regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/).safeParse(name)
   if (!parsed.success) return { error: "Invalid container name" }
-  return runAction("admin", on ? "auto-update.enable" : "auto-update.disable", parsed.data, async () => {
+  return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), on ? "auto-update.enable" : "auto-update.disable", parsed.data, async () => {
     const env = await getCurrentEnvironment()
     if (!env) throw new UserError("No Docker environment configured")
     await setEnrolled(env.id, parsed.data, on === true)
@@ -35,7 +36,7 @@ export async function setContainerAutoUpdate(name: string, on: boolean): Promise
   })
 }
 
-/** Runs auto-update now on every environment (same as the scheduled run). */
+/** Runs auto-update now on every environment (same as the scheduled run), so administrators only. */
 export async function runAutoUpdateNow(): Promise<ActionState> {
   return runAction("admin", "auto-update.run", "manual", async ({ user }) => {
     try {
