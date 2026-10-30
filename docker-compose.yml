@@ -39,6 +39,8 @@ services:
       METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-7}
       # Image update checks against the registries (hours; 0 = on demand only).
       UPDATE_CHECK_INTERVAL_HOURS: ${UPDATE_CHECK_INTERVAL_HOURS:-6}
+      # Scheduled backups (default /data/backups); mount another volume to keep them off the data disk.
+      BACKUP_DIR: ${BACKUP_DIR:-}
       # Public URL (OIDC callback: $GANTRY_URL/auth/oidc/callback).
       GANTRY_URL: ${GANTRY_URL:-}
       # Single sign-on (OpenID Connect); off unless issuer and client id are set.

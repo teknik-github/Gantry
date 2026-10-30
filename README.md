@@ -29,6 +29,8 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
   when an environment is unreachable, and for image updates
 - **Auto-update**: scheduled daily updates for the containers you choose
   (or label `gantry.auto-update=true`), rolled back on failure
+- **Backups**: encrypted backups of all of Gantry's data (download, or daily
+  to a directory with retention) and restore, across SQLite and MySQL
 - **Reverse proxy**: serve containers under domain names with automatic HTTPS,
   through a built-in Caddy proxy or the proxy you already run
 - **Bulk actions**: tick several containers, images, volumes or networks and
@@ -165,6 +167,7 @@ against the same throwaway cluster.
 | `METRICS_INTERVAL_SECONDS` | `60` | How often the dashboard history is sampled (minimum 10) |
 | `METRICS_RETENTION_DAYS` | `7` | How long history is kept |
 | `UPDATE_CHECK_INTERVAL_HOURS` | `6` | How often registries are asked about newer images (`0` = only on demand) |
+| `BACKUP_DIR` | `$DATA_DIR/backups` | Where scheduled backups are written (mount another disk here) |
 | `GANTRY_URL` | | Public URL of Gantry (e.g. `https://gantry.example.com`); the OIDC callback is `$GANTRY_URL/auth/oidc/callback` |
 | `OIDC_ISSUER` | | OpenID provider (issuer URL); single sign-on is off unless this and `OIDC_CLIENT_ID` are set |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | Client registered at the provider (confidential client; the secret is optional for public clients, PKCE is always used) |
@@ -399,6 +402,34 @@ time, with rollback on failure; containers pinned to a digest, built locally or
 running Gantry itself are skipped. "Run now" does the same immediately. The
 last run's results stay on the page, are recorded in the activity log (as
 `auto-update`) and are sent to channels subscribed to auto-update results.
+
+### Backups and restore
+
+**Backups** (administrators) holds everything Gantry stores — environments,
+users (with 2FA and API tokens), stacks and their Git settings, templates,
+registries, notification channels, proxy hosts, settings, history — plus the
+secret that seals the encrypted values (TLS keys, cluster and Git
+credentials, registry passwords, 2FA secrets, notification settings). It does
+not contain containers, images or volumes: back those up with Docker's own
+tools. Stack folders are rewritten from the database on the next deploy.
+
+- A backup is a `.gbk` file: gzipped JSON encrypted with AES-256-GCM under a
+  key derived from your passphrase (scrypt; at least 12 characters). Without
+  the passphrase it can't be opened, and Gantry can't recover it.
+- **Download** one at any time, or schedule a **daily backup** (time in the
+  server's time zone) written to `BACKUP_DIR` with the newest *N* kept. The
+  scheduled passphrase is stored encrypted; failures are sent to channels
+  subscribed to "Backup failed". Scripts can take backups with an
+  administrator's API token: `curl -H "Authorization: Bearer gtk_…" -H
+  "Content-Type: application/json" -d '{"passphrase":"…"}' -o gantry.gbk
+  https://gantry.example.com/api/backup`.
+- **Restore** replaces all data with the backup's in one transaction and
+  signs everyone out. Backups are database-independent, so a SQLite backup
+  restores into MySQL and the other way round (create the first administrator
+  with `/setup`, then restore). A backup from a newer Gantry is refused. If the
+  backup was made with another secret, `DATA_DIR/secret.key` is replaced and
+  Gantry must be restarted; with `GANTRY_SECRET` set, set it to the backup's
+  value first.
 
 ### Reverse proxy
 
