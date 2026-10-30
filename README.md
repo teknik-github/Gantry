@@ -21,7 +21,7 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
 - **Templates**: 35 ready-made stacks (databases, WordPress, Nextcloud,
   monitoring, Gitea, n8n, Keycloak, Ollama + Open WebUI, ...) plus your own
   templates from any compose file
-- **Notifications**: alerts to Telegram, Discord, Slack, ntfy or any webhook
+- **Notifications**: alerts to Telegram, Discord, Slack, ntfy, email (SMTP) or any webhook
   when containers crash, run out of memory, turn unhealthy or restart-loop,
   when an environment is unreachable, and for image updates
 - **Auto-update**: scheduled daily updates for the containers you choose
@@ -151,9 +151,14 @@ see below; it also tests the token form). The test workload runs `alpine:3`.
   `env_file: .env` to a service to pass the values into its containers.
   Gantry's own environment (secrets, DB credentials) is never exposed to
   compose files.
-- Private registries: mount a docker `config.json` and set `DOCKER_CONFIG`.
+- Private registries: add them under **Registries** (or mount a docker
+  `config.json` and set `DOCKER_CONFIG`).
 - Stack names are compose project names (`^[a-z0-9][a-z0-9_-]{0,62}$`). A name
   that matches an existing compose project is refused; use **Import** instead.
+  Import reads the compose file named in the project's labels, so it is only
+  offered for the local socket environment (whose files Gantry can see).
+- The compose file and the deploy output may contain secrets, so only
+  administrators can see them (standard users see the variable names).
 - Changes are admin-only, since compose files can bind-mount anything on the host.
 
 ### Edit / recreate containers
@@ -235,10 +240,12 @@ environment instead of `.env`.
 
 Administrators add channels under **Notifications**: Telegram (bot token +
 chat id), Discord or Slack (incoming webhook URL), ntfy (server + topic,
-optional token) or a generic webhook that receives a JSON POST per alert. Each
+optional token), email through any SMTP server (STARTTLS, TLS or plain for
+local relays) or a generic webhook that receives a JSON POST per alert. Each
 channel picks which alerts it gets; "Send a test" checks the settings. Tokens
 and webhook URLs are encrypted and never shown again (leave them empty when
-editing to keep them).
+editing to keep them; changing where they are sent, such as the ntfy server or
+SMTP host, requires entering them again).
 
 Gantry keeps one Docker event stream open per environment and raises:
 
@@ -287,6 +294,10 @@ last run's results stay on the page, are recorded in the activity log (as
   ready-to-paste config per host (Traefik labels, a Caddyfile block, an nginx
   `server`).
 - **Off** removes the built-in proxy container (its certificate volumes stay).
+
+Shortcuts: a container's page lists the domains proxied to it and has
+**Expose via proxy**; deploying a template can create a proxy host for one of
+its services (pick the service and port, a domain and the TLS mode).
 
 ### Environments: TLS and access
 
