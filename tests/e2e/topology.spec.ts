@@ -13,12 +13,13 @@ const NET = "gantry-test-e-topo-net"
 const VOL = "gantry-test-e-topo-vol"
 const DB = "gantry-test-e-topo-db"
 const WEB = "gantry-test-e-topo-web"
+const CACHE = "gantry-test-e-topo-cache"
 const E2E_LABEL = { "gantry.e2e": "true" }
 
 const ids = { db: "", web: "" }
 
 async function cleanup() {
-  for (const name of [WEB, DB]) await removeContainer(name)
+  for (const name of [CACHE, WEB, DB]) await removeContainer(name)
   await docker("DELETE", `/volumes/${VOL}`).catch(() => {})
   await docker("DELETE", `/networks/${NET}`).catch(() => {})
 }
@@ -121,6 +122,30 @@ test("topology shows a compose project with its network, volume and dependencies
   await expect(open).toHaveAttribute("href", `/containers/${ids.web}`)
   await open.click()
   await expect(page).toHaveURL(new RegExp(`/containers/${ids.web}$`))
+})
+
+test("topology follows Docker without reloading", async ({ page }) => {
+  test.setTimeout(DOCKER_TIMEOUT)
+  await signIn(page)
+  await page.goto(`/topology?project=${PROJECT}`)
+  await expect(page.getByTestId("live-indicator")).toHaveAttribute("data-status", "connected")
+  const canvas = page.getByTestId("topology-canvas")
+  await expect(canvas.getByTestId("topology-container")).toHaveCount(2)
+  // A reload would drop this marker.
+  await page.evaluate(() => ((window as unknown as { __gantryNoReload: boolean }).__gantryNoReload = true))
+
+  // Generous: the Docker host is shared and busy.
+  const timeout = 45_000
+  const id = await composeContainer(CACHE, "cache", "db:service_healthy:true")
+  await expect(canvas.getByLabel(`Container ${CACHE}`)).toBeVisible({ timeout })
+  await expect(canvas.getByTestId("topology-container")).toHaveCount(3)
+  await expect(canvas.getByLabel(`Compose project ${PROJECT}`)).toContainText("3/3 running")
+  await expect(canvas.locator(`.react-flow__edge[data-id="dep:container:${id}->container:${ids.db}"]`)).toHaveCount(1)
+
+  await removeContainer(id)
+  await expect(canvas.getByLabel(`Container ${CACHE}`)).toHaveCount(0, { timeout })
+  await expect(canvas.getByTestId("topology-container")).toHaveCount(2)
+  expect(await page.evaluate(() => (window as unknown as { __gantryNoReload?: boolean }).__gantryNoReload)).toBe(true)
 })
 
 test("topology filters: search, stopped containers and the project select", async ({ page }) => {
