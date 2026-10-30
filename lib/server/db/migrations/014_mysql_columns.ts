@@ -1,5 +1,7 @@
-import { MysqlAdapter, sql, type Kysely, type RawBuilder } from "kysely"
+import { sql, type Kysely, type RawBuilder } from "kysely"
 import type { Migration } from "kysely/migration"
+
+import { isMysql } from "@/lib/server/db/migrations/dialect"
 
 // MySQL-only column fixes; SQLite doesn't enforce lengths and compares text
 // byte for byte, so there is nothing to change there.
@@ -45,7 +47,7 @@ const changes: Change[] = [
 
 export const mysqlColumns: Migration = {
   async up(db: Kysely<unknown>) {
-    if (!(db.getExecutor().adapter instanceof MysqlAdapter)) return
+    if (!isMysql(db)) return
     for (const c of changes) {
       await db.schema
         .alterTable(c.table)

@@ -13,13 +13,13 @@ export default defineConfig({
     environment: "node",
     include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
     testTimeout: 30_000,
+    // beforeAll hooks migrate a fresh database; with GANTRY_TEST_MYSQL_URL that
+    // is a dozen DDL migrations per file, run by several files at once.
+    hookTimeout: 60_000,
     env: {
       GANTRY_SECRET: "unit-test-secret-unit-test-secret-0123456789",
       DATA_DIR: ".test-data/unit",
       SESSION_TTL_HOURS: "12",
-      // Test databases are MySQL with GANTRY_TEST_MYSQL_URL (tests/helpers/mysql.ts);
-      // migrations 002/007 pick their column types from DB_DRIVER.
-      ...(process.env.GANTRY_TEST_MYSQL_URL ? { DB_DRIVER: "mysql" } : {}),
     },
   },
 })
