@@ -67,6 +67,8 @@ export default defineConfig({
           GANTRY_SETUP_TOKEN: "e2e-setup-token-0123456789abcdef",
           // Tests trigger update checks themselves.
           UPDATE_CHECK_INTERVAL_HOURS: "0",
+          // git-stacks.spec.ts serves its repository over http on 127.0.0.1.
+          GANTRY_TEST_ALLOW_HTTP_GIT: "1",
         },
       },
 })

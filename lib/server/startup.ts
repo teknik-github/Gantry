@@ -5,6 +5,7 @@ import { startAutoUpdateScheduler } from "@/lib/server/auto-update"
 import { bootstrapFirstRun } from "@/lib/server/bootstrap"
 import { startUpdateChecker } from "@/lib/server/image-updates"
 import { startMetricsSampler } from "@/lib/server/metrics-sampler"
+import { startGitPoller } from "@/lib/server/stacks/git-sync"
 
 /**
  * One-time server startup work (called from instrumentation.ts). Keep each
@@ -17,6 +18,7 @@ export async function runStartupTasks() {
     ["image update checker", startUpdateChecker],
     ["alert watcher", startAlertWatcher],
     ["auto-update scheduler", startAutoUpdateScheduler],
+    ["git stack poller", startGitPoller],
   ]
 
   for (const [name, task] of tasks) {

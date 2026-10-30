@@ -40,9 +40,21 @@ export function operationCommands(op: StackOperation, opts: { removeVolumes?: bo
   }
 }
 
-/** Full argv for `docker` (project name and files are always explicit). */
-export function composeArgs(project: string, command: string[]): string[] {
+/** Compose and env file, relative to the stack's directory. */
+export type ComposeFiles = { compose: string; env: string }
+
+const DEFAULT_FILES: ComposeFiles = { compose: COMPOSE_FILE, env: ENV_FILE }
+
+/**
+ * Full argv for `docker` (project name and files are always explicit). Git
+ * stacks pass the compose file inside their checkout, so relative paths in it
+ * resolve inside the repository.
+ */
+export function composeArgs(project: string, command: string[], files: ComposeFiles = DEFAULT_FILES): string[] {
   if (!STACK_NAME_RE.test(project)) throw new Error(`Invalid project name: ${project}`)
+  if (path.isAbsolute(files.compose) || files.compose.split(/[\\/]/).includes("..") || files.compose.startsWith("-")) {
+    throw new Error(`Invalid compose file path: ${files.compose}`)
+  }
   return [
     "compose",
     "--ansi",
@@ -52,9 +64,9 @@ export function composeArgs(project: string, command: string[]): string[] {
     "-p",
     project,
     "-f",
-    COMPOSE_FILE,
+    files.compose,
     "--env-file",
-    ENV_FILE,
+    files.env,
     ...command,
   ]
 }
@@ -111,6 +123,12 @@ export async function writeStackFiles(dir: string, compose: string, env: string)
   await fs.mkdir(dir, { recursive: true, mode: 0o700 })
   await fs.writeFile(path.join(/* turbopackIgnore: true */ dir, COMPOSE_FILE), compose, { mode: 0o600 })
   // .env may hold secrets.
+  await fs.writeFile(path.join(/* turbopackIgnore: true */ dir, ENV_FILE), env, { mode: 0o600 })
+}
+
+/** Git stacks: only the .env is Gantry's; the compose file comes from the checkout. */
+export async function writeEnvFile(dir: string, env: string) {
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 })
   await fs.writeFile(path.join(/* turbopackIgnore: true */ dir, ENV_FILE), env, { mode: 0o600 })
 }
 
@@ -176,8 +194,12 @@ export async function runCompose(opts: {
   timeoutMs: number
   /** Registry logins for pulls (written to a private config.json for the run). */
   registries?: RegistryCredentials[]
+  /** Defaults to docker-compose.yml and .env in `cwd`. */
+  files?: ComposeFiles
+  /** Output collected so far (e.g. git's), continued by this run. */
+  out?: OutputBuffer
 }): Promise<ComposeRun> {
-  const out = new OutputBuffer()
+  const out = opts.out ?? new OutputBuffer()
   const certDir = opts.target.tls ? await writeCerts(opts.target.tls) : null
   let configDir: string | null = null
   const deadline = Date.now() + opts.timeoutMs
@@ -187,7 +209,7 @@ export async function runCompose(opts: {
     const env = composeEnv(opts.target, certDir, process.env, configDir)
     for (const command of opts.commands) {
       out.append(`$ docker compose ${command.join(" ")}\n`)
-      const res = await spawnCompose(composeArgs(opts.project, command), opts.cwd, env, deadline - Date.now(), out)
+      const res = await spawnCompose(composeArgs(opts.project, command, opts.files), opts.cwd, env, deadline - Date.now(), out)
       if (res.timedOut) {
         out.append(`\nTimed out after ${Math.round(opts.timeoutMs / 1000)} s; the command was stopped.\n`)
         return { code: res.code, output: out.toString(), timedOut: true }

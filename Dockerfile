@@ -16,8 +16,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
 FROM node:24-alpine AS runner
-# docker compose CLI for stacks (talks to the environment's daemon via DOCKER_HOST).
-RUN apk add --no-cache docker-cli docker-cli-compose
+# docker compose CLI for stacks (talks to the environment's daemon via DOCKER_HOST),
+# git for stacks sourced from a Git repository.
+RUN apk add --no-cache docker-cli docker-cli-compose git
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

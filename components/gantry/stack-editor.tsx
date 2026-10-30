@@ -6,6 +6,7 @@ import { RocketIcon, SaveIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { createStack, updateStack } from "@/app/(app)/stacks/actions"
+import { updateGitStackEnv } from "@/app/(app)/stacks/git-actions"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -27,14 +28,21 @@ export const EXAMPLE_COMPOSE = `services:
  */
 export function StackEditor({
   stack,
+  gitComposePath,
 }: {
   /** Omit to create a new stack. */
   stack?: { id: number; name: string; compose: string; env: string }
+  /** Git stacks: only the .env is edited here; the compose file comes from the repository. */
+  gitComposePath?: string
 }) {
   const isNew = !stack
+  const isGit = Boolean(stack && gitComposePath)
   const [intent, setIntent] = React.useState<"save" | "deploy">("save")
   // The Server Action itself (not a client wrapper) so the form works before hydration.
-  const [state, formAction, pending] = useActionState<ActionState, FormData>(isNew ? createStack : updateStack, {})
+  const [state, formAction, pending] = useActionState<ActionState, FormData>(
+    isNew ? createStack : isGit ? updateGitStackEnv : updateStack,
+    {}
+  )
   React.useEffect(() => {
     if (state.ok) toast.success(state.message ?? "Saved")
     else if (state.error && !state.fieldErrors) toast.error(state.error)
@@ -66,25 +74,27 @@ export function StackEditor({
           </Field>
         ) : null}
 
-        <Field data-invalid={errs.compose ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-stack-compose`}>Compose file</FieldLabel>
-          <Textarea
-            id={`${uid}-stack-compose`}
-            name="compose"
-            defaultValue={values.compose ?? stack?.compose ?? EXAMPLE_COMPOSE}
-            className="max-h-[70vh] min-h-80 font-mono text-xs leading-relaxed md:text-xs"
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            wrap="off"
-            required
-            aria-invalid={errs.compose ? true : undefined}
-          />
-          <FieldDescription>
-            docker-compose.yml. Relative paths resolve from the stack&apos;s folder in Gantry&apos;s data directory.
-          </FieldDescription>
-          <FieldError>{errs.compose?.[0]}</FieldError>
-        </Field>
+        {isGit ? null : (
+          <Field data-invalid={errs.compose ? true : undefined}>
+            <FieldLabel htmlFor={`${uid}-stack-compose`}>Compose file</FieldLabel>
+            <Textarea
+              id={`${uid}-stack-compose`}
+              name="compose"
+              defaultValue={values.compose ?? stack?.compose ?? EXAMPLE_COMPOSE}
+              className="max-h-[70vh] min-h-80 font-mono text-xs leading-relaxed md:text-xs"
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              wrap="off"
+              required
+              aria-invalid={errs.compose ? true : undefined}
+            />
+            <FieldDescription>
+              docker-compose.yml. Relative paths resolve from the stack&apos;s folder in Gantry&apos;s data directory.
+            </FieldDescription>
+            <FieldError>{errs.compose?.[0]}</FieldError>
+          </Field>
+        )}
 
         <Field data-invalid={errs.env ? true : undefined}>
           <FieldLabel htmlFor={`${uid}-stack-env`}>Environment variables</FieldLabel>
@@ -100,10 +110,18 @@ export function StackEditor({
             wrap="off"
             aria-invalid={errs.env ? true : undefined}
           />
-          <FieldDescription>
-            Written to the stack&apos;s <code>.env</code> (KEY=value per line). Use <code>env_file: .env</code> in a
-            service to pass them into containers.
-          </FieldDescription>
+          {isGit ? (
+            <FieldDescription>
+              Kept in Gantry, not in the repository (KEY=value per line), and used for <code>${"{VARIABLE}"}</code>{" "}
+              substitution in <code>{gitComposePath}</code>. Pass values into containers with{" "}
+              <code>environment:</code> entries such as <code>KEY: ${"{KEY}"}</code>.
+            </FieldDescription>
+          ) : (
+            <FieldDescription>
+              Written to the stack&apos;s <code>.env</code> (KEY=value per line). Use <code>env_file: .env</code> in a
+              service to pass them into containers.
+            </FieldDescription>
+          )}
           <FieldError>{errs.env?.[0]}</FieldError>
         </Field>
 

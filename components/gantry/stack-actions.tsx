@@ -4,6 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
   CloudDownloadIcon,
+  GitPullRequestArrowIcon,
   LayoutTemplateIcon,
   PlayIcon,
   PowerOffIcon,
@@ -36,15 +37,18 @@ export function StackActions({
   name,
   running,
   total,
+  git = false,
 }: {
   id: number
   name: string
   running: number
   total: number
+  /** Git stacks: "Pull & redeploy" fetches the repository; offer a forced redeploy too. */
+  git?: boolean
 }) {
   const router = useRouter()
   const [pending, run] = useRunAction()
-  const [current, setCurrent] = React.useState<StackOperation | null>(null)
+  const [current, setCurrent] = React.useState<StackOperation | "force" | null>(null)
   const [downVolumes, setDownVolumes] = React.useState(false)
   const [deleteVolumes, setDeleteVolumes] = React.useState(false)
 
@@ -52,11 +56,19 @@ export function StackActions({
     setCurrent(op)
     return run(() => stackOperation(id, op))
   }
+  const forceRedeploy = () => {
+    setCurrent("force")
+    return run(() => stackOperation(id, "redeploy", { force: true }))
+  }
   const busy = pending
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {busy && current ? <span className="text-sm text-muted-foreground">{PENDING_LABELS[current]}</span> : null}
+      {busy && current ? (
+        <span className="text-sm text-muted-foreground">
+          {current === "force" ? "Pulling & redeploying…" : PENDING_LABELS[current]}
+        </span>
+      ) : null}
       <Button size="sm" disabled={busy} onClick={() => act("deploy")}>
         <RocketIcon data-icon="inline-start" />
         Deploy
@@ -65,6 +77,18 @@ export function StackActions({
         <CloudDownloadIcon data-icon="inline-start" />
         Pull &amp; redeploy
       </Button>
+      {git ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={forceRedeploy}
+          title="Pull and redeploy even if the commit and .env didn't change"
+        >
+          <GitPullRequestArrowIcon data-icon="inline-start" />
+          Force redeploy
+        </Button>
+      ) : null}
       {total > 0 && running < total ? (
         <Button size="sm" variant="outline" disabled={busy} onClick={() => act("start")}>
           <PlayIcon data-icon="inline-start" />

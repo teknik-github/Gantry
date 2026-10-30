@@ -8,15 +8,10 @@ import { z } from "zod"
 
 import { runAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
-import type { CurrentUser } from "@/lib/server/auth/dal"
-import type { Stack } from "@/lib/server/db/schema"
-import type { DockerApi } from "@/lib/server/docker/api"
-import { getCurrentEnvironment } from "@/lib/server/environments"
 import {
   CONFIG_FILES_LABEL,
   deleteStackRecord,
   findStackByName,
-  getStack,
   groupByProject,
   insertStack,
   PROJECT_LABEL,
@@ -25,7 +20,10 @@ import {
   updateStackContent,
   WORKING_DIR_LABEL,
 } from "@/lib/server/stacks"
+import { auditName, currentEnvironmentId, loadStack, operate } from "@/lib/server/stacks/action-helpers"
 import { createStackInCurrentEnvironment } from "@/lib/server/stacks/create"
+import { getStackGit } from "@/lib/server/stacks/git-records"
+import { shortSha } from "@/lib/git-stacks"
 import { removeStackDir, STACK_OPERATIONS, stackDir, type StackOperation } from "@/lib/server/stacks/compose"
 import { MAX_COMPOSE_BYTES, normalizeText, stackNameSchema, validateCompose, validateDotenv } from "@/lib/stacks"
 import type { ActionState } from "@/lib/validation"
@@ -51,58 +49,6 @@ function checkContent(formData: FormData) {
   const envError = validateDotenv(env)
   if (envError) fieldErrors.env = [envError]
   return { compose, env, fieldErrors }
-}
-
-/** The current environment, which every stack operation is scoped to. */
-async function currentEnvironmentId() {
-  const env = await getCurrentEnvironment()
-  if (!env) throw new UserError("No Docker environment configured")
-  return env.id
-}
-
-/** Stack name for the audit log (falls back to the id). Not an authorization check. */
-async function auditName(id: number) {
-  return (await getStack(id))?.name ?? `#${id}`
-}
-
-/** Loads a stack and makes sure it belongs to the environment the user is working in. */
-async function loadStack(id: number): Promise<Stack> {
-  const stack = await getStack(id)
-  if (!stack) throw new UserError("Stack not found")
-  if (stack.environment_id !== (await currentEnvironmentId())) {
-    throw new UserError("This stack belongs to another environment. Switch to it first.")
-  }
-  return stack
-}
-
-/**
- * Runs a compose operation; on failure records an audit entry, refreshes the
- * page so the stored output shows, and reports the error.
- */
-async function operate(
-  stack: Stack,
-  op: StackOperation,
-  ctx: { user: CurrentUser; docker: () => Promise<DockerApi> },
-  opts: { removeVolumes?: boolean } = {}
-) {
-  const { target } = await ctx.docker()
-  let run
-  try {
-    run = await runStackOperation(stack, target, op, ctx.user.username, opts)
-  } catch (err) {
-    if (err instanceof StackBusyError) throw new UserError(err.message)
-    throw err
-  }
-  if (run.code !== 0) {
-    await audit(ctx.user, `stack.${op}.failed`, stack.name)
-    refresh()
-    throw new UserError(
-      run.timedOut
-        ? `docker compose timed out for ${stack.name}. See the output on the stack page.`
-        : `docker compose failed for ${stack.name}. See the output on the stack page.`
-    )
-  }
-  return run
 }
 
 export async function createStack(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -143,6 +89,7 @@ export async function updateStack(_prev: ActionState, formData: FormData): Promi
   // runAction audits the deploy; the save is audited separately so it's recorded even if the deploy fails.
   const res = await runAction("admin", deploy ? "stack.deploy" : "stack.update", await auditName(id.data), async (ctx) => {
     const stack = await loadStack(id.data)
+    if (await getStackGit(stack.id)) throw new UserError("This stack's compose file comes from its Git repository")
     await updateStackContent(stack.id, compose, env)
     if (!deploy) return `Stack ${stack.name} saved`
     await audit(ctx.user, "stack.update", stack.name)
@@ -156,22 +103,30 @@ const operationSchema = z.object({
   id: idSchema,
   op: z.enum(STACK_OPERATIONS),
   removeVolumes: z.boolean().optional(),
+  force: z.boolean().optional(),
 })
 
+/**
+ * Runs a compose operation on a stack. For Git stacks "redeploy" fetches the
+ * repository first and does nothing when the commit and .env are unchanged,
+ * unless `force` is set.
+ */
 export async function stackOperation(
   id: number,
   op: StackOperation,
-  opts: { removeVolumes?: boolean } = {}
+  opts: { removeVolumes?: boolean; force?: boolean } = {}
 ): Promise<ActionState> {
-  const parsed = operationSchema.safeParse({ id, op, removeVolumes: opts.removeVolumes })
+  const parsed = operationSchema.safeParse({ id, op, removeVolumes: opts.removeVolumes, force: opts.force })
   if (!parsed.success) return { error: "Invalid request" }
-  const { removeVolumes } = parsed.data
+  const { removeVolumes, force } = parsed.data
 
-  const target = `${await auditName(parsed.data.id)}${removeVolumes ? " (with volumes)" : ""}`
+  const target = `${await auditName(parsed.data.id)}${removeVolumes ? " (with volumes)" : ""}${force ? " (forced)" : ""}`
   return runAction("admin", `stack.${parsed.data.op}`, target, async (ctx) => {
     const stack = await loadStack(parsed.data.id)
-    await operate(stack, parsed.data.op, ctx, { removeVolumes: removeVolumes === true })
-    return `${stack.name} ${OP_LABELS[parsed.data.op]}`
+    const run = await operate(stack, parsed.data.op, ctx, { removeVolumes: removeVolumes === true, force: force === true })
+    if (run.skipped) return `${stack.name} is already at ${shortSha(run.commit?.sha)} with the same .env; nothing to redeploy`
+    const at = run.commit ? ` at ${shortSha(run.commit.sha)}` : ""
+    return `${stack.name} ${OP_LABELS[parsed.data.op]}${at}`
   })
 }
 

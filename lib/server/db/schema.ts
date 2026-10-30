@@ -72,6 +72,36 @@ export interface StacksTable {
   last_run_by: string | null
 }
 
+/** Git source of a stack (lib/server/stacks/git-records.ts); stacks without a row are edited in Gantry. */
+export interface StackGitTable {
+  stack_id: number
+  /** https URL without credentials */
+  repo_url: string
+  /** Branch, tag or full commit id */
+  ref: string
+  /** Compose file relative to the repository root */
+  compose_path: string
+  /** Encrypted JSON {username, token}, null for public repositories */
+  credentials: string | null
+  /** Last successfully deployed commit */
+  commit_sha: string | null
+  commit_subject: string | null
+  commit_author: string | null
+  /** ISO author date */
+  commit_date: string | null
+  /** sha256 of commit, .env and compose path at the last successful deploy */
+  deployed_hash: string | null
+  /** Opaque id in the webhook URL; null = webhook disabled */
+  webhook_id: string | null
+  /** Encrypted webhook secret */
+  webhook_secret: string | null
+  /** Check for new commits every N minutes; 0 = off */
+  poll_minutes: Generated<number>
+  last_checked_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 /** Periodic resource usage samples per environment (lib/server/metrics-sampler.ts). */
 export interface MetricsTable {
   id: Generated<number>
@@ -189,6 +219,7 @@ export interface Database {
   environment_access: EnvironmentAccessTable
   audit_logs: AuditLogsTable
   stacks: StacksTable
+  stack_git: StackGitTable
   metrics: MetricsTable
   registries: RegistriesTable
   templates: TemplatesTable
@@ -205,6 +236,7 @@ export type NewUser = Insertable<UsersTable>
 export type Environment = Selectable<EnvironmentsTable>
 export type AuditLog = Selectable<AuditLogsTable>
 export type Stack = Selectable<StacksTable>
+export type StackGit = Selectable<StackGitTable>
 export type Metric = Selectable<MetricsTable>
 export type NewMetric = Insertable<MetricsTable>
 export type Registry = Selectable<RegistriesTable>

@@ -1,20 +1,23 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ArrowLeftIcon } from "lucide-react"
+import { ArrowLeftIcon, GitBranchIcon, GitCommitHorizontalIcon } from "lucide-react"
 
 import { StackActions } from "@/components/gantry/stack-actions"
 import { StackEditor } from "@/components/gantry/stack-editor"
+import { GitSourceDialog, WebhookPanel } from "@/components/gantry/stack-git"
 import { StackStatusBadge } from "@/components/gantry/stacks-table"
 import { DockerUnavailable, Mono, PageBody, StateBadge } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { formatDate, timeAgo } from "@/lib/format"
+import { shortSha } from "@/lib/git-stacks"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
 import { getStack, isStackBusy, PROJECT_LABEL } from "@/lib/server/stacks"
+import { getStackGit, publicGitInfo, type GitStackInfo } from "@/lib/server/stacks/git-records"
 import { summarizeProject } from "@/lib/server/stacks/views"
 import { tryDocker } from "@/lib/server/views"
 import { parseDotenv, validateCompose } from "@/lib/stacks"
@@ -71,6 +74,9 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
   const notCreated = defined.filter((s) => !withContainers.has(s))
 
   const changedSinceRun = stack.last_run_at !== null && stack.updated_at > stack.last_run_at
+  // Never the credentials or webhook secret: only what publicGitInfo exposes.
+  const gitRow = await getStackGit(stack.id)
+  const git = gitRow ? publicGitInfo(gitRow) : null
 
   return (
     <PageBody>
@@ -89,13 +95,21 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
           </p>
         </div>
         {isAdmin && result.error === undefined ? (
-          <StackActions id={stack.id} name={stack.name} running={summary.running} total={summary.total} />
+          <StackActions
+            id={stack.id}
+            name={stack.name}
+            running={summary.running}
+            total={summary.total}
+            git={git !== null}
+          />
         ) : null}
       </div>
 
       {result.error !== undefined ? <DockerUnavailable message={result.error} /> : null}
 
       <div className="grid gap-4 px-4 lg:px-6">
+        {git ? <GitCard stackId={stack.id} git={git} isAdmin={isAdmin} /> : null}
+
         {result.error === undefined ? (
           <Card>
             <CardHeader>
@@ -199,14 +213,42 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
           ) : null}
         </Card>
 
+        {isAdmin && git ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Webhook</CardTitle>
+              <CardDescription>Redeploy automatically when you push to {git.ref}.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <WebhookPanel stackId={stack.id} webhookId={git.webhookId} gitRef={git.ref} />
+            </CardContent>
+          </Card>
+        ) : null}
+
         {isAdmin ? (
           <Card>
             <CardHeader>
               <CardTitle>Configuration</CardTitle>
               <CardDescription>Saving doesn&apos;t touch running containers until you deploy.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <StackEditor stack={{ id: stack.id, name: stack.name, compose: stack.compose, env: stack.env }} />
+            <CardContent className="flex flex-col gap-5">
+              <StackEditor
+                stack={{ id: stack.id, name: stack.name, compose: stack.compose, env: stack.env }}
+                gitComposePath={git?.composePath}
+              />
+              {git ? (
+                <div className="grid gap-2">
+                  <span className="text-sm font-medium">
+                    {git.composePath} <span className="font-normal text-muted-foreground">(from the repository, read-only)</span>
+                  </span>
+                  <pre
+                    data-testid="git-compose"
+                    className="max-h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed"
+                  >
+                    {stack.compose || "Not fetched yet."}
+                  </pre>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         ) : (
@@ -224,6 +266,69 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
         )}
       </div>
     </PageBody>
+  )
+}
+
+function GitCard({ stackId, git, isAdmin }: { stackId: number; git: GitStackInfo; isAdmin: boolean }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center gap-2">
+          <GitBranchIcon className="size-4" />
+          Git repository
+        </CardTitle>
+        <CardDescription className="break-all">
+          <Mono>{git.url}</Mono> · <Mono>{git.ref}</Mono> · <Mono>{git.composePath}</Mono>
+        </CardDescription>
+        {isAdmin ? (
+          <CardAction>
+            <GitSourceDialog
+              stackId={stackId}
+              source={{
+                url: git.url,
+                ref: git.ref,
+                composePath: git.composePath,
+                hasCredentials: git.hasCredentials,
+                pollMinutes: git.pollMinutes,
+              }}
+            />
+          </CardAction>
+        ) : null}
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2" data-testid="git-commit">
+          <GitCommitHorizontalIcon className="size-4 text-muted-foreground" />
+          {git.commit ? (
+            <>
+              <span className="text-muted-foreground">Deployed</span>
+              <Mono className="font-medium">{shortSha(git.commit.sha)}</Mono>
+              <span className="min-w-0 truncate font-medium">{git.commit.subject}</span>
+              <span className="text-muted-foreground">
+                {git.commit.author}
+                {git.commit.date ? (
+                  <>
+                    {" · "}
+                    <time dateTime={git.commit.date} title={formatDate(git.commit.date)}>
+                      {timeAgo(git.commit.date)}
+                    </time>
+                  </>
+                ) : null}
+              </span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">No commit deployed yet.</span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+          <span>Credentials: {git.hasCredentials ? "stored (encrypted)" : "none (public repository)"}</span>
+          <span>Webhook: {git.webhookId ? "enabled" : "off"}</span>
+          <span>
+            Polling: {git.pollMinutes > 0 ? `every ${git.pollMinutes} min` : "off"}
+            {git.pollMinutes > 0 && git.lastCheckedAt ? ` (last checked ${timeAgo(git.lastCheckedAt)})` : null}
+          </span>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
