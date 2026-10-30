@@ -168,7 +168,7 @@ test("a manager has full control of the environment, but no administration", asy
   await expect(mgr.getByRole("link", { name: "Auto-update" })).toBeVisible()
   await expect(mgr.getByRole("link", { name: "Users" })).toHaveCount(0)
   await mgr.goto("/proxy")
-  await expect(mgr.getByRole("heading", { name: "Proxy", exact: true })).toBeVisible({ timeout })
+  await expect(mgr.getByRole("heading", { level: 2, name: "Proxy", exact: true })).toBeVisible({ timeout })
   await mgr.goto("/auto-update")
   // The global schedule is for administrators.
   await expect(mgr.getByText(`Containers on local`)).toBeVisible({ timeout })

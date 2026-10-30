@@ -115,7 +115,8 @@ test("an existing local user is never matched by name; they link their account t
 test("a callback without the matching state is refused", async ({ page }) => {
   await page.goto("/auth/oidc/callback?code=stolen&state=forged")
   await expect(page).toHaveURL(/\/login\?sso=expired$/)
-  await expect(page.getByRole("alert")).toContainText("expired")
+  // Not Next's route announcer (also role="alert"): the message itself.
+  await expect(page.getByRole("alert").filter({ hasText: "expired" })).toBeVisible()
 })
 
 test("clean up the SSO users", async ({ page }) => {
