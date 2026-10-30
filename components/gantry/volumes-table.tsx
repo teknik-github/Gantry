@@ -3,8 +3,9 @@
 import * as React from "react"
 import { PlusIcon, Trash2Icon } from "lucide-react"
 
-import { createVolume, removeVolume } from "@/app/(app)/volumes/actions"
-import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
+import { createVolume, removeVolume, removeVolumes } from "@/app/(app)/volumes/actions"
+import { columnHelperFor, DataTable, SortHeader, type TableSelection } from "@/components/data-table"
+import { BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono } from "@/components/gantry/ui"
@@ -78,6 +79,25 @@ function buildColumns(isAdmin: boolean) {
   ])
 }
 
+const volumeSelection: TableSelection<VolumeRow> = {
+  rowLabel: (r) => r.name,
+  actions: (selected, clear) => {
+    const inUse = selected.filter((r) => r.usedBy.length).length
+    return (
+      <BulkConfirm
+        label="Remove"
+        icon={<Trash2Icon data-icon="inline-start" />}
+        title={`Remove ${selected.length} volume(s)?`}
+        description="All data stored in these volumes will be permanently deleted."
+        names={selected.map((r) => r.name)}
+        warning={inUse ? `${inUse} of them are used by a container and will fail.` : null}
+        onConfirm={() => removeVolumes(selected.map((r) => r.name))}
+        onDone={clear}
+      />
+    )
+  },
+}
+
 export function VolumesTable({ data, isAdmin }: { data: VolumeRow[]; isAdmin: boolean }) {
   const columns = React.useMemo(() => buildColumns(isAdmin), [isAdmin])
   return (
@@ -85,6 +105,7 @@ export function VolumesTable({ data, isAdmin }: { data: VolumeRow[]; isAdmin: bo
       data={data}
       columns={columns}
       getRowId={(r) => r.name}
+      selection={isAdmin ? volumeSelection : undefined}
       searchText={(r) => `${r.name} ${r.stack ?? ""} ${r.usedBy.join(" ")}`}
       searchPlaceholder="Search volumes…"
       emptyMessage="No volumes."

@@ -16,8 +16,15 @@ import {
   TerminalSquareIcon,
 } from "lucide-react"
 
-import { containerAction, createContainer, removeContainer } from "@/app/(app)/containers/actions"
-import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
+import {
+  bulkContainerAction,
+  containerAction,
+  createContainer,
+  removeContainer,
+  removeContainers,
+} from "@/app/(app)/containers/actions"
+import { columnHelperFor, DataTable, SortHeader, type TableSelection } from "@/components/data-table"
+import { BulkButton, BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { PullRecreateConfirm } from "@/components/gantry/container-edit-dialog"
 import { FormDialog } from "@/components/gantry/form-dialog"
@@ -123,17 +130,91 @@ export function ContainersTable({
   pageSize?: number
 }) {
   const columns = React.useMemo(() => buildColumns(isAdmin), [isAdmin])
+  const selection: TableSelection<ContainerRow> = {
+    rowLabel: (r) => r.name,
+    actions: (selected, clear) => <BulkActions selected={selected} clear={clear} isAdmin={isAdmin} />,
+  }
   return (
     <DataTable
       data={data}
       columns={columns}
       getRowId={(r) => r.id}
+      selection={selection}
       searchText={(r) => `${r.name} ${r.image} ${r.state} ${r.stack ?? ""}`}
       searchPlaceholder="Search containers…"
       emptyMessage="No containers."
       pageSize={pageSize}
       toolbar={isAdmin ? <CreateContainerDialog /> : null}
     />
+  )
+}
+
+// Which selected containers each action applies to (Docker rejects the rest).
+const APPLIES: Record<ContainerAction, (state: string) => boolean> = {
+  start: (s) => s !== "running" && s !== "paused",
+  stop: (s) => s === "running" || s === "paused" || s === "restarting",
+  restart: () => true,
+  pause: (s) => s === "running",
+  unpause: (s) => s === "paused",
+  kill: (s) => s === "running" || s === "paused" || s === "restarting",
+}
+
+const BULK_BUTTONS: { action: ContainerAction; label: string; icon: React.ReactNode }[] = [
+  { action: "start", label: "Start", icon: <PlayIcon data-icon="inline-start" /> },
+  { action: "stop", label: "Stop", icon: <SquareIcon data-icon="inline-start" /> },
+  { action: "restart", label: "Restart", icon: <RotateCwIcon data-icon="inline-start" /> },
+  { action: "pause", label: "Pause", icon: <PauseIcon data-icon="inline-start" /> },
+  { action: "unpause", label: "Resume", icon: <PlayIcon data-icon="inline-start" /> },
+  { action: "kill", label: "Kill", icon: <ZapIcon data-icon="inline-start" /> },
+]
+
+const toTarget = (r: ContainerRow) => ({ id: r.id, name: r.name })
+
+function BulkActions({ selected, clear, isAdmin }: { selected: ContainerRow[]; clear: () => void; isAdmin: boolean }) {
+  const [force, setForce] = React.useState(false)
+  const [volumes, setVolumes] = React.useState(false)
+  const running = selected.filter((r) => !APPLIES.start(r.state)).length
+
+  return (
+    <>
+      {BULK_BUTTONS.map(({ action, label, icon }) => {
+        const targets = selected.filter((r) => APPLIES[action](r.state))
+        return (
+          <BulkButton
+            key={action}
+            label={label}
+            icon={icon}
+            count={targets.length}
+            onRun={() => bulkContainerAction(targets.map(toTarget), action)}
+            onDone={clear}
+          />
+        )
+      })}
+      {isAdmin ? (
+        <BulkConfirm
+          label="Remove"
+          icon={<Trash2Icon data-icon="inline-start" />}
+          title={`Remove ${selected.length} container(s)?`}
+          description="These containers and their writable layers will be deleted. This cannot be undone."
+          names={selected.map((r) => r.name)}
+          warning={running && !force ? `${running} of them are running and will fail unless you force it.` : null}
+          onConfirm={() => removeContainers(selected.map(toTarget), { force, volumes })}
+          onDone={clear}
+          extra={
+            <div className="flex flex-col gap-3">
+              <Label className="font-normal">
+                <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
+                Force (stop running ones first)
+              </Label>
+              <Label className="font-normal">
+                <Checkbox checked={volumes} onCheckedChange={(v) => setVolumes(v === true)} />
+                Also remove anonymous volumes
+              </Label>
+            </div>
+          }
+        />
+      ) : null}
+    </>
   )
 }
 

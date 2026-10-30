@@ -3,8 +3,9 @@
 import * as React from "react"
 import { PlusIcon, Trash2Icon } from "lucide-react"
 
-import { createNetwork, removeNetwork } from "@/app/(app)/networks/actions"
-import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
+import { createNetwork, removeNetwork, removeNetworks } from "@/app/(app)/networks/actions"
+import { columnHelperFor, DataTable, SortHeader, type TableSelection } from "@/components/data-table"
+import { BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono } from "@/components/gantry/ui"
@@ -91,6 +92,26 @@ function buildColumns(isAdmin: boolean) {
   ])
 }
 
+const networkSelection: TableSelection<NetworkRow> = {
+  canSelect: (r) => !r.builtin,
+  rowLabel: (r) => r.name,
+  actions: (selected, clear) => {
+    const attached = selected.filter((r) => r.containers > 0).length
+    return (
+      <BulkConfirm
+        label="Remove"
+        icon={<Trash2Icon data-icon="inline-start" />}
+        title={`Remove ${selected.length} network(s)?`}
+        description="Containers must be disconnected from a network before it can be removed."
+        names={selected.map((r) => r.name)}
+        warning={attached ? `${attached} of them still have containers attached and will fail.` : null}
+        onConfirm={() => removeNetworks(selected.map((r) => ({ id: r.id, name: r.name })))}
+        onDone={clear}
+      />
+    )
+  },
+}
+
 export function NetworksTable({ data, isAdmin }: { data: NetworkRow[]; isAdmin: boolean }) {
   const columns = React.useMemo(() => buildColumns(isAdmin), [isAdmin])
   return (
@@ -98,6 +119,7 @@ export function NetworksTable({ data, isAdmin }: { data: NetworkRow[]; isAdmin: 
       data={data}
       columns={columns}
       getRowId={(r) => r.id}
+      selection={isAdmin ? networkSelection : undefined}
       searchText={(r) => `${r.name} ${r.driver} ${r.subnet}`}
       searchPlaceholder="Search networks…"
       emptyMessage="No networks."

@@ -2,7 +2,8 @@
 
 import { z } from "zod"
 
-import { runAction, UserError } from "@/lib/server/action"
+import { BULK_LIMIT, uniqueBy } from "@/lib/bulk"
+import { runAction, runBulkAction, UserError } from "@/lib/server/action"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const BUILTIN = new Set(["bridge", "host", "none"])
@@ -36,4 +37,24 @@ export async function removeNetwork(id: string, name: string): Promise<ActionSta
     await (await docker()).removeNetwork(parsed.data)
     return "Network removed"
   })
+}
+
+export async function removeNetworks(targets: { id: string; name: string }[]): Promise<ActionState> {
+  const parsed = z
+    .array(z.object({ id: z.string().regex(/^[a-f0-9]{12,64}$/), name: z.string().max(255) }))
+    .min(1)
+    .max(BULK_LIMIT)
+    .safeParse(targets)
+  if (!parsed.success) return { error: "Invalid request" }
+
+  return runBulkAction(
+    "admin",
+    "network.remove",
+    uniqueBy(parsed.data, (t) => t.id),
+    { verb: "Removed", noun: "network", label: (t) => t.name || t.id.slice(0, 12) },
+    async (t, docker) => {
+      if (BUILTIN.has(t.name)) throw new UserError("Built-in networks cannot be removed")
+      await docker.removeNetwork(t.id)
+    }
+  )
 }

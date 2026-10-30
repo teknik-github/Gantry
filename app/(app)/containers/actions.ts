@@ -3,12 +3,15 @@
 import { z } from "zod"
 
 import { containerNameField, imageField, parseEnv, parsePorts, parseVolumes, splitArgs } from "@/lib/container-form"
-import { runAction, UserError } from "@/lib/server/action"
+import { BULK_LIMIT, uniqueBy } from "@/lib/bulk"
+import { runAction, runBulkAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
 import { getCurrentUser } from "@/lib/server/auth/dal"
 import { CONTAINER_ACTIONS, type ContainerAction } from "@/lib/server/docker/api"
 import { DockerError } from "@/lib/server/docker/client"
 import { ExecSessionError, openExecSession } from "@/lib/server/docker/exec"
+import { isSelfContainer } from "@/lib/server/docker/recreate"
+import { selfContainerIds } from "@/lib/server/docker/self"
 import { environmentTarget, getCurrentEnvironment } from "@/lib/server/environments"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
@@ -34,6 +37,63 @@ export async function removeContainer(id: string, opts: { force?: boolean; volum
     })
     return "Container removed"
   })
+}
+
+const targetsSchema = z
+  .array(z.object({ id: idSchema, name: z.string().max(255) }))
+  .min(1, "Nothing selected")
+  .max(BULK_LIMIT)
+
+export type BulkTarget = { id: string; name: string }
+
+const PAST: Record<ContainerAction, string> = {
+  start: "Started",
+  stop: "Stopped",
+  restart: "Restarted",
+  pause: "Paused",
+  unpause: "Resumed",
+  kill: "Killed",
+}
+
+/** Stopping (or removing) the container Gantry runs in would cut the request off halfway. */
+function refuseSelf(id: string) {
+  if (isSelfContainer({ Id: id }, selfContainerIds())) throw new UserError("Gantry runs in this container; do it on its own")
+}
+
+export async function bulkContainerAction(targets: BulkTarget[], action: ContainerAction): Promise<ActionState> {
+  const parsed = z.object({ targets: targetsSchema, action: z.enum(CONTAINER_ACTIONS) }).safeParse({ targets, action })
+  if (!parsed.success) return { error: "Invalid request" }
+  const { action: act } = parsed.data
+
+  return runBulkAction(
+    "operate",
+    `container.${act}`,
+    uniqueBy(parsed.data.targets, (t) => t.id),
+    { verb: PAST[act], noun: "container", label: (t) => t.name || t.id.slice(0, 12), auditTarget: (t) => t.id },
+    async (t, docker) => {
+      if (act !== "start" && act !== "unpause") refuseSelf(t.id)
+      await docker.containerAction(t.id, act)
+    }
+  )
+}
+
+export async function removeContainers(
+  targets: BulkTarget[],
+  opts: { force?: boolean; volumes?: boolean } = {}
+): Promise<ActionState> {
+  const parsed = targetsSchema.safeParse(targets)
+  if (!parsed.success) return { error: "Invalid request" }
+
+  return runBulkAction(
+    "admin",
+    "container.remove",
+    uniqueBy(parsed.data, (t) => t.id),
+    { verb: "Removed", noun: "container", label: (t) => t.name || t.id.slice(0, 12), auditTarget: (t) => t.id },
+    async (t, docker) => {
+      refuseSelf(t.id)
+      await docker.removeContainer(t.id, { force: opts.force === true, volumes: opts.volumes === true })
+    }
+  )
 }
 
 const createSchema = z.object({

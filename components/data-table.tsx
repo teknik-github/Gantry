@@ -32,9 +32,11 @@ import {
   ChevronsRightIcon,
   Columns3Icon,
   SearchIcon,
+  XIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -105,6 +107,16 @@ export function SortHeader<T extends RowData, V>({ column, title }: { column: Co
   )
 }
 
+/** Row checkboxes plus a bar of actions for the checked rows. */
+export type TableSelection<T> = {
+  /** Rows that can't be acted on (e.g. built-in networks) get no checkbox. */
+  canSelect?: (row: T) => boolean
+  /** Accessible name of a row's checkbox: "Select <label>". */
+  rowLabel: (row: T) => string
+  /** Actions for the checked rows (only those still listed and matching the search). */
+  actions: (selected: T[], clear: () => void) => React.ReactNode
+}
+
 export function DataTable<T extends RowData>({
   data,
   columns,
@@ -114,6 +126,7 @@ export function DataTable<T extends RowData>({
   toolbar,
   emptyMessage = "No results.",
   pageSize: initialPageSize = 10,
+  selection,
 }: {
   data: T[]
   columns: Columns<T>
@@ -124,6 +137,7 @@ export function DataTable<T extends RowData>({
   toolbar?: React.ReactNode
   emptyMessage?: string
   pageSize?: number
+  selection?: TableSelection<T>
 }) {
   const [query, setQuery] = React.useState("")
   const [columnVisibility, setColumnVisibility] = React.useState<ColumnVisibilityState>({})
@@ -136,10 +150,59 @@ export function DataTable<T extends RowData>({
     return data.filter((row) => searchText(row).toLowerCase().includes(q))
   }, [data, query, searchText])
 
+  // Ids rather than rows: a live refresh replaces the row objects.
+  const [checked, setChecked] = React.useState<ReadonlySet<string>>(() => new Set())
+  const canSelect = selection?.canSelect ?? (() => true)
+  const selectable = selection ? rows.filter(canSelect) : []
+  // Rows that vanished (removed, filtered out by the search) drop out on their own.
+  const selected = selectable.filter((row) => checked.has(getRowId(row)))
+  const allChecked = selectable.length > 0 && selected.length === selectable.length
+  const clear = () => setChecked(new Set())
+
+  function toggle(ids: string[], on: boolean) {
+    setChecked((prev) => {
+      const next = new Set(prev)
+      for (const id of ids) {
+        if (on) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  }
+
+  const allColumns: Columns<T> = selection
+    ? [
+        columnHelperFor<T>().display({
+          id: "select",
+          header: () => (
+            <Checkbox
+              aria-label="Select all"
+              className="align-middle"
+              disabled={!selectable.length}
+              checked={allChecked ? true : selected.length ? "indeterminate" : false}
+              onCheckedChange={(v) => toggle(selectable.map(getRowId), v === true)}
+            />
+          ),
+          cell: ({ row }) =>
+            canSelect(row.original) ? (
+              <Checkbox
+                aria-label={`Select ${selection.rowLabel(row.original)}`}
+                className="align-middle"
+                checked={checked.has(row.id)}
+                onCheckedChange={(v) => toggle([row.id], v === true)}
+              />
+            ) : null,
+          enableSorting: false,
+          enableHiding: false,
+        }),
+        ...columns,
+      ]
+    : columns
+
   const table = useTable({
     features,
     data: rows,
-    columns,
+    columns: allColumns,
     state: { sorting, columnVisibility, pagination },
     getRowId,
     autoResetPageIndex: false,
@@ -196,6 +259,19 @@ export function DataTable<T extends RowData>({
           {toolbar}
         </div>
       </div>
+      {selection && selected.length ? (
+        <div
+          data-testid="bulk-bar"
+          className="mx-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 lg:mx-6"
+        >
+          <span className="mr-1 text-sm font-medium tabular-nums">{selected.length} selected</span>
+          {selection.actions(selected, clear)}
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={clear}>
+            <XIcon data-icon="inline-start" />
+            Clear
+          </Button>
+        </div>
+      ) : null}
       <div className="relative flex flex-col gap-4 overflow-auto px-4 lg:px-6">
         <div className="overflow-hidden rounded-lg border">
           <Table>
@@ -203,7 +279,7 @@ export function DataTable<T extends RowData>({
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id} colSpan={header.colSpan}>
+                    <TableHead key={header.id} colSpan={header.colSpan} className={header.column.id === "select" ? "w-8" : undefined}>
                       {header.isPlaceholder ? null : <FlexRender header={header} />}
                     </TableHead>
                   ))}
@@ -213,7 +289,7 @@ export function DataTable<T extends RowData>({
             <TableBody>
               {table.getRowModel().rows.length ? (
                 table.getRowModel().rows.map((row) => (
-                  <TableRow key={row.id}>
+                  <TableRow key={row.id} data-state={checked.has(row.id) ? "selected" : undefined}>
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>
                         <FlexRender cell={cell} />

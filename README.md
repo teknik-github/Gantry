@@ -14,6 +14,8 @@ A Portainer-style web UI for Docker, built with Next.js 16 and shadcn/ui
 - **Topology**: interactive map of compose projects, containers, networks,
   volumes and `depends_on` relations
 - Images (pull, remove, prune), volumes and networks (create, remove)
+- **Bulk actions**: tick several containers, images, volumes or networks and
+  start/stop/restart/pause/resume/kill or remove them at once
 - Multiple Docker environments: local socket or TCP, optionally with mutual TLS;
   standard users only see the environments they were given
 - Users with `admin` / `user` roles, plus an activity log
@@ -138,7 +140,19 @@ The first run needs a browser: `pnpm exec playwright install chromium`.
 `/topology` is a read-only map of the current environment. Built-in networks
 (`bridge`/`host`/`none`) and bind mounts are hidden by default (toggles);
 unused networks and volumes are not drawn. Deep link to one project with
-`/topology?project=<name>`.
+`/topology?project=<name>`. The map is built from the Docker API on every
+request (no stored copy) and redraws itself on Docker events.
+
+### Bulk actions
+
+The container, image, volume and network lists have checkboxes. "Select all"
+ticks every row that matches the search (across pages). Each container action
+only counts the containers it applies to (e.g. Stop skips stopped ones).
+Removal asks for confirmation and lists what will go. Objects that fail (in
+use, running without force) are reported by name and stay selected; the rest
+are still done. Standard users get the start/stop actions only; built-in
+networks can't be selected; the container Gantry runs in is skipped for
+stop/restart/pause/kill/remove. At most 200 objects per request.
 
 ### Environments: TLS and access
 

@@ -3,8 +3,9 @@
 import * as React from "react"
 import { DownloadIcon, EraserIcon, Trash2Icon } from "lucide-react"
 
-import { pruneImages, pullImage, removeImage } from "@/app/(app)/images/actions"
-import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
+import { pruneImages, pullImage, removeImage, removeImages } from "@/app/(app)/images/actions"
+import { columnHelperFor, DataTable, SortHeader, type TableSelection } from "@/components/data-table"
+import { BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono } from "@/components/gantry/ui"
@@ -85,6 +86,7 @@ export function ImagesTable({ data, isAdmin }: { data: ImageRow[]; isAdmin: bool
       data={data}
       columns={columns}
       getRowId={(r) => r.id}
+      selection={isAdmin ? imageSelection : undefined}
       searchText={(r) => `${r.tags.join(" ")} ${r.shortId}`}
       searchPlaceholder="Search images…"
       emptyMessage="No images."
@@ -106,6 +108,41 @@ export function ImagesTable({ data, isAdmin }: { data: ImageRow[]; isAdmin: bool
             <PullImageDialog />
           </>
         ) : null
+      }
+    />
+  )
+}
+
+const imageName = (r: ImageRow) => r.tags[0] ?? r.shortId
+
+const imageSelection: TableSelection<ImageRow> = {
+  rowLabel: imageName,
+  actions: (selected, clear) => <BulkRemoveImages selected={selected} clear={clear} />,
+}
+
+function BulkRemoveImages({ selected, clear }: { selected: ImageRow[]; clear: () => void }) {
+  const [force, setForce] = React.useState(false)
+  const inUse = selected.filter((r) => r.inUse > 0).length
+  const multiTag = selected.filter((r) => r.tags.length > 1).length
+  const warnings = [
+    inUse ? `${inUse} in use by containers` : null,
+    !force && multiTag ? `${multiTag} with several tags (needs force)` : null,
+  ].filter(Boolean)
+  return (
+    <BulkConfirm
+      label="Remove"
+      icon={<Trash2Icon data-icon="inline-start" />}
+      title={`Remove ${selected.length} image(s)?`}
+      description="These images will be deleted from this environment."
+      names={selected.map(imageName)}
+      warning={warnings.length ? `Some may fail: ${warnings.join(", ")}.` : null}
+      onConfirm={() => removeImages(selected.map((r) => ({ id: r.id, name: imageName(r) })), force)}
+      onDone={clear}
+      extra={
+        <Label className="font-normal">
+          <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
+          Force (remove even if tagged multiple times or used by stopped containers)
+        </Label>
       }
     />
   )

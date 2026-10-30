@@ -2,7 +2,8 @@
 
 import { z } from "zod"
 
-import { runAction } from "@/lib/server/action"
+import { BULK_LIMIT } from "@/lib/bulk"
+import { runAction, runBulkAction } from "@/lib/server/action"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const nameSchema = z
@@ -32,4 +33,17 @@ export async function removeVolume(name: string): Promise<ActionState> {
     await (await docker()).removeVolume(parsed.data)
     return "Volume removed"
   })
+}
+
+export async function removeVolumes(names: string[]): Promise<ActionState> {
+  const parsed = z.array(nameSchema).min(1).max(BULK_LIMIT).safeParse(names)
+  if (!parsed.success) return { error: "Invalid request" }
+
+  return runBulkAction(
+    "admin",
+    "volume.remove",
+    [...new Set(parsed.data)],
+    { verb: "Removed", noun: "volume", label: (n) => n },
+    (name, docker) => docker.removeVolume(name).then(() => {})
+  )
 }

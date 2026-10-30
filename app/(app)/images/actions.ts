@@ -3,7 +3,8 @@
 import { z } from "zod"
 
 import { formatBytes } from "@/lib/format"
-import { runAction } from "@/lib/server/action"
+import { BULK_LIMIT, uniqueBy } from "@/lib/bulk"
+import { runAction, runBulkAction } from "@/lib/server/action"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const imageIdSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/, "Invalid image id")
@@ -35,6 +36,23 @@ export async function removeImage(id: string, force = false): Promise<ActionStat
     await (await docker()).removeImage(parsed.data, force === true)
     return "Image removed"
   })
+}
+
+export async function removeImages(targets: { id: string; name: string }[], force = false): Promise<ActionState> {
+  const parsed = z
+    .array(z.object({ id: imageIdSchema, name: z.string().max(255) }))
+    .min(1)
+    .max(BULK_LIMIT)
+    .safeParse(targets)
+  if (!parsed.success) return { error: "Invalid request" }
+
+  return runBulkAction(
+    "admin",
+    "image.remove",
+    uniqueBy(parsed.data, (t) => t.id),
+    { verb: "Removed", noun: "image", label: (t) => t.name || t.id.slice(7, 19), auditTarget: (t) => t.id },
+    (t, docker) => docker.removeImage(t.id, force === true).then(() => {})
+  )
 }
 
 export async function pruneImages(): Promise<ActionState> {
