@@ -10,7 +10,7 @@ import { columnHelperFor, DataTable } from "@/components/data-table"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono, StateBadge } from "@/components/gantry/ui"
-import { useRunAction } from "@/components/gantry/use-action"
+import { submitKeepingValues, useRunAction } from "@/components/gantry/use-action"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -103,7 +103,8 @@ export function ProxySettingsCard({
               <span className="break-words">{lastError}</span>
             </div>
           ) : null}
-          <form action={formAction} className="flex flex-col gap-4">
+          {/* No automatic form reset: Radix Select/Checkbox would jump back to their first values. */}
+          <form method="post" onSubmit={submitKeepingValues(formAction)} className="flex flex-col gap-4">
             <FieldGroup className="gap-4">
               <Field className="max-w-sm">
                 <FieldLabel htmlFor={`${uid}-mode`}>Mode</FieldLabel>

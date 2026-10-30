@@ -8,7 +8,7 @@ import { toast } from "sonner"
 import { runAutoUpdateNow, saveSchedule, setContainerAutoUpdate } from "@/app/(app)/auto-update/actions"
 import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
 import { Mono, StateBadge } from "@/components/gantry/ui"
-import { useRunAction } from "@/components/gantry/use-action"
+import { submitKeepingValues, useRunAction } from "@/components/gantry/use-action"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -50,7 +50,8 @@ export function AutoUpdateSchedule({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form action={formAction} className="flex flex-wrap items-end gap-4">
+          {/* No automatic form reset: Radix Select/Checkbox would jump back to their first values. */}
+          <form method="post" onSubmit={submitKeepingValues(formAction)} className="flex flex-wrap items-end gap-4">
             <Label className="h-8 font-normal">
               <Checkbox name="enabled" value="on" defaultChecked={enabled} />
               Run every day
