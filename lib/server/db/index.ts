@@ -49,6 +49,9 @@ async function migrate(db: Kysely<Database>) {
       const { error, results } = await new Migrator({
         db,
         provider: migrationProvider,
+        // Features land from parallel branches; each migration only adds its
+        // own tables/columns, so one merged later may run after a newer one.
+        allowUnorderedMigrations: true,
       }).migrateToLatest()
       for (const r of results ?? []) {
         if (r.status === "Success") console.log(`[gantry] migration ${r.migrationName} applied`)

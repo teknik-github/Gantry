@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
   },
   poweredByHeader: false,
   // Hosts allowed to load dev resources (HMR etc.) when not on localhost.
-  allowedDevOrigins: ["10.8.0.4", "192.168.1.104"],
+  allowedDevOrigins: ["10.8.0.4", "192.168.1.104", "192.168.1.107"],
   turbopack: {
     rules: {
       "*.css": {
