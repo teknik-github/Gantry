@@ -17,6 +17,10 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
 - **Topology**: interactive map of compose projects, containers, networks,
   volumes and `depends_on` relations
 - Images (pull, remove, prune), volumes and networks (create, remove)
+- **File browser** for containers (running, stopped or without a shell) and
+  volumes: browse, download files and folders, upload (drag and drop), edit
+  text files, create folders, delete; plus **log download** (streamed `.log`
+  with timestamps, since/until, tail) and **log search** in the viewer
 - **Private registries**: store logins (encrypted) for GHCR, GitLab, Docker Hub
   or your own registry; used for pulls, recreate, update checks and stacks
 - **Image updates**: containers whose tag has a newer image in the registry
@@ -204,6 +208,12 @@ against the same throwaway cluster.
 | `TRIVY_CACHE_VOLUME` | `gantry-trivy-cache` | Named volume, on each environment, holding Trivy's vulnerability database |
 | `TRIVY_TIMEOUT_MINUTES` | `20` | Longest a single scan (pull, export, scan) may take |
 | `TRIVY_DB_REPOSITORY`, `TRIVY_JAVA_DB_REPOSITORY`, `TRIVY_SKIP_DB_UPDATE`, `TRIVY_SKIP_JAVA_DB_UPDATE`, `TRIVY_OFFLINE_SCAN`, `TRIVY_INSECURE` | | Passed on to the scanner container as is (database mirrors, offline use) |
+| `FILES_UPLOAD_MAX_MB` | `512` | Largest file one upload may carry (file browser) |
+| `FILES_EDIT_MAX_KB` | `1024` | Largest text file the file browser opens and saves in its editor |
+| `FILES_LIST_MAX_ENTRIES` | `5000` | Entries shown per folder (the rest are counted) |
+| `FILES_SCAN_MAX_MB` / `FILES_SCAN_TIMEOUT_SECONDS` | `512` / `30` | Limits for listing a folder of a stopped or shell-less container from Docker's tar archive |
+| `FILES_HELPER_IMAGE` | `alpine:3` | Image of the short-lived containers that open volumes (needs `sh`, `stat`, `rm`; pulled when missing) |
+| `FILES_HELPER_IDLE_SECONDS` | `120` | How long a volume helper is kept for the next operation before it is removed |
 | `GANTRY_URL` | | Public URL of Gantry (e.g. `https://gantry.example.com`); the OIDC callback is `$GANTRY_URL/auth/oidc/callback` |
 | `OIDC_ISSUER` | | OpenID provider (issuer URL); single sign-on is off unless this and `OIDC_CLIENT_ID` are set |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | Client registered at the provider (confidential client; the secret is optional for public clients, PKCE is always used) |
@@ -339,6 +349,53 @@ against the same throwaway cluster.
   project overwrites the changes.
 - Gantry refuses to recreate its own container; update it from the host with
   `docker compose pull && docker compose up -d`.
+
+### Files and logs
+
+The container page has a **Files** tab, and **Volumes → Browse** opens
+`/volumes/<name>` with the same browser: breadcrumbs (or type a path), name,
+type (symbolic links with their target), size, mode, owner and modification
+time; download a file or a whole folder (`.tar`), upload files (button or drag
+and drop; asks before replacing), create folders, delete, and view/edit text
+files up to `FILES_EDIT_MAX_KB` (binary files are detected and offered as a
+download). Saving keeps the file's owner and mode; new files and folders
+belong to root (644 / 755).
+
+How it works:
+
+- **Listing** uses `stat` through `docker exec` when the container runs and
+  has a shell (fast, any folder size). Stopped, paused or distroless
+  containers are listed from the headers of Docker's tar archive of the
+  folder (`GET /containers/{id}/archive`), skipping file bodies. Docker still
+  sends everything below the folder, so big trees take a while and listing
+  stops after `FILES_SCAN_MAX_MB` / `FILES_SCAN_TIMEOUT_SECONDS` with a
+  notice. Measured on a busy 4-CPU host: `/usr` of a stopped `node:24-slim`
+  (221 MB, 6,483 entries) took 13.7 s from the archive; `stat` through exec
+  lists `/usr/bin` of the running container in ~0.15 s.
+- **Downloads, uploads, edits and new folders** use the archive API, so they
+  work in stopped containers too. Everything is streamed (no size limit for
+  downloads; uploads up to `FILES_UPLOAD_MAX_MB`, sent as the raw request body
+  to `PUT /api/uploads/files`, outside `proxy.ts` because it would buffer the
+  body). **Delete** runs `rm` in the container, so it needs a running
+  container with `rm`; otherwise it is disabled with the reason.
+- **Volumes** are opened by a helper container (`FILES_HELPER_IMAGE`, label
+  `gantry.helper=files`, named `gantry-helper-files-…`, no network, read-only
+  root filesystem) with the volume mounted read-only, or read-write for
+  changes. A helper is reused for `FILES_HELPER_IDLE_SECONDS` and then
+  removed; helpers also remove themselves after 6 hours (`sleep` with
+  AutoRemove), Gantry sweeps leftovers by label at startup and every 10
+  minutes, and removing the volume in Gantry removes its idle helpers first.
+  Every path component is checked inside the helper first: the browser never
+  follows a symbolic link inside a volume (links can be deleted, not entered
+  or written through). The volume page lists the containers that mount it and
+  asks before the first change while it is in use.
+- Paths are normalized (no `..` above the root, no NUL bytes) and names are
+  single path components.
+
+The log viewer has **search** (case-insensitive, highlighted, match count,
+next/previous with Enter / Shift+Enter, "only matching lines") and
+**Download**: the whole log (or the last N lines, or a since/until window,
+with or without timestamps) streamed as `<container>-<time>.log`.
 
 ### Topology
 
@@ -586,7 +643,9 @@ in environments they were given, with one of these roles each:
 | --- | :-: | :-: | :-: |
 | Lists, details, dashboard, resource usage, live updates | ✓ | ✓ | ✓ |
 | Start / stop / restart / pause / kill containers, rollout restart (Kubernetes) | | ✓ | ✓ |
-| Container and pod logs, image update checks, vulnerability scans | | ✓ | ✓ |
+| Container and pod logs (view, search, download), image update checks, vulnerability scans | | ✓ | ✓ |
+| Browse and download container and volume files | | ✓ | ✓ |
+| Upload, edit, create folders, delete files | | | ✓ |
 | Create / remove / prune containers, images, volumes, networks | | | ✓ |
 | Container environment variable values, edit & recreate, pull & recreate, console | | | ✓ |
 | Stacks (create, edit, deploy, start/stop, delete), deploy templates | | | ✓ |
@@ -654,6 +713,11 @@ curl -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/metrics?r
 curl -N -H "Authorization: Bearer $TOKEN" https://gantry.example.com/api/events
 # Last 200 log lines of a container (operator or manager)
 curl -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/containers/<id>/logs?tail=200"
+# Whole log as a file, streamed (since/until: Unix seconds; tail: lines or "all")
+curl -OJ -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/containers/<id>/logs/download?timestamps=1"
+# A folder listing, a file, or a folder as tar (operator or manager; ?volume=<name> for volumes)
+curl -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/files/list?container=<id>&path=/etc"
+curl -OJ -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/files/download?container=<id>&path=/etc/hosts"
 ```
 
 ### Kubernetes environments
@@ -797,6 +861,12 @@ image pull secrets).
   bound to the user who opened them, use unguessable ids, are audited, close
   when the page is left or nobody reads them for 20 seconds, and are closed
   when the user's role or access changes.
+- Files may hold secrets: browsing and downloading container and volume
+  files needs the operator role, changing them the manager role; downloads,
+  uploads, edits, new folders and deletes are audited. Uploads
+  (`/api/uploads/*`) bypass `proxy.ts` so bodies stream instead of being
+  buffered; the handler itself requires a same-origin browser session (no API
+  tokens), the manager role and the environment the page showed.
 - The "at least one administrator" rule is enforced atomically (row locks on
   MySQL), so two admins demoting or deleting each other can't leave none.
 - `next=` after login only accepts same-origin paths (no `//`, backslashes,

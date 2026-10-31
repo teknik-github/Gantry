@@ -8,6 +8,7 @@ import { containerAction, removeContainer } from "@/app/(app)/containers/actions
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { EditContainerDialog, PullRecreateButton, type RecreateInfo } from "@/components/gantry/container-edit-dialog"
+import { LogDownloadDialog, LogOutput } from "@/components/gantry/log-tools"
 import { useRunAction } from "@/components/gantry/use-action"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -133,7 +134,6 @@ export function LogViewer({ id }: { id: string }) {
   const [follow, setFollow] = React.useState(true)
   const [loading, setLoading] = React.useState(false)
   const [refreshKey, setRefreshKey] = React.useState(0)
-  const preRef = React.useRef<HTMLPreElement>(null)
 
   React.useEffect(() => {
     let cancelled = false
@@ -165,11 +165,6 @@ export function LogViewer({ id }: { id: string }) {
       clearInterval(timer)
     }
   }, [id, tail, follow, refreshKey, router])
-
-  React.useEffect(() => {
-    const el = preRef.current
-    if (el && follow) el.scrollTop = el.scrollHeight
-  }, [logs, follow])
 
   return (
     <Card>
@@ -205,18 +200,14 @@ export function LogViewer({ id }: { id: string }) {
           >
             <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
           </Button>
+          <LogDownloadDialog id={id} />
         </CardAction>
       </CardHeader>
       <CardContent>
         {error ? (
           <p className="text-sm text-destructive">{error}</p>
         ) : (
-          <pre
-            ref={preRef}
-            className="h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap"
-          >
-            {logs || "No log output."}
-          </pre>
+          <LogOutput logs={logs} follow={follow} />
         )}
       </CardContent>
     </Card>

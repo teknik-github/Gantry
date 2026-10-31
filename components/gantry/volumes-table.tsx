@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { PlusIcon, Trash2Icon } from "lucide-react"
+import Link from "next/link"
+import { FolderOpenIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
 import { createVolume, removeVolume, removeVolumes } from "@/app/(app)/volumes/actions"
 import { columnHelperFor, DataTable, SortHeader, type TableSelection } from "@/components/data-table"
@@ -26,7 +27,7 @@ export type VolumeRow = {
 
 const helper = columnHelperFor<VolumeRow>()
 
-function buildColumns(canManage: boolean, environmentId: number | undefined) {
+function buildColumns(canManage: boolean, environmentId: number | undefined, canBrowse = false) {
   return helper.columns([
     helper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -61,18 +62,27 @@ function buildColumns(canManage: boolean, environmentId: number | undefined) {
     helper.display({
       id: "actions",
       cell: ({ row }) =>
-        canManage ? (
+        canManage || canBrowse ? (
           <div className="flex justify-end">
-            <ConfirmAction
-              title={`Remove volume ${row.original.name}?`}
-              description="All data stored in this volume will be permanently deleted."
-              confirmLabel="Remove"
-              onConfirm={() => removeVolume(row.original.name, environmentId)}
-            >
-              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Remove volume">
-                <Trash2Icon />
+            {canBrowse ? (
+              <Button asChild variant="ghost" size="icon" className="size-8 text-muted-foreground">
+                <Link href={`/volumes/${encodeURIComponent(row.original.name)}`} aria-label={`Browse volume ${row.original.name}`}>
+                  <FolderOpenIcon />
+                </Link>
               </Button>
-            </ConfirmAction>
+            ) : null}
+            {canManage ? (
+              <ConfirmAction
+                title={`Remove volume ${row.original.name}?`}
+                description="All data stored in this volume will be permanently deleted."
+                confirmLabel="Remove"
+                onConfirm={() => removeVolume(row.original.name, environmentId)}
+              >
+                <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Remove volume">
+                  <Trash2Icon />
+                </Button>
+              </ConfirmAction>
+            ) : null}
           </div>
         ) : null,
       enableHiding: false,
@@ -99,9 +109,9 @@ const volumeSelection = (environmentId: number | undefined): TableSelection<Volu
   },
 })
 
-export function VolumesTable({ data, canManage }: { data: VolumeRow[]; canManage: boolean }) {
+export function VolumesTable({ data, canManage, canBrowse }: { data: VolumeRow[]; canManage: boolean; canBrowse?: boolean }) {
   const environmentId = useEnvironmentId()
-  const columns = React.useMemo(() => buildColumns(canManage, environmentId), [canManage, environmentId])
+  const columns = React.useMemo(() => buildColumns(canManage, environmentId, canBrowse), [canManage, environmentId, canBrowse])
   const selection = React.useMemo(() => (canManage ? volumeSelection(environmentId) : undefined), [canManage, environmentId])
   return (
     <DataTable
