@@ -17,7 +17,16 @@ import { KubeError, kubeJson, kubeStream, type KubeTarget } from "@/lib/server/k
  * end the whole source; the hub reconnects with exponential backoff.
  */
 
-type Watched = { kind: KubeWatchKind; group: string; resource: string }
+type Watched = {
+  kind: KubeWatchKind
+  group: string
+  resource: string
+  /** Fetch metadata only (PartialObjectMetadata): Secret values never even reach Gantry. */
+  metadataOnly?: boolean
+}
+
+/** Accept header for metadata-only lists and watches. */
+export const METADATA_ONLY = "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1,application/json"
 
 export const WATCHED: readonly Watched[] = [
   { kind: "Pod", group: "v1", resource: "pods" },
@@ -28,6 +37,8 @@ export const WATCHED: readonly Watched[] = [
   { kind: "Ingress", group: "networking.k8s.io/v1", resource: "ingresses" },
   { kind: "Event", group: "v1", resource: "events" },
   { kind: "Namespace", group: "v1", resource: "namespaces" },
+  { kind: "ConfigMap", group: "v1", resource: "configmaps", metadataOnly: true },
+  { kind: "Secret", group: "v1", resource: "secrets", metadataOnly: true },
 ]
 
 /** The server ends each watch after this long; we then re-watch from the last version. */
@@ -155,13 +166,15 @@ function collectionPath(group: string, resource: string, namespace: string | nul
 }
 
 /** The real transport: list with limit=1 (only the version is needed), then a streaming watch. */
-export function httpTransport(target: KubeTarget, path: string): WatchTransport {
+export function httpTransport(target: KubeTarget, path: string, opts: { metadataOnly?: boolean } = {}): WatchTransport {
+  const accept = opts.metadataOnly ? METADATA_ONLY : undefined
   return {
     async list() {
       const { data } = await kubeJson<{ metadata?: { resourceVersion?: string } }>(target, {
         method: "GET",
         path,
         query: { limit: 1 },
+        accept,
       })
       return data.metadata?.resourceVersion ?? "0"
     },
@@ -173,6 +186,7 @@ export function httpTransport(target: KubeTarget, path: string): WatchTransport 
           path,
           query: { watch: 1, resourceVersion, allowWatchBookmarks: true, timeoutSeconds: WATCH_SECONDS },
           idleTimeoutMs: IDLE_TIMEOUT_MS,
+          accept,
         },
         signal
       )
@@ -230,7 +244,7 @@ export function kubeEventSource(target: KubeTarget, opts: { fallbackNamespace: s
       }
 
       const run = async (w: Watched) => {
-        let transport = httpTransport(target, collectionPath(w.group, w.resource, null))
+        let transport = httpTransport(target, collectionPath(w.group, w.resource, null), w)
         let resourceVersion: string
         try {
           resourceVersion = await transport.list(inner.signal)
@@ -240,7 +254,7 @@ export function kubeEventSource(target: KubeTarget, opts: { fallbackNamespace: s
             markOpen() // Not allowed: no live updates for this type.
             return
           }
-          transport = httpTransport(target, collectionPath(w.group, w.resource, opts.fallbackNamespace))
+          transport = httpTransport(target, collectionPath(w.group, w.resource, opts.fallbackNamespace), w)
           try {
             resourceVersion = await transport.list(inner.signal)
           } catch (err2) {

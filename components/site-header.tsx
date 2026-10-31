@@ -36,6 +36,8 @@ const KUBERNETES_TITLES: Record<string, string> = {
   events: "Events",
   apply: "Apply manifest",
   helm: "Helm releases",
+  charts: "Helm charts",
+  edit: "Edit YAML",
 }
 
 export function SiteHeader() {

@@ -256,6 +256,25 @@ export function kube(target: KubeTarget) {
       }
     },
 
+    /** One object as the API returns it (Secrets included: callers decide who may see it). */
+    getObject: (apiVersion: string, resource: string, ns: string, name: string) =>
+      get<Record<string, unknown>>(`${collectionPath(apiVersion, resource, ns)}/${seg(name)}`),
+
+    /**
+     * Replaces an object (PUT). The body's metadata.resourceVersion makes it
+     * conditional: a newer version on the server fails with 409 Conflict.
+     * `dryRun` validates and returns the result without persisting it.
+     */
+    async replaceObject(apiVersion: string, resource: string, ns: string, name: string, body: Record<string, unknown>, dryRun: boolean) {
+      const res = await kubeJson<Record<string, unknown>>(target, {
+        method: "PUT",
+        path: `${collectionPath(apiVersion, resource, ns)}/${seg(name)}`,
+        body,
+        query: { fieldManager: "gantry", dryRun: dryRun ? "All" : undefined, fieldValidation: "Strict" },
+      })
+      return res.data
+    },
+
     version: () => get<{ gitVersion: string; platform?: string }>("/version"),
 
     /** Throws when the credentials are rejected (discovery needs an authenticated user). */

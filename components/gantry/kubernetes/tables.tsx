@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { PlusIcon, RotateCwIcon, ScalingIcon, ScrollTextIcon, Trash2Icon } from "lucide-react"
+import { FileCodeIcon, PlusIcon, RotateCwIcon, ScalingIcon, ScrollTextIcon, Trash2Icon } from "lucide-react"
 
 import {
   createNamespace,
@@ -32,6 +32,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { timeAgo } from "@/lib/format"
+import { editHref } from "@/lib/kubernetes/edit"
 import { MAX_REPLICAS, PROTECTED_NAMESPACES } from "@/lib/kubernetes/names"
 import type {
   ConfigMapRow,
@@ -95,6 +96,34 @@ function IconButton({ label, children, ...props }: React.ComponentProps<typeof B
       {children}
     </Button>
   )
+}
+
+/** Link to the object's "Edit YAML" page (manager role; Secrets: administrators). */
+export function EditYamlLink({ kind, namespace, name }: { kind: string; namespace: string; name: string }) {
+  const href = editHref(kind, namespace, name)
+  if (!href) return null
+  return (
+    <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" asChild>
+      <Link href={href} aria-label="Edit YAML" title="Edit YAML">
+        <FileCodeIcon />
+      </Link>
+    </Button>
+  )
+}
+
+function editColumn<T extends { kind?: string; namespace: string; name: string }>(
+  helper: ReturnType<typeof columnHelperFor<T>>,
+  kind: string
+) {
+  return helper.display({
+    id: "actions",
+    cell: ({ row }) => (
+      <div className="flex justify-end">
+        <EditYamlLink kind={row.original.kind ?? kind} namespace={row.original.namespace} name={row.original.name} />
+      </div>
+    ),
+    enableHiding: false,
+  })
 }
 
 // --------------------------------------------------------------------- nodes
@@ -341,6 +370,7 @@ function workloadColumns(environmentId: number, can: { operate: boolean; manage:
         return (
           <div className="flex justify-end gap-1">
             {can.manage && w.kind !== "DaemonSet" ? <ScaleDialog row={w} environmentId={environmentId} /> : null}
+            {can.manage ? <EditYamlLink kind={w.kind} namespace={w.namespace} name={w.name} /> : null}
             <ConfirmAction
               title={`Restart ${w.name}?`}
               description={`Like kubectl rollout restart: the pods of ${w.kind} ${w.namespace}/${w.name} are replaced one by one.`}
@@ -406,7 +436,7 @@ export function WorkloadsTable({
 
 const serviceHelper = columnHelperFor<ServiceRow>()
 
-function serviceColumns(showNamespace: boolean) {
+function serviceColumns(showNamespace: boolean, canEdit: boolean) {
   return serviceHelper.columns([
     serviceHelper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -424,11 +454,12 @@ function serviceColumns(showNamespace: boolean) {
     serviceHelper.display({ id: "ports", header: "Ports", cell: ({ row }) => <Tags items={row.original.ports} /> }),
     serviceHelper.display({ id: "external", header: "External", cell: ({ row }) => <Tags items={row.original.externalIPs} /> }),
     serviceHelper.accessor("created", { header: "Age", cell: ({ row }) => <Age at={row.original.created} /> }),
+    ...(canEdit ? [editColumn(serviceHelper, "Service")] : []),
   ])
 }
 
-export function ServicesTable({ data, showNamespace }: { data: ServiceRow[]; showNamespace: boolean }) {
-  const columns = React.useMemo(() => serviceColumns(showNamespace), [showNamespace])
+export function ServicesTable({ data, showNamespace, canEdit = false }: { data: ServiceRow[]; showNamespace: boolean; canEdit?: boolean }) {
+  const columns = React.useMemo(() => serviceColumns(showNamespace, canEdit), [showNamespace, canEdit])
   return (
     <DataTable
       data={data}
@@ -444,7 +475,7 @@ export function ServicesTable({ data, showNamespace }: { data: ServiceRow[]; sho
 
 const ingressHelper = columnHelperFor<IngressRow>()
 
-function ingressColumns(showNamespace: boolean) {
+function ingressColumns(showNamespace: boolean, canEdit: boolean) {
   return ingressHelper.columns([
     ingressHelper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -458,11 +489,12 @@ function ingressColumns(showNamespace: boolean) {
     ingressHelper.display({ id: "hosts", header: "Hosts", cell: ({ row }) => <Tags items={row.original.hosts} /> }),
     ingressHelper.display({ id: "address", header: "Address", cell: ({ row }) => <Tags items={row.original.address} /> }),
     ingressHelper.accessor("created", { header: "Age", cell: ({ row }) => <Age at={row.original.created} /> }),
+    ...(canEdit ? [editColumn(ingressHelper, "Ingress")] : []),
   ])
 }
 
-export function IngressesTable({ data, showNamespace }: { data: IngressRow[]; showNamespace: boolean }) {
-  const columns = React.useMemo(() => ingressColumns(showNamespace), [showNamespace])
+export function IngressesTable({ data, showNamespace, canEdit = false }: { data: IngressRow[]; showNamespace: boolean; canEdit?: boolean }) {
+  const columns = React.useMemo(() => ingressColumns(showNamespace, canEdit), [showNamespace, canEdit])
   return (
     <DataTable
       data={data}
@@ -562,7 +594,7 @@ function NamespaceNameField({ environmentId, error }: { environmentId: number; e
 
 const cmHelper = columnHelperFor<ConfigMapRow>()
 
-function configMapColumns(showNamespace: boolean) {
+function configMapColumns(showNamespace: boolean, canEdit: boolean) {
   return cmHelper.columns([
     cmHelper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -572,11 +604,12 @@ function configMapColumns(showNamespace: boolean) {
     ...(showNamespace ? [cmHelper.accessor("namespace", { header: ({ column }) => <SortHeader column={column} title="Namespace" /> })] : []),
     cmHelper.display({ id: "keys", header: "Keys", cell: ({ row }) => <Tags items={row.original.keys} empty="no keys" /> }),
     cmHelper.accessor("created", { header: "Age", cell: ({ row }) => <Age at={row.original.created} /> }),
+    ...(canEdit ? [editColumn(cmHelper, "ConfigMap")] : []),
   ])
 }
 
-export function ConfigMapsTable({ data, showNamespace }: { data: ConfigMapRow[]; showNamespace: boolean }) {
-  const columns = React.useMemo(() => configMapColumns(showNamespace), [showNamespace])
+export function ConfigMapsTable({ data, showNamespace, canEdit = false }: { data: ConfigMapRow[]; showNamespace: boolean; canEdit?: boolean }) {
+  const columns = React.useMemo(() => configMapColumns(showNamespace, canEdit), [showNamespace, canEdit])
   return (
     <DataTable
       data={data}
@@ -591,7 +624,7 @@ export function ConfigMapsTable({ data, showNamespace }: { data: ConfigMapRow[];
 
 const secretHelper = columnHelperFor<SecretRow>()
 
-function secretColumns(showNamespace: boolean) {
+function secretColumns(showNamespace: boolean, canEdit: boolean) {
   return secretHelper.columns([
     secretHelper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Name" />,
@@ -604,11 +637,13 @@ function secretColumns(showNamespace: boolean) {
     secretHelper.accessor("type", { header: "Type", cell: ({ row }) => <Mono>{row.original.type}</Mono> }),
     secretHelper.display({ id: "keys", header: "Keys", cell: ({ row }) => <Tags items={row.original.keys} empty="no keys" /> }),
     secretHelper.accessor("created", { header: "Age", cell: ({ row }) => <Age at={row.original.created} /> }),
+    ...(canEdit ? [editColumn(secretHelper, "Secret")] : []),
   ])
 }
 
-export function SecretsTable({ data, showNamespace }: { data: SecretRow[]; showNamespace: boolean }) {
-  const columns = React.useMemo(() => secretColumns(showNamespace), [showNamespace])
+/** `canEdit`: administrators only (the editor shows the Secret's data). */
+export function SecretsTable({ data, showNamespace, canEdit = false }: { data: SecretRow[]; showNamespace: boolean; canEdit?: boolean }) {
+  const columns = React.useMemo(() => secretColumns(showNamespace, canEdit), [showNamespace, canEdit])
   return (
     <DataTable
       data={data}

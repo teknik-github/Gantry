@@ -26,6 +26,8 @@ export type KubeWatchKind =
   | "Ingress"
   | "Event"
   | "Namespace"
+  | "ConfigMap"
+  | "Secret"
 
 /**
  * One change from a Kubernetes watch. "resync" means the watch had to start
@@ -113,6 +115,9 @@ const KUBE_PAGES: Record<string, readonly KubeWatchKind[]> = {
   services: ["Service", "Ingress"],
   namespaces: ["Namespace"],
   events: ["Event"],
+  config: ["ConfigMap", "Secret"],
+  // Helm keeps each release revision in a Secret.
+  helm: ["Secret"],
 }
 
 function kubeEventAffects(event: KubeLiveEvent, segments: string[]): boolean {

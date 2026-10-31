@@ -5,14 +5,13 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Trash2Icon } from "lucide-react"
 
-import { uninstallHelmRelease } from "@/app/(app)/kubernetes/actions"
+import { uninstallHelmRelease } from "@/app/(app)/kubernetes/helm-actions"
 import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { Age, KubeStatus } from "@/components/gantry/kubernetes/tables"
 import { Mono } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import type { HelmReleaseRow } from "@/lib/server/kubernetes/helm"
-
 
 function UninstallButton({
   environmentId,
@@ -28,7 +27,7 @@ function UninstallButton({
   return (
     <ConfirmAction
       title={`Uninstall ${release.name}?`}
-      description={`Deletes every object of Helm release ${release.namespace}/${release.name} and its history. Hooks are not run; objects marked "helm.sh/resource-policy: keep" stay.`}
+      description={`Runs helm uninstall: deletes every object of release ${release.namespace}/${release.name} and its history (uninstall hooks run; objects marked "helm.sh/resource-policy: keep" stay).`}
       confirmLabel="Uninstall"
       onConfirm={async () => {
         const res = await uninstallHelmRelease({ environmentId, namespace: release.namespace, name: release.name })
@@ -52,7 +51,7 @@ function UninstallButton({
 
 const helper = columnHelperFor<HelmReleaseRow>()
 
-function columns(environmentId: number, isAdmin: boolean, showNamespace: boolean) {
+function columns(environmentId: number, canManage: boolean, showNamespace: boolean) {
   return helper.columns([
     helper.accessor("name", {
       header: ({ column }) => <SortHeader column={column} title="Release" />,
@@ -98,7 +97,7 @@ function columns(environmentId: number, isAdmin: boolean, showNamespace: boolean
     helper.display({
       id: "actions",
       cell: ({ row }) =>
-        isAdmin ? (
+        canManage ? (
           <div className="flex justify-end">
             <UninstallButton environmentId={environmentId} release={row.original} />
           </div>
@@ -111,15 +110,15 @@ function columns(environmentId: number, isAdmin: boolean, showNamespace: boolean
 export function HelmReleasesTable({
   data,
   environmentId,
-  isAdmin,
+  canManage,
   showNamespace,
 }: {
   data: HelmReleaseRow[]
   environmentId: number
-  isAdmin: boolean
+  canManage: boolean
   showNamespace: boolean
 }) {
-  const cols = React.useMemo(() => columns(environmentId, isAdmin, showNamespace), [environmentId, isAdmin, showNamespace])
+  const cols = React.useMemo(() => columns(environmentId, canManage, showNamespace), [environmentId, canManage, showNamespace])
   return (
     <DataTable
       data={data}
