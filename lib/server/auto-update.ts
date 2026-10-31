@@ -6,7 +6,7 @@ import type { Environment } from "@/lib/server/db/schema"
 import { docker, type ContainerSummary } from "@/lib/server/docker/api"
 import { pullAndRecreate, RecreateError } from "@/lib/server/docker/recreate"
 import { selfContainerIds } from "@/lib/server/docker/self"
-import { environmentTarget } from "@/lib/server/environment-target"
+import { environmentTarget, isDockerEnvironment } from "@/lib/server/environment-target"
 import { checkReferences, containerReferences, referencesOf, updatesFor } from "@/lib/server/image-updates"
 import { notify } from "@/lib/server/notifications"
 import { credentialsForImage } from "@/lib/server/registries"
@@ -153,7 +153,7 @@ export async function runAutoUpdate(trigger: AutoUpdateRun["trigger"], actor: Ac
   const results: AutoUpdateResult[] = []
   try {
     const db = await getDb()
-    const envs = (await db.selectFrom("environments").selectAll().execute()).filter((e) => e.type === "socket" || e.type === "tcp")
+    const envs = (await db.selectFrom("environments").selectAll().execute()).filter(isDockerEnvironment)
     for (const env of envs) {
       try {
         results.push(...(await updateEnvironment(env, actor)))

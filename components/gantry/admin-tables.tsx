@@ -25,6 +25,14 @@ import {
 } from "@/app/(app)/environments/actions"
 import { createUser, deleteUser, resetPassword, resetTwoFactor, setUserAccess, setUserRole } from "@/app/(app)/users/actions"
 import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
+import {
+  AddAgentDialog,
+  AgentAddressCell,
+  AgentStatusBadge,
+  AgentTypeCell,
+  RotateAgentKeyButton,
+  type AgentRow,
+} from "@/components/gantry/agent-environment"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono } from "@/components/gantry/ui"
@@ -171,7 +179,7 @@ function RoleBadge({ name, role }: { name: string; role: EnvironmentRole }) {
 export type EnvironmentRow = {
   id: number
   name: string
-  type: "socket" | "tcp" | "kubernetes"
+  type: "socket" | "tcp" | "agent" | "kubernetes"
   url: string
   /** Whether TLS certificates are stored. The PEM material itself never reaches the browser. */
   tls: boolean
@@ -184,6 +192,8 @@ export type EnvironmentRow = {
   version: string | null
   error: string | null
   current: boolean
+  /** "agent" only: connection state and what the agent reported. */
+  agent: AgentRow | null
   /** Standard users granted access, with their role (administrators can always use it). */
   access: { id: number; username: string; role: EnvironmentRole }[]
 }
@@ -206,18 +216,23 @@ function environmentColumns(users: UserOption[]) {
     }),
     envHelper.accessor("status", {
       header: "Status",
-      cell: ({ row }) => (
-        <Badge variant="outline" className="gap-1.5 px-1.5 text-muted-foreground" title={row.original.error ?? undefined}>
-          <span className={cn("size-2 rounded-full", row.original.status === "up" ? "bg-emerald-500" : "bg-red-500")} />
-          {row.original.status === "up" ? `up · ${row.original.version}` : "unreachable"}
-        </Badge>
-      ),
+      cell: ({ row }) =>
+        row.original.agent ? (
+          <AgentStatusBadge agent={row.original.agent} version={row.original.version} error={row.original.error} />
+        ) : (
+          <Badge variant="outline" className="gap-1.5 px-1.5 text-muted-foreground" title={row.original.error ?? undefined}>
+            <span className={cn("size-2 rounded-full", row.original.status === "up" ? "bg-emerald-500" : "bg-red-500")} />
+            {row.original.status === "up" ? `up · ${row.original.version}` : "unreachable"}
+          </Badge>
+        ),
     }),
     envHelper.accessor("type", {
       header: "Type",
       cell: ({ row }) =>
         row.original.type === "socket" ? (
           "Unix socket"
+        ) : row.original.agent ? (
+          <AgentTypeCell agent={row.original.agent} />
         ) : row.original.type === "kubernetes" ? (
           <div className="flex flex-wrap items-center gap-1.5">
             Kubernetes
@@ -249,7 +264,7 @@ function environmentColumns(users: UserOption[]) {
     }),
     envHelper.accessor("url", {
       header: "Address",
-      cell: ({ row }) => <Mono>{row.original.url}</Mono>,
+      cell: ({ row }) => (row.original.agent ? <AgentAddressCell agent={row.original.agent} /> : <Mono>{row.original.url}</Mono>),
     }),
     envHelper.display({
       id: "access",
@@ -286,13 +301,16 @@ function environmentColumns(users: UserOption[]) {
             selected={row.original.access.map((u) => ({ id: u.id, role: u.role }))}
             emptyMessage="There are no standard users yet."
           />
+          {row.original.agent ? <RotateAgentKeyButton id={row.original.id} name={row.original.name} /> : null}
           <EditEnvironmentDialog row={row.original} />
           <ConfirmAction
             title={`Remove environment ${row.original.name}?`}
             description={
               row.original.type === "kubernetes"
                 ? "Gantry will stop managing this cluster and forget its credentials. Nothing in the cluster is changed."
-                : "Gantry will stop managing this Docker host. Nothing on the host is changed."
+                : row.original.agent
+                  ? "Gantry will stop managing this Docker host and forget the agent's key, so the agent is disconnected and can't come back. Remove the gantry-agent container on the host. Nothing else on the host is changed."
+                  : "Gantry will stop managing this Docker host. Nothing on the host is changed."
             }
             confirmLabel="Remove"
             onConfirm={() => deleteEnvironment(row.original.id)}
@@ -316,7 +334,12 @@ export function EnvironmentsTable({ data, users }: { data: EnvironmentRow[]; use
       columns={columns}
       getRowId={(r) => String(r.id)}
       emptyMessage="No environments."
-      toolbar={<AddEnvironmentDialog />}
+      toolbar={
+        <>
+          <AddAgentDialog />
+          <AddEnvironmentDialog />
+        </>
+      }
     />
   )
 }
@@ -407,6 +430,8 @@ function EnvironmentFields({ errors, initial }: { errors: Errors; initial?: Envi
   const tcp = type === "tcp"
   const kubernetes = type === "kubernetes"
   const showPem = tcp && useTls && replacing
+
+  if (initial?.type === "agent") return <AgentEnvironmentFields errors={errors} initial={initial} />
 
   return (
     <>
@@ -528,6 +553,25 @@ function EnvironmentFields({ errors, initial }: { errors: Errors; initial?: Envi
           ) : null}
         </>
       )}
+    </>
+  )
+}
+
+/** Agent environments: only the name is edited here; the key is rotated from the row. */
+function AgentEnvironmentFields({ errors, initial }: { errors: Errors; initial: EnvironmentDefaults }) {
+  const uid = React.useId()
+  return (
+    <>
+      <input type="hidden" name="id" value={initial.id} />
+      <input type="hidden" name="type" value="agent" />
+      <Field data-invalid={errors.name ? true : undefined}>
+        <FieldLabel htmlFor={`${uid}-name`}>Name</FieldLabel>
+        <Input id={`${uid}-name`} name="name" defaultValue={initial.name} required autoFocus />
+        <FieldError>{errors.name?.[0]}</FieldError>
+      </Field>
+      <FieldDescription>
+        The connection comes from the agent on the host. Use &ldquo;Rotate agent key&rdquo; to issue a new key.
+      </FieldDescription>
     </>
   )
 }

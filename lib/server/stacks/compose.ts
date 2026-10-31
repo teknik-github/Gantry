@@ -5,6 +5,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { agentIdFromUrl, agentProblem, agentSocketPath } from "@/lib/server/agent/state"
 import { config } from "@/lib/server/config"
 import type { DockerTarget } from "@/lib/server/docker/client"
 import { dockerConfigJson, type RegistryCredentials } from "@/lib/registry"
@@ -74,6 +75,12 @@ export function composeArgs(project: string, command: string[], files: ComposeFi
 /** DOCKER_HOST value for an environment. */
 export function dockerHost(target: DockerTarget): string {
   if (target.type === "socket") return `unix://${target.url}`
+  // The local socket that leads into the agent's tunnel (lib/server/agent/).
+  if (target.type === "agent") {
+    const id = agentIdFromUrl(target.url)
+    if (id === null) throw new Error("Invalid agent environment")
+    return `unix://${agentSocketPath(id)}`
+  }
   // tcp environments are stored as host:port, optionally with tcp:// or http://.
   return `tcp://${target.url.replace(/^[a-z]+:\/\//i, "")}`
 }
@@ -200,6 +207,13 @@ export async function runCompose(opts: {
   out?: OutputBuffer
 }): Promise<ComposeRun> {
   const out = opts.out ?? new OutputBuffer()
+  if (opts.target.type === "agent") {
+    const problem = agentProblem(agentIdFromUrl(opts.target.url))
+    if (problem) {
+      out.append(`${problem}\n`)
+      return { code: 1, output: out.toString(), timedOut: false }
+    }
+  }
   const certDir = opts.target.tls ? await writeCerts(opts.target.tls) : null
   let configDir: string | null = null
   const deadline = Date.now() + opts.timeoutMs

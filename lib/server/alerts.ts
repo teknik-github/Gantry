@@ -4,7 +4,7 @@ import { ALERT_EVENT_FILTERS, ContainerAlertTracker, EnvironmentHealth } from "@
 import { getDb } from "@/lib/server/db"
 import type { Environment } from "@/lib/server/db/schema"
 import { streamDockerEvents } from "@/lib/server/docker/events"
-import { environmentTarget } from "@/lib/server/environment-target"
+import { environmentTarget, isDockerEnvironment } from "@/lib/server/environment-target"
 import { notify, pruneAlerts } from "@/lib/server/notifications"
 
 /**
@@ -16,8 +16,6 @@ import { notify, pruneAlerts } from "@/lib/server/notifications"
 const SYNC_EVERY_MS = 60_000
 const PRUNE_EVERY_MS = 60 * 60_000
 const MAX_BACKOFF_MS = 60_000
-/** Environment types with a Docker API (others, e.g. Kubernetes, are skipped). */
-const DOCKER_TYPES = new Set(["socket", "tcp"])
 
 type Watch = { key: string; abort: AbortController }
 
@@ -74,7 +72,7 @@ async function watchEnvironment(env: Environment, signal: AbortSignal) {
           kind: "environment_down",
           environment: env.name,
           subject: `${env.name} is unreachable`,
-          message: `Gantry has not been able to reach Docker at ${env.url} for 2 minutes${error ? `: ${error}` : "."}`,
+          message: `Gantry has not been able to reach Docker ${env.type === "agent" ? "through its agent" : `at ${env.url}`} for 2 minutes${error ? `: ${error}` : "."}`,
         },
         env.id
       )
@@ -87,7 +85,7 @@ async function watchEnvironment(env: Environment, signal: AbortSignal) {
 
 async function sync(watches: Map<number, Watch>) {
   const db = await getDb()
-  const envs = (await db.selectFrom("environments").selectAll().execute()).filter((e) => DOCKER_TYPES.has(e.type))
+  const envs = (await db.selectFrom("environments").selectAll().execute()).filter(isDockerEnvironment)
   const seen = new Set<number>()
   for (const env of envs) {
     seen.add(env.id)

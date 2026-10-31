@@ -4,6 +4,7 @@ import http from "node:http"
 import https from "node:https"
 import net from "node:net"
 
+import { agentIdFromUrl, agentProblem, agentSocketPath } from "@/lib/server/agent/state"
 import type { DockerEnvironmentType } from "@/lib/server/db/schema"
 
 export type DockerTarget = {
@@ -40,10 +41,18 @@ const MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 /**
  * Where to connect for a target: a Unix socket, or host/port for "tcp"
  * (plus the PEM material when it uses TLS). Accepts "host:port",
- * "tcp://host:port", "http://host:port" and "https://host:port".
+ * "tcp://host:port", "http://host:port" and "https://host:port". An "agent"
+ * target ("agent://<environment id>") is the local Unix socket that leads
+ * into that agent's tunnel (lib/server/agent/), so Docker traffic to it is
+ * plain HTTP over a socket, like the "socket" type.
  */
 export function connectionOptions(target: DockerTarget): https.RequestOptions {
   if (target.type === "socket") return { socketPath: target.url }
+  if (target.type === "agent") {
+    const id = agentIdFromUrl(target.url)
+    if (id === null) throw new DockerError("Invalid agent environment", 500)
+    return { socketPath: agentSocketPath(id) }
+  }
   const raw = /^[a-z]+:\/\//i.test(target.url) ? target.url : `tcp://${target.url}`
   const url = new URL(raw.replace(/^[a-z]+:/i, "http:"))
   const tls = target.tls
@@ -73,16 +82,33 @@ export function dockerRequest(
   options: Omit<http.RequestOptions, "host" | "hostname" | "port" | "socketPath">,
   onResponse?: (res: http.IncomingMessage) => void
 ): http.ClientRequest {
+  if (target.type === "agent") {
+    // Fail with a clear message instead of ENOENT when the agent is offline.
+    const problem = agentProblem(agentIdFromUrl(target.url))
+    if (problem) return failedRequest(options, new DockerError(problem, 502))
+  }
   const conn = connectionOptions(target)
   // Over TCP the Host header must name the daemon: Node derives the TLS
   // server name from it. Over a socket any value works.
-  const host = target.type === "socket" ? "docker" : `${conn.host}:${conn.port}`
+  const host = target.type === "tcp" ? `${conn.host}:${conn.port}` : "docker"
   const opts: https.RequestOptions = {
     ...options,
     ...conn,
     headers: { ...options.headers, Host: host },
   }
   return target.type === "tcp" && target.tls ? https.request(opts, onResponse) : http.request(opts, onResponse)
+}
+
+/** A request that fails with `err` (emitted as its "error") without connecting anywhere. */
+function failedRequest(options: http.RequestOptions, err: Error): http.ClientRequest {
+  return http.request({
+    ...options,
+    createConnection: () => {
+      const socket = new net.Socket()
+      process.nextTick(() => socket.destroy(err))
+      return socket
+    },
+  })
 }
 
 /** Maps a socket/TLS error to a DockerError without leaking anything sensitive. */

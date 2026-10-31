@@ -13,6 +13,11 @@ export type EnvironmentConnection = Pick<Environment, "type" | "url" | "tls_ca" 
 // Bound as AAD so an encrypted value only decrypts in its own column.
 const CONTEXT = { ca: "environment.tls_ca", cert: "environment.tls_cert", key: "environment.tls_key" } as const
 
+/** Environment types with a Docker Engine API (Kubernetes clusters have none). */
+export function isDockerEnvironment(env: Pick<Environment, "type">): boolean {
+  return env.type === "socket" || env.type === "tcp" || env.type === "agent"
+}
+
 export function hasTls(env: Pick<Environment, "type" | "tls_ca" | "tls_cert" | "tls_key">): boolean {
   return env.type === "tcp" && Boolean(env.tls_ca && env.tls_cert && env.tls_key)
 }

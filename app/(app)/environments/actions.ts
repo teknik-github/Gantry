@@ -5,6 +5,7 @@ import { refresh } from "next/cache"
 import { z } from "zod"
 
 import { runAction, UserError } from "@/lib/server/action"
+import { disconnectAgent } from "@/lib/server/agent/hub"
 import { getCurrentUser } from "@/lib/server/auth/dal"
 import { ENV_COOKIE } from "@/lib/server/auth/token"
 import { getDb } from "@/lib/server/db"
@@ -48,7 +49,8 @@ const PEM_MAX = 64 * 1024
 const envSchema = z
   .object({
     name: z.string().trim().min(1, "Name is required").max(100),
-    type: z.enum(["socket", "tcp", "kubernetes"]),
+    // "agent" environments are added with createAgentEnvironment (agent-actions.ts); here only renamed.
+    type: z.enum(["socket", "tcp", "agent", "kubernetes"]),
     // Docker only; Kubernetes uses kube_server or the kubeconfig.
     url: z.string().trim().max(255).default(""),
     // "on" when the TLS switch is enabled (tcp only).
@@ -71,6 +73,7 @@ const envSchema = z
     kube_context: z.string().max(253).default(""),
   })
   .superRefine((v, ctx) => {
+    if (v.type === "agent") return
     if (v.type !== "kubernetes" && !v.url) {
       ctx.addIssue({ code: "custom", path: ["url"], message: "Address is required" })
       return
@@ -157,6 +160,7 @@ export async function createEnvironment(_prev: ActionState, formData: FormData):
   const parsed = parseForm(formData)
   if (!parsed.success) return fieldErrors(parsed.error)
   const v = parsed.data
+  if (v.type === "agent") return { error: "Add agent environments with “Add agent”" }
 
   if (v.type === "kubernetes") {
     const res = kubeFromForm(v)
@@ -203,6 +207,7 @@ export async function updateEnvironment(_prev: ActionState, formData: FormData):
   const v = parsed.data
 
   if (v.type === "kubernetes") return updateKubeEnvironment(id.data, v)
+  if (v.type === "agent") return renameAgentEnvironment(id.data, v.name)
   const type = v.type
 
   // TLS: "keep" the stored certificates, "set" new ones, or "off" (sockets,
@@ -220,6 +225,7 @@ export async function updateEnvironment(_prev: ActionState, formData: FormData):
     const existing = await db.selectFrom("environments").selectAll().where("id", "=", id.data).executeTakeFirst()
     if (!existing) throw new UserError("Environment not found")
     if (existing.type === "kubernetes") throw new UserError("A Kubernetes environment can't become a Docker one. Add a new environment instead.")
+    if (existing.type === "agent") throw new UserError("An agent environment can't be changed into another type. Add a new environment instead.")
 
     let tls: DockerTls | null = null
     if (useTls) {
@@ -235,6 +241,18 @@ export async function updateEnvironment(_prev: ActionState, formData: FormData):
       .where("id", "=", id.data)
       .execute()
     return `Environment "${v.name}" saved`
+  })
+}
+
+/** Agent environments: only the name can be edited (the connection comes from the agent). */
+async function renameAgentEnvironment(id: number, name: string): Promise<ActionState> {
+  return runAction("admin", "environment.update", `${id}:${name}`, async () => {
+    const db = await getDb()
+    const existing = await db.selectFrom("environments").select("type").where("id", "=", id).executeTakeFirst()
+    if (!existing) throw new UserError("Environment not found")
+    if (existing.type !== "agent") throw new UserError("Only agent environments are edited this way")
+    await db.updateTable("environments").set({ name }).where("id", "=", id).execute()
+    return `Environment "${name}" saved`
   })
 }
 
@@ -285,6 +303,8 @@ export async function deleteEnvironment(id: number): Promise<ActionState> {
     if (Number(count.n) <= 1) throw new UserError("At least one environment is required")
     // environment_access rows go with it (ON DELETE CASCADE).
     await db.deleteFrom("environments").where("id", "=", parsed.data).execute()
+    // Its key went with the row: a connected agent is dropped and can't come back.
+    disconnectAgent(parsed.data, "the environment was deleted in Gantry")
     return "Environment removed"
   })
 }

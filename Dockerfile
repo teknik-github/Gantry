@@ -51,6 +51,9 @@ COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/public ./public
 COPY --from=helm /usr/local/bin/helm /usr/local/bin/helm
+# The remote host agent (`docker run … gantry agent`): one dependency-free script.
+COPY --chown=node:node agent/gantry-agent.mjs ./agent/gantry-agent.mjs
+COPY --chmod=0755 agent/docker-entrypoint.sh /usr/local/bin/gantry-entrypoint
 RUN mkdir -p /data && chown node:node /data
 
 # Runs unprivileged; docker-compose adds the docker socket's group.
@@ -58,7 +61,10 @@ USER node
 VOLUME ["/data"]
 EXPOSE 3000
 
+# Gantry: its /api/health. The agent: connected to Gantry within the last minute.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1
+  CMD gantry-entrypoint healthcheck || exit 1
 
+# `agent` as the command runs the agent instead of Gantry (agent/docker-entrypoint.sh).
+ENTRYPOINT ["gantry-entrypoint"]
 CMD ["node", "server.js"]

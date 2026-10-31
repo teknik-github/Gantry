@@ -66,7 +66,7 @@ const PAST: Record<ContainerAction, string> = {
 
 /** Stopping (or removing) the container Gantry runs in would cut the request off halfway. */
 function refuseSelf(id: string) {
-  if (isSelfContainer({ Id: id }, selfContainerIds())) throw new UserError("Gantry runs in this container; do it on its own")
+  if (isSelfContainer({ Id: id }, selfContainerIds())) throw new UserError("Gantry (or its agent for this host) runs in this container; do it on the host")
 }
 
 export async function bulkContainerAction(
