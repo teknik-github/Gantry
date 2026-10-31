@@ -112,7 +112,10 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Everything except Next.js internals and static files in /public.
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt)$).*)",
+    // Everything except Next.js internals and static files in /public, and
+    // the build context upload: Next buffers the body of every request that
+    // goes through proxy in memory (cut at 10 MB), so that route streams the
+    // archive without proxy and does its checks itself.
+    "/((?!_next/static|_next/image|favicon.ico|api/images/build/upload$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt)$).*)",
   ],
 }

@@ -9,6 +9,7 @@ import { BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { FormDialog } from "@/components/gantry/form-dialog"
+import { ImageTagPushActions } from "@/components/gantry/image-tag-push"
 import { Mono } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -74,7 +75,13 @@ function buildColumns(canManage: boolean) {
     }),
     helper.display({
       id: "actions",
-      cell: ({ row }) => (canManage ? <RemoveImage row={row.original} /> : null),
+      cell: ({ row }) =>
+        canManage ? (
+          <div className="flex justify-end gap-1">
+            <ImageTagPushActions row={row.original} />
+            <RemoveImage row={row.original} />
+          </div>
+        ) : null,
       enableHiding: false,
     }),
   ])

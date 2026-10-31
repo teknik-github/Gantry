@@ -128,7 +128,16 @@ type GitRun = { code: number | null; stdout: string; timedOut: boolean }
 
 function spawnGit(
   args: string[],
-  opts: { cwd: string; env: Record<string, string>; timeoutMs: number; out: OutputBuffer; secrets: string[]; captureStdout?: boolean }
+  opts: {
+    cwd: string
+    env: Record<string, string>
+    timeoutMs: number
+    out: OutputBuffer
+    secrets: string[]
+    captureStdout?: boolean
+    /** Stops git (like the timeout) when aborted, e.g. a cancelled image build. */
+    signal?: AbortSignal
+  }
 ): Promise<GitRun> {
   return new Promise((resolve) => {
     let stdout = ""
@@ -165,12 +174,19 @@ function spawnGit(
       kill("SIGTERM")
       killTimer = setTimeout(() => kill("SIGKILL"), 5_000)
     }, Math.max(1, opts.timeoutMs))
+    const onAbort = () => {
+      kill("SIGTERM")
+      killTimer ??= setTimeout(() => kill("SIGKILL"), 5_000)
+    }
+    if (opts.signal?.aborted) onAbort()
+    else opts.signal?.addEventListener("abort", onAbort, { once: true })
 
     const finish = (code: number | null) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       clearTimeout(killTimer)
+      opts.signal?.removeEventListener("abort", onAbort)
       const text = redact(log.toString(), opts.secrets)
       if (text) opts.out.append(text.endsWith("\n") ? text : `${text}\n`)
       resolve({ code, stdout: redact(stdout, opts.secrets), timedOut })
@@ -193,7 +209,8 @@ function spawnGit(
  */
 async function withGit<T>(
   source: Pick<GitSource, "url" | "credentials">,
-  fn: (git: (args: string[], o: { cwd: string; timeoutMs?: number; out?: OutputBuffer; captureStdout?: boolean }) => Promise<GitRun>, home: string) => Promise<T>
+  fn: (git: (args: string[], o: { cwd: string; timeoutMs?: number; out?: OutputBuffer; captureStdout?: boolean }) => Promise<GitRun>, home: string) => Promise<T>,
+  signal?: AbortSignal
 ): Promise<T> {
   const home = await makeTempHome()
   const secrets = source.credentials ? [source.credentials.token] : []
@@ -218,6 +235,7 @@ async function withGit<T>(
           out: o.out ?? new OutputBuffer(MAX_GIT_OUTPUT),
           secrets,
           captureStdout: o.captureStdout,
+          signal,
         }),
       home
     )
@@ -250,7 +268,12 @@ export async function hasCheckout(stackDir: string) {
  * (detached, tracked files forced to the commit; untracked files such as
  * data in bind-mounted folders stay). Git's output goes to `out`.
  */
-export async function syncCheckout(stackDir: string, source: GitSource, out: OutputBuffer): Promise<CommitInfo> {
+export async function syncCheckout(
+  stackDir: string,
+  source: GitSource,
+  out: OutputBuffer,
+  opts: { signal?: AbortSignal } = {}
+): Promise<CommitInfo> {
   const repo = checkoutDir(stackDir)
   await fs.mkdir(repo, { recursive: true, mode: 0o700 })
   return withGit(source, async (git) => {
@@ -270,7 +293,7 @@ export async function syncCheckout(stackDir: string, source: GitSource, out: Out
     const commit = await readHead(repo, git)
     out.append(`Checked out ${commit.sha.slice(0, 7)} ${commit.subject}\n`)
     return commit
-  })
+  }, opts.signal)
 }
 
 const LOG_FORMAT = "%H%x00%s%x00%an%x00%aI"
