@@ -16,6 +16,7 @@ import { auth } from "@/lib/server/db/migrations/011_auth"
 import { gitStacks } from "@/lib/server/db/migrations/013_git_stacks"
 import { mysqlColumns } from "@/lib/server/db/migrations/014_mysql_columns"
 import { imageScans } from "@/lib/server/db/migrations/015_image_scans"
+import { helmRepositories } from "@/lib/server/db/migrations/018_helm_repositories"
 
 // One file per migration, written with Kysely's schema builder only so the
 // same migrations run on SQLite and MySQL. Never edit a migration that has
@@ -36,6 +37,7 @@ const migrations: Record<string, Migration> = {
   "013_git_stacks": gitStacks,
   "014_mysql_columns": mysqlColumns,
   "015_image_scans": imageScans,
+  "018_helm_repositories": helmRepositories,
 }
 
 export const migrationProvider: MigrationProvider = {

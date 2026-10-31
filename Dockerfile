@@ -15,6 +15,27 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
+# helm for installing/upgrading charts on Kubernetes environments: a pinned
+# release, verified against its published SHA-256 for the target architecture
+# (downloaded on the build platform, so multi-arch builds need no emulation).
+FROM --platform=$BUILDPLATFORM node:24-alpine AS helm
+ARG TARGETARCH
+ARG HELM_VERSION=v3.19.0
+ARG HELM_SHA256_AMD64=a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496
+ARG HELM_SHA256_ARM64=440cf7add0aee27ebc93fada965523c1dc2e0ab340d4348da2215737fc0d76ad
+RUN set -eu; \
+    arch="${TARGETARCH:-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')}"; \
+    case "$arch" in \
+      amd64) sum="$HELM_SHA256_AMD64" ;; \
+      arm64) sum="$HELM_SHA256_ARM64" ;; \
+      *) echo "helm: no pinned checksum for architecture $arch" >&2; exit 1 ;; \
+    esac; \
+    wget -qO /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz"; \
+    echo "$sum  /tmp/helm.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/helm.tgz -C /tmp; \
+    install -m 0755 "/tmp/linux-${arch}/helm" /usr/local/bin/helm; \
+    if [ "$arch" = "$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')" ]; then /usr/local/bin/helm version --short; fi
+
 FROM node:24-alpine AS runner
 # docker compose CLI for stacks (talks to the environment's daemon via DOCKER_HOST),
 # git for stacks sourced from a Git repository.
@@ -29,6 +50,7 @@ ENV NODE_ENV=production \
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/public ./public
+COPY --from=helm /usr/local/bin/helm /usr/local/bin/helm
 RUN mkdir -p /data && chown node:node /data
 
 # Runs unprivileged; docker-compose adds the docker socket's group.

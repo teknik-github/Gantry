@@ -165,6 +165,19 @@ export interface RegistriesTable {
   updated_at: string
 }
 
+/** Helm chart repository (https index or oci:// registry) for Kubernetes environments. */
+export interface HelmRepositoriesTable {
+  id: Generated<number>
+  /** Name helm knows it by; charts are "<name>/<chart>". */
+  name: string
+  /** https://… (or http://) index repository, or oci://host/path */
+  url: string
+  /** Encrypted JSON {username, password} (lib/server/crypto.ts); null = anonymous */
+  credentials: string | null
+  created_at: string
+  updated_at: string
+}
+
 /** Custom stack template; built-in ones are in lib/template-catalog.ts. */
 export interface TemplatesTable {
   id: Generated<number>
@@ -298,6 +311,7 @@ export interface Database {
   recovery_codes: RecoveryCodesTable
   api_tokens: ApiTokensTable
   image_scans: ImageScansTable
+  helm_repositories: HelmRepositoriesTable
 }
 
 export type User = Selectable<UsersTable>

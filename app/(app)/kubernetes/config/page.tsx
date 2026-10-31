@@ -41,13 +41,13 @@ export default async function ConfigPage() {
       {configMaps.error !== undefined ? (
         <KubeUnavailable message={configMaps.error} />
       ) : (
-        <ConfigMapsTable data={configMaps.data} showNamespace={showNamespace} />
+        <ConfigMapsTable data={configMaps.data} showNamespace={showNamespace} canEdit={page.can.manage} />
       )}
-      <PageHeader title="Secrets" description="Gantry never shows secret values, only their keys." />
+      <PageHeader title="Secrets" description="Lists show key names only; values are shown to administrators in Edit YAML." />
       {secrets.error !== undefined ? (
         <KubeUnavailable message={secrets.error} />
       ) : (
-        <SecretsTable data={secrets.data} showNamespace={showNamespace} />
+        <SecretsTable data={secrets.data} showNamespace={showNamespace} canEdit={page.can.manage && page.user.role === "admin"} />
       )}
     </PageBody>
   )

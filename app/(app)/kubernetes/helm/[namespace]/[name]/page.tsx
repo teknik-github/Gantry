@@ -3,15 +3,19 @@ import Link from "next/link"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { HelmReleaseActions } from "@/components/gantry/kubernetes/helm"
+import { HelmRollbackForm, HelmUpgradeForm } from "@/components/gantry/kubernetes/helm-forms"
 import { KubeUnavailable, loadKubePage } from "@/components/gantry/kubernetes/page"
 import { Age, KubeStatus } from "@/components/gantry/kubernetes/tables"
 import { PageBody } from "@/components/gantry/page-body"
 import { Mono, PageHeader } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { namespaceSchema, objectNameSchema } from "@/lib/kubernetes/names"
 import { tryKube } from "@/lib/server/kubernetes"
-import { getRelease } from "@/lib/server/kubernetes/helm"
+import { getRelease, type HelmRevisionRow } from "@/lib/server/kubernetes/helm"
+import { helmVersion, HELM_MISSING } from "@/lib/server/kubernetes/helm-cli"
+import { listHelmRepos } from "@/lib/server/kubernetes/helm-repos"
 
 export async function generateMetadata({ params }: PageProps<"/kubernetes/helm/[namespace]/[name]">): Promise<Metadata> {
   const { name } = await params
@@ -32,6 +36,60 @@ function Block({ title, description, text, testId }: { title: string; descriptio
         >
           {text}
         </pre>
+      </CardContent>
+    </Card>
+  )
+}
+
+function History({ rows, current }: { rows: HelmRevisionRow[]; current: number }) {
+  return (
+    <Card className="min-w-0">
+      <CardHeader>
+        <CardTitle>History</CardTitle>
+        <CardDescription>Revisions of this release (helm history).</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-hidden rounded-lg border" data-testid="helm-history">
+          <Table>
+            <TableHeader className="bg-muted">
+              <TableRow>
+                <TableHead>Revision</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Chart</TableHead>
+                <TableHead>App version</TableHead>
+                <TableHead>Updated</TableHead>
+                <TableHead>Description</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((h) => (
+                <TableRow key={h.revision}>
+                  <TableCell className="tabular-nums">
+                    {h.revision}
+                    {h.revision === current ? " (current)" : ""}
+                  </TableCell>
+                  <TableCell>
+                    <KubeStatus status={h.status} />
+                  </TableCell>
+                  <TableCell>
+                    <Mono>
+                      {h.chart}-{h.chartVersion}
+                    </Mono>
+                  </TableCell>
+                  <TableCell>
+                    <Mono>{h.appVersion || "—"}</Mono>
+                  </TableCell>
+                  <TableCell>
+                    <Age at={h.updated} />
+                  </TableCell>
+                  <TableCell className="max-w-96 truncate text-muted-foreground" title={h.description}>
+                    {h.description}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   )
@@ -80,6 +138,8 @@ export default async function HelmReleasePage({ params }: PageProps<"/kubernetes
 
   const r = result.data
   const isAdmin = page.user.role === "admin"
+  const canManage = page.can.manage
+  const [helm, repos] = canManage ? await Promise.all([helmVersion(), listHelmRepos()]) : [null, []]
   return (
     <PageBody>
       <PageHeader
@@ -99,11 +159,53 @@ export default async function HelmReleasePage({ params }: PageProps<"/kubernetes
         actions={
           <>
             {back}
-            {isAdmin ? <HelmReleaseActions environmentId={page.env.id} namespace={namespace} name={name} /> : null}
+            {canManage ? <HelmReleaseActions environmentId={page.env.id} namespace={namespace} name={name} /> : null}
           </>
         }
       />
       {r.description ? <p className="px-4 text-sm text-muted-foreground lg:px-6">{r.description}</p> : null}
+      <div className="px-4 lg:px-6">
+        <History rows={r.history} current={r.revision} />
+      </div>
+      {canManage && !helm ? <KubeUnavailable message={`${HELM_MISSING} Upgrade and rollback are unavailable.`} /> : null}
+      {canManage && helm ? (
+        <div className="grid gap-4 px-4 lg:px-6 @5xl/main:grid-cols-2">
+          <Card className="min-w-0">
+            <CardHeader>
+              <CardTitle>Upgrade</CardTitle>
+              <CardDescription>
+                helm upgrade to another chart version and/or new values. Pick where the chart comes from.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <HelmUpgradeForm
+                environmentId={page.env.id}
+                namespace={namespace}
+                release={name}
+                chart={r.chart}
+                repos={repos.map((repo) => ({ id: repo.id, name: repo.name, url: repo.url, oci: repo.oci }))}
+                currentValues={isAdmin ? r.values : null}
+              />
+            </CardContent>
+          </Card>
+          <Card className="min-w-0 self-start">
+            <CardHeader>
+              <CardTitle>Roll back</CardTitle>
+              <CardDescription>helm rollback to an earlier revision.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <HelmRollbackForm
+                environmentId={page.env.id}
+                namespace={namespace}
+                release={name}
+                revisions={r.history
+                  .filter((h) => h.revision !== r.revision)
+                  .map((h) => ({ revision: h.revision, label: `${h.revision}: ${h.chart}-${h.chartVersion} (${h.status})` }))}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
       {isAdmin ? (
         <div className="grid gap-4 px-4 lg:px-6 @5xl/main:grid-cols-2">
           <Block

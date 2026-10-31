@@ -118,33 +118,49 @@ export async function listReleases(api: KubeApi, namespace: string | null): Prom
   return rows.sort((a, b) => a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name))
 }
 
+/** One revision of a release's history (`helm history`); no values. */
+export type HelmRevisionRow = Pick<HelmReleaseRow, "revision" | "status" | "chart" | "chartVersion" | "appVersion" | "updated" | "description">
+
 export type HelmReleaseDetail = HelmReleaseRow & {
   /** User-supplied values as YAML. */
   values: string
   manifest: string
   notes: string
   revisions: number[]
+  /** Newest first. Revisions whose record can't be decoded are left out. */
+  history: HelmRevisionRow[]
 }
 
-/** One release with its values and manifest. Callers must restrict this to administrators. */
+/** One release with its values and manifest. Callers must restrict values, manifest and notes to administrators. */
 export async function getRelease(api: KubeApi, namespace: string, name: string): Promise<HelmReleaseDetail | null> {
   const secrets = await api.helmReleaseSecrets(namespace, name)
   const [latest] = latestRevisions(secrets)
   if (!latest) return null
   const record = decodeRelease(latest.release)
+  const history: HelmRevisionRow[] = []
+  for (const s of secrets) {
+    try {
+      const r = s === latest ? record : decodeRelease(s.release)
+      const { revision, status, chart, chartVersion, appVersion, updated, description } = toReleaseRow(r, s)
+      history.push({ revision, status, chart, chartVersion, appVersion, updated, description })
+    } catch {
+      // Listed without details below; still a valid rollback target for helm.
+    }
+  }
   return {
     ...toReleaseRow(record, latest),
     values: record.config && Object.keys(record.config).length ? stringify(record.config) : "",
     manifest: record.manifest ?? "",
     notes: record.info?.notes ?? "",
     revisions: secrets.map((s) => s.version).sort((a, b) => b - a),
+    history: history.sort((a, b) => b.revision - a.revision),
   }
 }
 
 export type UninstallResult = { deleted: number; kept: string[]; failed: string[] }
 
 /**
- * Like `helm uninstall` without hooks: deletes the objects of the latest
+ * Fallback for servers without the helm CLI. Like `helm uninstall` without hooks: deletes the objects of the latest
  * revision's manifest (except those annotated helm.sh/resource-policy: keep),
  * then every revision record. Objects that fail are reported and the
  * records are left in place, so the release stays visible and can be retried.

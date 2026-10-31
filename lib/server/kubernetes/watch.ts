@@ -17,7 +17,19 @@ import { KubeError, kubeJson, kubeStream, type KubeTarget } from "@/lib/server/k
  * end the whole source; the hub reconnects with exponential backoff.
  */
 
-type Watched = { kind: KubeWatchKind; group: string; resource: string }
+type Watched = {
+  kind: KubeWatchKind
+  group: string
+  resource: string
+  /** Fetch metadata only (PartialObjectMetadata): Secret values never even reach Gantry. */
+  metadataOnly?: boolean
+}
+
+/** Accept headers for metadata-only lists and watches (a list is a PartialObjectMetadataList, watch events carry single objects). */
+export const METADATA_ONLY = {
+  list: "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1",
+  watch: "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1",
+} as const
 
 export const WATCHED: readonly Watched[] = [
   { kind: "Pod", group: "v1", resource: "pods" },
@@ -28,6 +40,8 @@ export const WATCHED: readonly Watched[] = [
   { kind: "Ingress", group: "networking.k8s.io/v1", resource: "ingresses" },
   { kind: "Event", group: "v1", resource: "events" },
   { kind: "Namespace", group: "v1", resource: "namespaces" },
+  { kind: "ConfigMap", group: "v1", resource: "configmaps", metadataOnly: true },
+  { kind: "Secret", group: "v1", resource: "secrets", metadataOnly: true },
 ]
 
 /** The server ends each watch after this long; we then re-watch from the last version. */
@@ -155,13 +169,15 @@ function collectionPath(group: string, resource: string, namespace: string | nul
 }
 
 /** The real transport: list with limit=1 (only the version is needed), then a streaming watch. */
-export function httpTransport(target: KubeTarget, path: string): WatchTransport {
+export function httpTransport(target: KubeTarget, path: string, opts: { metadataOnly?: boolean } = {}): WatchTransport {
+  const accept = opts.metadataOnly ? METADATA_ONLY : undefined
   return {
     async list() {
       const { data } = await kubeJson<{ metadata?: { resourceVersion?: string } }>(target, {
         method: "GET",
         path,
         query: { limit: 1 },
+        accept: accept?.list,
       })
       return data.metadata?.resourceVersion ?? "0"
     },
@@ -173,6 +189,7 @@ export function httpTransport(target: KubeTarget, path: string): WatchTransport 
           path,
           query: { watch: 1, resourceVersion, allowWatchBookmarks: true, timeoutSeconds: WATCH_SECONDS },
           idleTimeoutMs: IDLE_TIMEOUT_MS,
+          accept: accept?.watch,
         },
         signal
       )
@@ -230,17 +247,22 @@ export function kubeEventSource(target: KubeTarget, opts: { fallbackNamespace: s
       }
 
       const run = async (w: Watched) => {
-        let transport = httpTransport(target, collectionPath(w.group, w.resource, null))
+        let transport = httpTransport(target, collectionPath(w.group, w.resource, null), w)
         let resourceVersion: string
         try {
           resourceVersion = await transport.list(inner.signal)
         } catch (err) {
+          // A server that can't answer metadata-only (406, very old clusters): no live updates for this type.
+          if (w.metadataOnly && err instanceof KubeError && (err.status === 406 || err.status === 415)) {
+            markOpen()
+            return
+          }
           if (!(err instanceof KubeError) || err.status !== 403) throw err
           if (w.kind === "Namespace" || !opts.fallbackNamespace) {
             markOpen() // Not allowed: no live updates for this type.
             return
           }
-          transport = httpTransport(target, collectionPath(w.group, w.resource, opts.fallbackNamespace))
+          transport = httpTransport(target, collectionPath(w.group, w.resource, opts.fallbackNamespace), w)
           try {
             resourceVersion = await transport.list(inner.signal)
           } catch (err2) {

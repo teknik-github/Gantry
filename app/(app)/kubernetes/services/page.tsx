@@ -33,13 +33,13 @@ export default async function ServicesPage() {
       {services.error !== undefined ? (
         <KubeUnavailable message={services.error} />
       ) : (
-        <ServicesTable data={services.data} showNamespace={showNamespace} />
+        <ServicesTable data={services.data} showNamespace={showNamespace} canEdit={page.can.manage} />
       )}
       <PageHeader title="Ingresses" />
       {ingresses.error !== undefined ? (
         <KubeUnavailable message={ingresses.error} />
       ) : (
-        <IngressesTable data={ingresses.data} showNamespace={showNamespace} />
+        <IngressesTable data={ingresses.data} showNamespace={showNamespace} canEdit={page.can.manage} />
       )}
     </PageBody>
   )

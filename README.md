@@ -48,9 +48,11 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
   or a kubeconfig; overview (nodes, namespaces, pods by phase), workloads
   (scale, rollout restart, delete), pods (status, followed logs, console,
   delete), services and ingresses, namespaces, ConfigMaps and Secrets (names
-  and keys only), warning events, **Helm releases** (values, manifest,
-  uninstall) and **Apply manifest** (multi-document YAML, server-side apply);
-  pages update live from Kubernetes watches
+  and keys only), warning events, **Helm** (chart repositories, install,
+  upgrade, rollback, uninstall with live output; values and manifest),
+  **Edit YAML** with a diff of the server-side dry run, and **Apply manifest**
+  (multi-document YAML, server-side apply); pages update live from Kubernetes
+  watches
 - Users: global `admin` / standard roles plus **per-environment roles**
   (viewer, operator, manager), and an activity log
 - **Two-factor authentication** (TOTP authenticator apps, recovery codes),
@@ -181,7 +183,11 @@ kind delete cluster --name gantry-k8s-e2e
 see below; it also tests the token form). The test workloads run `alpine:3`.
 The Helm test installs a tiny local chart with the `helm` CLI when it is on the
 PATH (with private Helm directories and the explicit kubeconfig), otherwise it
-writes the release record Helm would. `GANTRY_TEST_KUBECONFIG=…` also runs
+writes the release record Helm would. `tests/e2e/kubernetes-helm-edit.spec.ts`
+(same variables; needs `helm` and `kubectl` on the PATH, no internet) serves a
+chart repository from 127.0.0.1 and installs, upgrades, rolls back and
+uninstalls a release through Gantry, edits a ConfigMap as YAML (diff and a
+conflict) and checks that the ConfigMaps page updates live. `GANTRY_TEST_KUBECONFIG=…` also runs
 `tests/integration/kubernetes.test.ts` (client, watches, exec, log follow)
 against the same throwaway cluster.
 
@@ -214,6 +220,8 @@ against the same throwaway cluster.
 | `FILES_SCAN_MAX_MB` / `FILES_SCAN_TIMEOUT_SECONDS` | `512` / `30` | Limits for listing a folder of a stopped or shell-less container from Docker's tar archive |
 | `FILES_HELPER_IMAGE` | `alpine:3` | Image of the short-lived containers that open volumes (needs `sh`, `stat`, `rm`; pulled when missing) |
 | `FILES_HELPER_IDLE_SECONDS` | `120` | How long a volume helper is kept for the next operation before it is removed |
+| `HELM_BIN` | `helm` on the `PATH` | The helm 3 CLI used for chart installs/upgrades/rollbacks (the Docker image includes a pinned, checksum-verified helm) |
+| `HELM_MAX_OPERATIONS` | `4` | Helm installs/upgrades/rollbacks/uninstalls running at once on the server (1–64) |
 | `GANTRY_URL` | | Public URL of Gantry (e.g. `https://gantry.example.com`); the OIDC callback is `$GANTRY_URL/auth/oidc/callback` |
 | `OIDC_ISSUER` | | OpenID provider (issuer URL); single sign-on is off unless this and `OIDC_CLIENT_ID` are set |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | Client registered at the provider (confidential client; the secret is optional for public clients, PKCE is always used) |
@@ -775,18 +783,32 @@ Registries apply to Docker environments only (clusters pull with their own
 image pull secrets).
 
 - Viewing (lists, pod logs) needs access to the environment, like Docker.
-  Scaling, rollout restart, deleting pods/workloads, creating/deleting
-  namespaces and applying manifests are admin-only and audited.
+  Scaling, deleting pods/workloads, creating/deleting namespaces, applying
+  manifests, editing YAML and Helm operations need the manager role (rollout
+  restart: operator) and are audited.
 - **Apply manifest** uses server-side apply (`fieldManager=gantry`) into the
   chosen namespace; objects that name another namespace are refused, as with
   `kubectl apply -n`. "Force conflicts" (off by default) takes over fields
   owned by other managers; "Dry run" validates on the server without changes.
   Every object gets its own result; a failing one doesn't stop the rest.
-- Secrets are listed with their keys only; values are dropped on the server.
+- Secrets are listed with their keys only; values are dropped on the server
+  (live updates watch ConfigMaps and Secrets as metadata only). Only
+  administrators open a Secret in **Edit YAML**, which shows its data.
+- **Edit YAML** (workloads, services, ingresses, ConfigMaps, Secrets): the
+  editor shows the live object without `status` and server-managed metadata.
+  **Review changes** sends the edited object as a server-side dry run
+  (`PUT …?dryRun=All`, strict field validation) and shows a line diff of the
+  result against the live object, so defaults and admission changes are
+  visible before anything is stored. **Apply changes** replaces the object at
+  the `resourceVersion` the editor was loaded at: if anyone changed it in the
+  meantime the API answers 409 and Gantry shows a conflict (load the latest
+  version and redo the change) instead of overwriting their change. Fields
+  deleted in the editor are removed (it is a replace, like `kubectl replace`).
 - **Live updates**: Gantry watches pods, deployments, stateful sets, daemon
-  sets, services, ingresses, events and namespaces (one watch per type and
+  sets, services, ingresses, events, namespaces, ConfigMaps and Secrets (the
+  last two as metadata only; Helm pages follow Secrets) with one watch per type and
   environment, shared by every open tab, closed shortly after the last tab
-  leaves) and refreshes the pages that show what changed. Watches resume from
+  leaves, and refreshes the pages that show what changed. Watches resume from
   the last resource version, follow bookmarks, re-list after "410 Gone" and
   reconnect with backoff. Credentials that may not watch cluster-wide fall back
   to the environment's default namespace. The metrics history and image update
@@ -799,25 +821,60 @@ image pull secrets).
   (`kubectl exec` over a WebSocket to the API server, `v5.channel.k8s.io` or
   `v4.channel.k8s.io`), audited like Docker consoles. The account needs RBAC
   `create` on `pods/exec` (and `get` on `pods/exec` for older clusters).
-- **Helm releases** are read from Helm 3's release records (Secrets of type
-  `helm.sh/release.v1`), so no `helm` binary is needed: chart, version, app
-  version, status, revision. Administrators can see a release's user-supplied
-  values and manifest (they may contain secrets) and **uninstall** it: Gantry
-  deletes the objects of the latest manifest (except those annotated
-  `helm.sh/resource-policy: keep`) and then the release records, like
-  `helm uninstall --no-hooks`; hooks are not run. Installing or upgrading
-  charts is not built in: use the `helm` CLI (the image doesn't contain it; to
-  use it inside the container, `docker exec` in and download the static binary
-  from https://get.helm.sh into a writable directory, or run it from a machine
-  with a kubeconfig).
+- **Helm releases** are listed from Helm 3's release records (Secrets of type
+  `helm.sh/release.v1`): chart, version, app version, status and history.
+  Administrators see a release's user-supplied values, manifest and notes
+  (they may contain secrets).
+- **Helm install / upgrade / rollback / uninstall** run the real `helm` CLI
+  (`HELM_BIN`, else `helm` on the `PATH`; the Docker image ships helm
+  v3.19.0, pinned and SHA-256-verified per architecture) and need the manager
+  role. **Install chart** picks a chart from a **chart repository** (versions
+  from `helm search repo --versions`) or an `oci://` reference, a release
+  name and namespace (optionally created), and values in a YAML editor
+  prefilled with the chart's defaults (`helm show values`); `--wait`,
+  `--atomic` and `--timeout` are options. The release page adds **Upgrade**
+  (another version and/or values; administrators edit the complete values,
+  prefilled with the current ones, others keep them with
+  `--reset-then-reuse-values`), **Roll back** to a chosen revision and
+  **Uninstall** (hooks run). Command output is streamed live to whoever
+  started the operation; NOTES are hidden for non-administrators.
+  - Credentials: each helm command gets a fresh private temp directory
+    (`mkdtemp`, mode 0700, files 0600) with a kubeconfig generated from the
+    environment's stored token or client certificate (and CA / skip-verify),
+    plus a `repositories.yaml` or OCI registry config holding only the
+    repository login it needs. Nothing secret is passed in arguments or
+    environment variables, the directory is deleted when the command ends,
+    and output is redacted (tokens, keys, passwords, anything key-like).
+  - Isolation: helm runs with an environment built from scratch (no
+    `GANTRY_SECRET`, database settings or the server's `KUBECONFIG`), `HOME`
+    in the temp directory, plugins disabled, and `HELM_CONFIG_HOME`,
+    `HELM_CACHE_HOME` and `HELM_DATA_HOME` under `$DATA_DIR/helm/` (config,
+    cache with the downloaded repository indexes, data).
+  - Limits: one operation per release at a time (a second one is refused),
+    at most `HELM_MAX_OPERATIONS` at once, a hard kill (SIGTERM, then SIGKILL
+    of the process group) 2 minutes after the chosen `--timeout` (1–30
+    minutes), 90 s for searches and `helm show values`, values up to 512 KB,
+    512 KB of output kept per operation for 30 minutes. If Gantry restarts
+    during an operation, helm is stopped with it and the release may stay
+    `pending-*`; roll it back from the release page.
+  - **Chart repositories** (administrators, like registry logins: they apply
+    to every cluster) are index repositories (`https://`; plain `http://`
+    without credentials, or to loopback) whose index is downloaded when they
+    are added, or `oci://` registry paths. Optional username/password are
+    stored AES-256-GCM-encrypted. Typed `oci://` references use the login of
+    a matching OCI repository; for non-administrators they must lie under an
+    added OCI repository (Gantry won't contact arbitrary registries for them).
+  - Without the helm CLI, install/upgrade/rollback are unavailable and
+    uninstall falls back to deleting the manifest's objects and the release
+    records directly (like `helm uninstall --no-hooks`).
 
 ### Live updates and history
 
 - Pages refresh themselves from Docker events (or Kubernetes watches),
   streamed as Server-Sent Events from `/api/events` (one Docker events
   connection or one set of watches per environment, shared by all tabs).
-- Behind a reverse proxy, don't buffer `/api/events`, `/api/exec/*` and
-  `/api/kubernetes/pods/*/logs`
+- Behind a reverse proxy, don't buffer `/api/events`, `/api/exec/*`,
+  `/api/kubernetes/pods/*/logs` and `/api/kubernetes/helm/operations/*`
   (nginx: `proxy_buffering off`, or rely on the `X-Accel-Buffering: no`
   header) and allow read timeouts above 25 seconds.
 - A background sampler records CPU, memory and running containers per
