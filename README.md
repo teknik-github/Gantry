@@ -222,6 +222,9 @@ against the same throwaway cluster.
 | `FILES_HELPER_IDLE_SECONDS` | `120` | How long a volume helper is kept for the next operation before it is removed |
 | `HELM_BIN` | `helm` on the `PATH` | The helm 3 CLI used for chart installs/upgrades/rollbacks (the Docker image includes a pinned, checksum-verified helm) |
 | `HELM_MAX_OPERATIONS` | `4` | Helm installs/upgrades/rollbacks/uninstalls running at once on the server (1–64) |
+| `GANTRY_BUILD_MAX_CONTEXT_MB` | `512` | Largest build context (uploaded archive or Git context) an image build accepts |
+| `GANTRY_BUILD_TIMEOUT_MINUTES` | `60` | An image build (clone, build and push) is stopped after this long |
+| `GANTRY_BUILD_CONCURRENCY` | `2` | Image builds running at once; more are refused until one finishes |
 | `GANTRY_URL` | | Public URL of Gantry (e.g. `https://gantry.example.com`); the OIDC callback is `$GANTRY_URL/auth/oidc/callback` |
 | `OIDC_ISSUER` | | OpenID provider (issuer URL); single sign-on is off unless this and `OIDC_CLIENT_ID` are set |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | Client registered at the provider (confidential client; the secret is optional for public clients, PKCE is always used) |
@@ -510,6 +513,47 @@ fill the cache volume yourself (`trivy image --download-db-only
 `TRIVY_SKIP_JAVA_DB_UPDATE=true`. Push the scanner image to a registry the
 environment can reach and set `TRIVY_IMAGE` to it (stored registry logins are
 used for the pull).
+### Image builds, tag and push
+
+**Images → Build image** (`/images/build`, managers) builds on the current
+environment with its Docker daemon, from one of three sources:
+
+- **Dockerfile**: written in the editor, with up to 20 small extra files next
+  to it for `COPY` (1 MB together);
+- **Upload archive**: a `.tar` or `.tar.gz` of the build context, streamed to
+  Docker as it is received and never stored (`GANTRY_BUILD_MAX_CONTEXT_MB`);
+- **Git repository**: URL, branch/tag/commit, context directory and Dockerfile
+  path, cloned shallowly with the Git stacks code (https only, an optional
+  username and token used for this clone only and never stored, redacted from
+  the output). `.git` is left out of the context.
+
+Options: one or more tags, build arguments, labels, a target stage, no cache,
+always pull base images, and push after build. Every stored registry login is
+sent with the build (`X-Registry-Config`), so `FROM` can use private images.
+Don't pass secrets as build arguments: they are visible in the image history
+and in Gantry's build history.
+
+The output streams live (the response of `POST /api/images/build` is JSON
+lines) and ends with the image id and tags, or Docker's error. **Cancel build**
+closes that request, and so does leaving the page or closing the tab: Gantry
+then closes its connection to Docker, which stops the build and kills the
+running step's container. Builds run with the classic builder (`/build`
+`version=1`, whose stream carries the output, errors and image id), stop after
+`GANTRY_BUILD_TIMEOUT_MINUTES`, and at most `GANTRY_BUILD_CONCURRENCY` run at
+once.
+
+The last 100 builds of each environment are kept with who started them, the
+source (without credentials or the archive), tags, outcome, duration, image id
+and the end of their output (512 KB). **Log** shows it; **Rebuild** fills the
+form again from the editor or Git source (enter a Git token again for private
+repositories).
+
+On the Images page, **Tag** adds a name to an image and **Push** uploads one of
+its tags with the login stored under Registries for that tag's registry
+(`localhost:5000/team/app:1` → `localhost:5000`), with live progress. A refused
+login, or a registry without a stored login, says so and links to Registries.
+Building, tagging and pushing need the manager role and are audited
+(`image.build`, `image.tag`, `image.push`).
 
 ### Templates
 
@@ -655,6 +699,7 @@ in environments they were given, with one of these roles each:
 | Browse and download container and volume files | | ✓ | ✓ |
 | Upload, edit, create folders, delete files | | | ✓ |
 | Create / remove / prune containers, images, volumes, networks | | | ✓ |
+| Build, tag and push images, build history | | | ✓ |
 | Container environment variable values, edit & recreate, pull & recreate, console | | | ✓ |
 | Stacks (create, edit, deploy, start/stop, delete), deploy templates | | | ✓ |
 | Proxy, per-container auto-update | | | ✓ |
@@ -726,6 +771,12 @@ curl -OJ -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/conta
 # A folder listing, a file, or a folder as tar (operator or manager; ?volume=<name> for volumes)
 curl -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/files/list?container=<id>&path=/etc"
 curl -OJ -H "Authorization: Bearer $TOKEN" "https://gantry.example.com/api/files/download?container=<id>&path=/etc/hosts"
+# Build from a Git repository, streaming JSON lines (manager)
+curl -N -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" https://gantry.example.com/api/images/build \
+  -d '{"source":{"kind":"git","url":"https://github.com/org/app.git","ref":"main"},"options":{"tags":"app:1"}}'
+# Push a tag with the stored registry login (manager)
+curl -N -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" https://gantry.example.com/api/images/push \
+  -d '{"reference":"registry.example.com/team/app:1"}'
 ```
 
 ### Kubernetes environments
@@ -890,6 +941,12 @@ image pull secrets).
   over 1 MB, is limited to 30 deliveries per minute per webhook and audits
   every delivery. Pages without a session redirect to `/login`; `/auth/*` (SSO
   and clearing stale cookies) is reachable without one.
+- One route skips `proxy.ts`: `POST /api/images/build/upload` (build context
+  archives). Next buffers the body of every request that goes through proxy
+  in memory and cuts it at 10 MB, so this route streams the archive to Docker
+  instead and makes proxy's checks itself: a valid browser session (no API
+  tokens), the manager role, same-origin requests only, and a custom header
+  that cross-site forms can't send.
 - Route handlers and Server Actions re-check the user against the database,
   so deleted users and role changes take effect immediately. API tokens are
   only honoured on `/api/*` route handlers: `proxy.ts` marks such requests

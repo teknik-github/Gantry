@@ -1,9 +1,12 @@
 import type { Metadata } from "next"
+import Link from "next/link"
+import { HammerIcon } from "lucide-react"
 
 import { ImageScanProvider, ImageScanSettings } from "@/components/gantry/image-scan-server"
 import { ImagesTable, type ImageRow } from "@/components/gantry/images-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
+import { Button } from "@/components/ui/button"
 import { formatBytes, shortId, timeAgo } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getDocker, getPermissions } from "@/lib/server/environments"
@@ -50,7 +53,20 @@ export default async function ImagesPage() {
 
   return (
     <PageBody>
-      <PageHeader title="Images" description={`${rows.length} image(s) using ${formatBytes(total)}`} />
+      <PageHeader
+        title="Images"
+        description={`${rows.length} image(s) using ${formatBytes(total)}`}
+        actions={
+          can.manage ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href="/images/build">
+                <HammerIcon data-icon="inline-start" />
+                Build image
+              </Link>
+            </Button>
+          ) : null
+        }
+      />
       {can.admin ? <ImageScanSettings /> : null}
       <ImageScanProvider>
         <ImagesTable data={rows} canManage={can.manage} canOperate={can.operate} />

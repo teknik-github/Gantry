@@ -292,6 +292,32 @@ export interface ImageScansTable {
   error: string | null
 }
 
+export type ImageBuildStatus = "running" | "success" | "error" | "cancelled"
+
+/** One image build (lib/server/images/builds.ts); never holds credentials. */
+export interface ImageBuildsTable {
+  id: Generated<number>
+  environment_id: number
+  user_id: number | null
+  username: string
+  source_kind: string
+  /** One line, e.g. "Git https://… @ main (app)" */
+  source_summary: string
+  /** JSON BuildSource (lib/image-build.ts), for a rebuild */
+  source: string
+  /** JSON BuildOptions */
+  options: string
+  /** JSON array of the requested tags */
+  tags: string
+  status: ImageBuildStatus
+  error: string | null
+  image_id: string | null
+  /** The end of the build output (capped) */
+  log: string | null
+  started_at: string
+  finished_at: string | null
+}
+
 export interface Database {
   users: UsersTable
   environments: EnvironmentsTable
@@ -312,6 +338,7 @@ export interface Database {
   api_tokens: ApiTokensTable
   image_scans: ImageScansTable
   helm_repositories: HelmRepositoriesTable
+  image_builds: ImageBuildsTable
 }
 
 export type User = Selectable<UsersTable>

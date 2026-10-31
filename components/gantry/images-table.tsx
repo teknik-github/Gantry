@@ -10,6 +10,7 @@ import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { BulkScanImages, ScanImageButton, VulnerabilityCell } from "@/components/gantry/image-scan-ui"
+import { ImageTagPushActions } from "@/components/gantry/image-tag-push"
 import { Mono } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -81,9 +82,14 @@ function buildColumns(canManage: boolean, canOperate: boolean) {
     helper.display({
       id: "actions",
       cell: ({ row }) => (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-1">
           {canOperate ? <ScanImageButton imageId={row.original.id} name={imageName(row.original)} /> : null}
-          {canManage ? <RemoveImage row={row.original} /> : null}
+          {canManage ? (
+            <>
+              <ImageTagPushActions row={row.original} />
+              <RemoveImage row={row.original} />
+            </>
+          ) : null}
         </div>
       ),
       enableHiding: false,

@@ -16,6 +16,7 @@ import { auth } from "@/lib/server/db/migrations/011_auth"
 import { gitStacks } from "@/lib/server/db/migrations/013_git_stacks"
 import { mysqlColumns } from "@/lib/server/db/migrations/014_mysql_columns"
 import { imageScans } from "@/lib/server/db/migrations/015_image_scans"
+import { imageBuilds } from "@/lib/server/db/migrations/016_image_builds"
 import { helmRepositories } from "@/lib/server/db/migrations/018_helm_repositories"
 
 // One file per migration, written with Kysely's schema builder only so the
@@ -37,6 +38,7 @@ const migrations: Record<string, Migration> = {
   "013_git_stacks": gitStacks,
   "014_mysql_columns": mysqlColumns,
   "015_image_scans": imageScans,
+  "016_image_builds": imageBuilds,
   "018_helm_repositories": helmRepositories,
 }
 
