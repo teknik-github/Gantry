@@ -285,3 +285,13 @@ test("a viewer sees the results but can't scan", async ({ page, browser }) => {
   await expect(viewer.getByRole("button", { name: "Scan now" })).toHaveCount(0)
   await context.close()
 })
+
+// Later suites (notifications, setup checks) expect no channel left behind.
+test("the test webhook channel is removed again", async ({ page }) => {
+  await signIn(page, ADMIN)
+  await page.goto("/notifications")
+  const row = page.getByRole("row").filter({ hasText: CHANNEL })
+  await row.getByRole("button", { name: `Remove ${CHANNEL}` }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click()
+  await expect(page.getByRole("row").filter({ hasText: CHANNEL })).toHaveCount(0)
+})
