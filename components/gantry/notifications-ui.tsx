@@ -121,7 +121,7 @@ export function ChannelsTable({ data }: { data: ChannelRow[] }) {
           trigger={
             <Button size="sm">
               <BellPlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">{t.notifications.channels.add}</span>
+              <span className="max-lg:sr-only">{t.notifications.channels.add}</span>
             </Button>
           }
           title={t.notifications.channels.addTitle}

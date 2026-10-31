@@ -193,7 +193,7 @@ export function PodLogViewer({
           ref={preRef}
           data-testid="pod-logs"
           data-state={state}
-          className="h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap"
+          className="h-[28rem] overflow-auto overscroll-contain rounded-lg border max-sm:h-[60svh] bg-muted/40 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap"
         >
           {logs || (state === "loading" ? t.common.status.loading : k.empty)}
         </pre>

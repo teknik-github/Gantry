@@ -86,7 +86,7 @@ export function HelmReposTable({ data }: { data: HelmRepoRow[] }) {
           trigger={
             <Button size="sm">
               <PlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">{k.add}</span>
+              <span className="max-lg:sr-only">{k.add}</span>
             </Button>
           }
           title={k.addTitle}

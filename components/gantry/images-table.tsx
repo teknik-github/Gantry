@@ -129,7 +129,7 @@ export function ImagesTable({ data, canManage, canOperate = false }: { data: Ima
             >
               <Button size="sm" variant="outline">
                 <EraserIcon data-icon="inline-start" />
-                <span className="hidden lg:inline">{t.images.prune}</span>
+                <span className="max-lg:sr-only">{t.images.prune}</span>
               </Button>
             </ConfirmAction>
             <PullImageDialog />
@@ -217,7 +217,7 @@ function PullImageDialog() {
       trigger={
         <Button size="sm">
           <DownloadIcon data-icon="inline-start" />
-          <span className="hidden lg:inline">{t.images.pull.trigger}</span>
+          <span className="max-lg:sr-only">{t.images.pull.trigger}</span>
         </Button>
       }
       title={t.images.pull.title}

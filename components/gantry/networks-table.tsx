@@ -139,7 +139,7 @@ export function NetworksTable({ data, canManage }: { data: NetworkRow[]; canMana
             trigger={
               <Button size="sm">
                 <PlusIcon data-icon="inline-start" />
-                <span className="hidden lg:inline">{t.networks.add}</span>
+                <span className="max-lg:sr-only">{t.networks.add}</span>
               </Button>
             }
             title={t.networks.createTitle}

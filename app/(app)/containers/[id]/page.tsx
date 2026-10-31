@@ -100,7 +100,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
             <CardTitle>{text.overview}</CardTitle>
           </CardHeader>
           <CardContent>
-            <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm">
+            <dl className="grid grid-cols-[minmax(6rem,8rem)_1fr] gap-x-4 gap-y-2 text-sm">
               <Row label={t.common.fields.image}>
                 <span className="flex flex-wrap items-center gap-1.5">
                   <Mono>{c.Config.Image}</Mono>
@@ -201,7 +201,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
                 {c.Config.Env.map((e) => {
                   const [key, ...rest] = e.split("=")
                   return (
-                    <div key={e} className="grid grid-cols-[minmax(8rem,16rem)_1fr] gap-3 break-all">
+                    <div key={e} className="grid gap-x-3 break-all max-sm:gap-y-0.5 sm:grid-cols-[minmax(8rem,16rem)_1fr]">
                       <span className="font-medium">{key}</span>
                       {/* Values may hold secrets; only managers (and administrators) see them. */}
                       <span className="text-muted-foreground">{can.manage ? rest.join("=") : "••••••"}</span>

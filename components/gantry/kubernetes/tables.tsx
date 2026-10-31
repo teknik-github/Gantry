@@ -642,7 +642,7 @@ export function NamespacesTable({ data, environmentId, canManage }: { data: Name
             trigger={
               <Button size="sm">
                 <PlusIcon data-icon="inline-start" />
-                <span className="hidden lg:inline">{k.create}</span>
+                <span className="max-lg:sr-only">{k.create}</span>
               </Button>
             }
             title={k.create}

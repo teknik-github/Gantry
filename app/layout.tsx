@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 
 import { ThemeProvider } from "@/components/theme-provider"
@@ -20,6 +20,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: { default: "Gantry", template: "%s · Gantry" },
   description: "Container management for Docker",
+}
+
+// cover: use the whole screen of notched phones; the safe-area insets are
+// padded where content would end up under them (globals.css, sidebar, header).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 }
 
 // The root layout stays static (Cache Components), so <html lang> can't come

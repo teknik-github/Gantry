@@ -10,6 +10,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { useI18n } from "@/lib/i18n/client"
 import type { Messages } from "@/lib/i18n"
@@ -26,6 +27,7 @@ export type NavItem = {
 export function NavMain({ items, group }: { items: NavItem[]; group?: keyof Messages["nav"]["groups"] }) {
   const pathname = usePathname()
   const { t } = useI18n()
+  const { isMobile, setOpenMobile } = useSidebar()
   const label = group ? t.nav.groups[group] : null
 
   return (
@@ -45,7 +47,8 @@ export function NavMain({ items, group }: { items: NavItem[]; group?: keyof Mess
                   // Crane-yellow marker on the current page.
                   className="data-[active=true]:shadow-[inset_3px_0_0_var(--crane)] data-[active=true]:[&>svg]:text-crane"
                 >
-                  <Link href={item.url}>
+                  {/* On phones the sidebar is a sheet: close it once a page is picked. */}
+                  <Link href={item.url} onClick={() => isMobile && setOpenMobile(false)}>
                     {item.icon}
                     <span>{title}</span>
                   </Link>

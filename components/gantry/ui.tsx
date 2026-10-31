@@ -15,11 +15,11 @@ export function PageHeader({
 }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-3 px-4 lg:px-6">
-      <div className="grid gap-1">
-        <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+      <div className="grid min-w-0 gap-1">
+        <h2 className="text-xl font-semibold tracking-tight break-words">{title}</h2>
+        {description ? <p className="text-sm break-words text-muted-foreground">{description}</p> : null}
       </div>
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   )
 }

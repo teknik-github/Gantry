@@ -302,7 +302,7 @@ export function ExecConsole({
         {!running ? (
           <p className="text-sm text-muted-foreground">{text.notRunning}</p>
         ) : null}
-        <div className="relative h-[28rem] overflow-hidden rounded-lg border bg-[#0a0a0a] p-2">
+        <div className="relative h-[28rem] overflow-hidden rounded-lg border bg-[#0a0a0a] p-2 max-sm:h-[60svh]">
           <div ref={hostRef} className="size-full" data-testid="exec-terminal" />
           {!started ? (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-neutral-400">

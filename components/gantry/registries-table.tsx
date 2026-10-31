@@ -71,7 +71,7 @@ export function RegistriesTable({ data }: { data: RegistryRow[] }) {
           trigger={
             <Button size="sm">
               <PlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">{t.registries.add}</span>
+              <span className="max-lg:sr-only">{t.registries.add}</span>
             </Button>
           }
           title={t.registries.add}

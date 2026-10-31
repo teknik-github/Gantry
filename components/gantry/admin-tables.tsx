@@ -951,7 +951,7 @@ export function UsersTable({ data, environments }: { data: UserRow[]; environmen
           trigger={
             <Button size="sm">
               <PlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">{t.users.add}</span>
+              <span className="max-lg:sr-only">{t.users.add}</span>
             </Button>
           }
           title={t.users.add}

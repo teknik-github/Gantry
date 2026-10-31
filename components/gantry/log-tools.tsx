@@ -63,7 +63,7 @@ export function LogOutput({ logs, follow }: { logs: string; follow: boolean }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <label htmlFor={`${id}-search`} className="sr-only">
             {text.search}
@@ -73,7 +73,7 @@ export function LogOutput({ logs, follow }: { logs: string; follow: boolean }) {
             type="search"
             value={query}
             placeholder={text.searchPlaceholder}
-            className="h-7 w-64 pl-7 text-xs"
+            className="h-7 w-full pl-7 text-xs sm:w-64"
             onChange={(e) => {
               setQuery(e.target.value)
               setCurrent(0)
@@ -107,7 +107,7 @@ export function LogOutput({ logs, follow }: { logs: string; follow: boolean }) {
       <pre
         ref={preRef}
         data-testid="log-output"
-        className="h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap"
+        className="h-[28rem] overflow-auto overscroll-contain rounded-lg border max-sm:h-[60svh] bg-muted/40 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap"
       >
         {search.lines.length === 0
           ? text.noOutput

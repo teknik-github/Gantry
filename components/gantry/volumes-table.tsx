@@ -137,7 +137,7 @@ export function VolumesTable({ data, canManage, canBrowse }: { data: VolumeRow[]
             trigger={
               <Button size="sm">
                 <PlusIcon data-icon="inline-start" />
-                <span className="hidden lg:inline">{t.volumes.add}</span>
+                <span className="max-lg:sr-only">{t.volumes.add}</span>
               </Button>
             }
             title={t.volumes.createTitle}

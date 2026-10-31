@@ -62,6 +62,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useI18n } from "@/lib/i18n/client"
+import { cn } from "@/lib/utils"
+
+// On narrow screens the table scrolls sideways inside its card; the row
+// actions column stays pinned to the right edge so it is always reachable.
+const STICKY_ACTIONS = "max-md:sticky max-md:right-0 max-md:z-[1] max-md:shadow-[-6px_0_6px_-6px_var(--border)]"
 
 // Features shared by every Gantry table (v9 tree-shakes the rest).
 export const features = tableFeatures({
@@ -221,7 +226,7 @@ export function DataTable<T extends RowData>({
     <div className="flex w-full flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 lg:px-6">
         {searchText ? (
-          <div className="relative w-full max-w-xs">
+          <div className="relative w-full sm:max-w-xs">
             <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
@@ -237,12 +242,12 @@ export function DataTable<T extends RowData>({
         ) : (
           <div />
         )}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
                 <Columns3Icon data-icon="inline-start" />
-                <span className="hidden lg:inline">{text.columns}</span>
+                <span className="max-lg:sr-only">{text.columns}</span>
                 <ChevronDownIcon data-icon="inline-end" />
               </Button>
             </DropdownMenuTrigger>
@@ -283,12 +288,17 @@ export function DataTable<T extends RowData>({
       ) : null}
       <div className="relative flex flex-col gap-4 overflow-auto px-4 lg:px-6">
         <div className="overflow-hidden rounded-lg border">
-          <Table>
+          {/* Phones: room for the columns; the table scrolls sideways inside its card. */}
+          <Table className="max-md:min-w-[40rem]">
             <TableHeader className="sticky top-0 z-10 bg-muted">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id} colSpan={header.colSpan} className={header.column.id === "select" ? "w-8" : undefined}>
+                    <TableHead
+                      key={header.id}
+                      colSpan={header.colSpan}
+                      className={cn(header.column.id === "select" && "w-8", header.column.id === "actions" && STICKY_ACTIONS, "bg-muted")}
+                    >
                       {header.isPlaceholder ? null : <FlexRender header={header} />}
                     </TableHead>
                   ))}
@@ -300,7 +310,7 @@ export function DataTable<T extends RowData>({
                 table.getRowModel().rows.map((row) => (
                   <TableRow key={row.id} data-state={checked.has(row.id) ? "selected" : undefined}>
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
+                      <TableCell key={cell.id} className={cell.column.id === "actions" ? cn(STICKY_ACTIONS, "bg-background") : undefined}>
                         <FlexRender cell={cell} />
                       </TableCell>
                     ))}
@@ -319,7 +329,7 @@ export function DataTable<T extends RowData>({
             </TableBody>
           </Table>
         </div>
-        <div className="flex items-center justify-between px-4">
+        <div className="flex items-center justify-between px-0 sm:px-4">
           <div className="hidden flex-1 text-sm text-muted-foreground lg:flex">
             {rows.length !== data.length
               ? i18n.format(text.itemsOf, { count: rows.length, total: data.length })

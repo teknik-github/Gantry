@@ -175,7 +175,7 @@ function CheckUpdatesButton({ lastChecked }: { lastChecked: number | null }) {
       title={lastChecked ? i18n.format(t.containers.lastChecked, { time: i18n.timeAgo(new Date(lastChecked)) }) : t.containers.notChecked}
     >
       <RefreshCwIcon data-icon="inline-start" className={pending ? "animate-spin" : undefined} />
-      <span className="hidden lg:inline">{pending ? t.containers.checking : t.containers.checkUpdates}</span>
+      <span className="max-lg:sr-only">{pending ? t.containers.checking : t.containers.checkUpdates}</span>
     </Button>
   )
 }
@@ -452,7 +452,7 @@ function CreateContainerDialog() {
       trigger={
         <Button size="sm">
           <PlusIcon data-icon="inline-start" />
-          <span className="hidden lg:inline">{text.add}</span>
+          <span className="max-lg:sr-only">{text.add}</span>
         </Button>
       }
       title={text.createTitle}

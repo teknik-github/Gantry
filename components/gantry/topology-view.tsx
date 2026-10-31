@@ -457,7 +457,7 @@ export function TopologyView({ graph, initialProject }: { graph: TopologyGraph; 
       </div>
       <Sheet modal={false} open={selectedNode !== null} onOpenChange={(open) => (open ? null : setSelected(null))}>
         <SheetContent
-          className="gap-0 sm:max-w-md"
+          className="gap-0 max-sm:w-[85%] sm:max-w-md"
           data-testid="topology-details"
           onInteractOutside={(e) => {
             // Clicking another node switches the panel instead of closing it.

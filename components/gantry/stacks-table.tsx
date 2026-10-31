@@ -149,13 +149,13 @@ export function StacksTable({ data, canManage }: { data: StackRow[]; canManage: 
             <Button size="sm" variant="outline" asChild>
               <Link href="/templates">
                 <LayoutTemplateIcon data-icon="inline-start" />
-                <span className="hidden lg:inline">{t.stacks.list.fromTemplate}</span>
+                <span className="max-lg:sr-only">{t.stacks.list.fromTemplate}</span>
               </Link>
             </Button>
             <Button size="sm" asChild>
               <Link href="/stacks/new">
                 <PlusIcon data-icon="inline-start" />
-                <span className="hidden lg:inline">{t.stacks.list.addStack}</span>
+                <span className="max-lg:sr-only">{t.stacks.list.addStack}</span>
               </Link>
             </Button>
           </>

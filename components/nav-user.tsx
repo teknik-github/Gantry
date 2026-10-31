@@ -33,7 +33,7 @@ import {
 import { useI18n } from "@/lib/i18n/client"
 
 export function NavUser({ user }: { user: { username: string; role: string } }) {
-  const { isMobile } = useSidebar()
+  const { isMobile, setOpenMobile } = useSidebar()
   const { resolvedTheme, setTheme } = useTheme()
   const { t } = useI18n()
   const roleLabel = user.role === "admin" ? t.nav.user.roleAdmin : user.role === "user" ? t.nav.user.roleUser : user.role
@@ -76,7 +76,7 @@ export function NavUser({ user }: { user: { username: string; role: string } }) 
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                <Link href="/account">
+                <Link href="/account" onClick={() => isMobile && setOpenMobile(false)}>
                   <CircleUserRoundIcon />
                   {t.nav.user.account}
                 </Link>

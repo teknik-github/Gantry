@@ -311,7 +311,7 @@ export function ProxyHostsTable({
           trigger={
             <Button size="sm">
               <PlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">{t.proxy.addHost}</span>
+              <span className="max-lg:sr-only">{t.proxy.addHost}</span>
             </Button>
           }
           title={t.proxy.addTitle}
