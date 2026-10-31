@@ -346,7 +346,10 @@ test("tags and pushes to a private registry, then builds on its image and pushes
   await tagDialog.getByLabel("New tag").fill(pushed)
   await tagDialog.getByRole("button", { name: "Tag" }).click()
   await expect(page.getByText(`Tagged as ${pushed}`)).toBeVisible()
-  await expect(row).toContainText(pushed)
+  const tagged = await docker<{ RepoTags: string[] }>("GET", `/images/${encodeURIComponent(pushed)}/json`)
+  expect(tagged.RepoTags).toEqual(expect.arrayContaining([EDITOR_TAG, pushed]))
+  // The refresh lists every image again (slow with the containerd store).
+  await expect(row).toContainText(pushed, { timeout: 120_000 })
 
   // Without a stored login the push fails readably and points to Registries.
   const openPush = async () => {
