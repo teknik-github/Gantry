@@ -335,6 +335,53 @@ export function summarizeSource(source: BuildSource): string {
 }
 
 // ---------------------------------------------------------------------------
+// Build form
+
+export type SourceKind = "editor" | "upload" | "git"
+
+/**
+ * Values of the build form. A rebuild starts from those of an earlier build
+ * (never with credentials or the archive). Kept here, not in the client
+ * component: the server page builds them, and a server component importing
+ * a value from a "use client" module only gets a client reference.
+ */
+export type BuildFormValues = {
+  kind: SourceKind
+  dockerfile: string
+  files: EditorFile[]
+  uploadDockerfile: string
+  url: string
+  ref: string
+  context: string
+  gitDockerfile: string
+  tags: string
+  buildArgs: string
+  labels: string
+  target: string
+  noCache: boolean
+  pull: boolean
+  push: boolean
+}
+
+export const EMPTY_BUILD_FORM: BuildFormValues = {
+  kind: "editor",
+  dockerfile: EXAMPLE_DOCKERFILE,
+  files: [],
+  uploadDockerfile: DEFAULT_DOCKERFILE,
+  url: "",
+  ref: "main",
+  context: "",
+  gitDockerfile: DEFAULT_DOCKERFILE,
+  tags: "",
+  buildArgs: "",
+  labels: "",
+  target: "",
+  noCache: false,
+  pull: false,
+  push: false,
+}
+
+// ---------------------------------------------------------------------------
 // Docker's JSON stream
 
 /**

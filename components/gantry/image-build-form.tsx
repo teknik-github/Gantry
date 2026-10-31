@@ -17,51 +17,13 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   BUILD_OPTIONS_HEADER,
   DEFAULT_DOCKERFILE,
-  EXAMPLE_DOCKERFILE,
   isArchiveName,
   MAX_EXTRA_FILES,
   MAX_OPTIONS_HEADER,
+  type BuildFormValues,
   type FieldErrors,
+  type SourceKind,
 } from "@/lib/image-build"
-
-export type SourceKind = "editor" | "upload" | "git"
-
-/** Form values; a rebuild starts from those of an earlier build (never with credentials or the archive). */
-export type BuildFormValues = {
-  kind: SourceKind
-  dockerfile: string
-  files: { path: string; content: string }[]
-  uploadDockerfile: string
-  url: string
-  ref: string
-  context: string
-  gitDockerfile: string
-  tags: string
-  buildArgs: string
-  labels: string
-  target: string
-  noCache: boolean
-  pull: boolean
-  push: boolean
-}
-
-export const EMPTY_BUILD_FORM: BuildFormValues = {
-  kind: "editor",
-  dockerfile: EXAMPLE_DOCKERFILE,
-  files: [],
-  uploadDockerfile: DEFAULT_DOCKERFILE,
-  url: "",
-  ref: "main",
-  context: "",
-  gitDockerfile: DEFAULT_DOCKERFILE,
-  tags: "",
-  buildArgs: "",
-  labels: "",
-  target: "",
-  noCache: false,
-  pull: false,
-  push: false,
-}
 
 const monoArea = "font-mono text-xs leading-relaxed md:text-xs"
 
