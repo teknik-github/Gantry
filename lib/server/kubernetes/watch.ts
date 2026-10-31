@@ -25,8 +25,11 @@ type Watched = {
   metadataOnly?: boolean
 }
 
-/** Accept header for metadata-only lists and watches. */
-export const METADATA_ONLY = "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1,application/json"
+/** Accept headers for metadata-only lists and watches (a list is a PartialObjectMetadataList, watch events carry single objects). */
+export const METADATA_ONLY = {
+  list: "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1",
+  watch: "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1",
+} as const
 
 export const WATCHED: readonly Watched[] = [
   { kind: "Pod", group: "v1", resource: "pods" },
@@ -174,7 +177,7 @@ export function httpTransport(target: KubeTarget, path: string, opts: { metadata
         method: "GET",
         path,
         query: { limit: 1 },
-        accept,
+        accept: accept?.list,
       })
       return data.metadata?.resourceVersion ?? "0"
     },
@@ -186,7 +189,7 @@ export function httpTransport(target: KubeTarget, path: string, opts: { metadata
           path,
           query: { watch: 1, resourceVersion, allowWatchBookmarks: true, timeoutSeconds: WATCH_SECONDS },
           idleTimeoutMs: IDLE_TIMEOUT_MS,
-          accept,
+          accept: accept?.watch,
         },
         signal
       )
@@ -249,6 +252,11 @@ export function kubeEventSource(target: KubeTarget, opts: { fallbackNamespace: s
         try {
           resourceVersion = await transport.list(inner.signal)
         } catch (err) {
+          // A server that can't answer metadata-only (406, very old clusters): no live updates for this type.
+          if (w.metadataOnly && err instanceof KubeError && (err.status === 406 || err.status === 415)) {
+            markOpen()
+            return
+          }
           if (!(err instanceof KubeError) || err.status !== 403) throw err
           if (w.kind === "Namespace" || !opts.fallbackNamespace) {
             markOpen() // Not allowed: no live updates for this type.
