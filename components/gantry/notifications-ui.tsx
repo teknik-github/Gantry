@@ -2,10 +2,12 @@
 
 import * as React from "react"
 import { BellPlusIcon, PencilIcon, SendIcon, Trash2Icon } from "lucide-react"
+import { toast } from "sonner"
 
 import {
   createChannel,
   deleteChannel,
+  saveResourceThresholds,
   setChannelEnabled,
   testChannel,
   updateChannel,
@@ -16,6 +18,7 @@ import { FormDialog } from "@/components/gantry/form-dialog"
 import { useRunAction } from "@/components/gantry/use-action"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -31,6 +34,8 @@ import {
   type AlertKind,
   type ChannelType,
 } from "@/lib/notifications"
+import type { Thresholds } from "@/lib/thresholds"
+import type { ActionState } from "@/lib/validation"
 
 type Errors = Record<string, string[] | undefined>
 
@@ -269,6 +274,62 @@ function OptionSelect({ id, name, options, initial }: { id: string; name: string
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+export function ResourceThresholds({ thresholds }: { thresholds: Thresholds }) {
+  const [state, formAction, pending] = React.useActionState<ActionState, FormData>(saveResourceThresholds, {})
+  React.useEffect(() => {
+    if (state.ok) toast.success(state.message ?? "Saved")
+    else if (state.error && !state.fieldErrors) toast.error(state.error)
+  }, [state])
+  const errs = state.fieldErrors ?? {}
+  const values = state.values ?? {}
+  const uid = React.useId()
+  const field = (name: keyof Thresholds, label: string, unit: string, description?: string) => (
+    <Field data-invalid={errs[name] ? true : undefined}>
+      <FieldLabel htmlFor={`${uid}-${name}`}>{label}</FieldLabel>
+      <div className="flex items-center gap-2">
+        <Input
+          id={`${uid}-${name}`}
+          name={name}
+          type="number"
+          min={1}
+          defaultValue={values[name] ?? (thresholds[name] === null ? "" : String(thresholds[name]))}
+          placeholder="off"
+          className="w-28"
+        />
+        <span className="text-sm text-muted-foreground">{unit}</span>
+      </div>
+      {description ? <FieldDescription>{description}</FieldDescription> : null}
+      <FieldError>{errs[name]?.[0]}</FieldError>
+    </Field>
+  )
+  return (
+    <div className="px-4 lg:px-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Resource thresholds</CardTitle>
+          <CardDescription>
+            Raise a &ldquo;High CPU or memory&rdquo; alert when a value stays at or above its threshold, checked on every
+            metrics sample. Leave a field empty to turn that check off. Repeats at most hourly.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={formAction} className="flex flex-col gap-4">
+            <div className="grid gap-4 @3xl/main:grid-cols-4">
+              {field("containerCpu", "Container CPU", "%", "100% = one full core")}
+              {field("containerMemory", "Container memory", "% of limit", "The host's memory if it has no limit")}
+              {field("hostMemory", "Host memory", "%", "All running containers together")}
+              {field("minutes", "For at least", "minutes")}
+            </div>
+            <Button type="submit" variant="outline" className="w-fit" disabled={pending}>
+              {pending ? "Saving…" : "Save thresholds"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
   )
 }
 

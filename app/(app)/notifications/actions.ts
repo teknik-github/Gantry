@@ -6,6 +6,8 @@ import { ALERT_KIND_KEYS, CHANNEL_TYPE_KEYS, checkChannelConfig, channelFields, 
 import { runAction, UserError } from "@/lib/server/action"
 import { getCurrentUser } from "@/lib/server/auth/dal"
 import { deleteChannel as deleteChannelRecord, deliver, getChannel, insertChannel, updateChannel as updateChannelRecord } from "@/lib/server/notifications"
+import { checkThresholds } from "@/lib/thresholds"
+import { saveThresholds } from "@/lib/server/thresholds"
 import type { ActionState } from "@/lib/validation"
 
 const idSchema = z.coerce.number().int().positive()
@@ -92,5 +94,28 @@ export async function testChannel(id: number): Promise<ActionState> {
     })
     if (error) throw new UserError(`${c.name}: ${error}`)
     return `Test sent to ${c.name}`
+  })
+}
+
+export async function saveResourceThresholds(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const values: Record<string, string> = {}
+  for (const k of ["containerCpu", "containerMemory", "hostMemory", "minutes"]) values[k] = String(formData.get(k) ?? "")
+  const checked = checkThresholds(values)
+  if (!checked.thresholds) {
+    return {
+      error: "Please fix the highlighted fields",
+      fieldErrors: Object.fromEntries(Object.entries(checked.errors).map(([k, v]) => [k, [v]])),
+      values,
+    }
+  }
+  const t = checked.thresholds
+  const summary = [
+    t.containerCpu !== null ? `CPU ${t.containerCpu}%` : null,
+    t.containerMemory !== null ? `memory ${t.containerMemory}%` : null,
+    t.hostMemory !== null ? `host memory ${t.hostMemory}%` : null,
+  ].filter(Boolean)
+  return runAction("admin", "notification.thresholds", summary.join(", ") || "off", async () => {
+    await saveThresholds(t)
+    return summary.length ? `Alerts above ${summary.join(", ")} for ${t.minutes} min` : "Resource alerts are off"
   })
 }

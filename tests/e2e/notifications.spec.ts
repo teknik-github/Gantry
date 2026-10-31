@@ -226,3 +226,53 @@ test("an email channel sends through SMTP", async ({ page }) => {
     await new Promise<void>((resolve) => sink.server.close(() => resolve()))
   }
 })
+
+test("a container above the CPU threshold raises a resource alert", async ({ page }) => {
+  test.setTimeout(300_000)
+  const BUSY = "gantry-test-i-busy"
+  await removeContainer(BUSY)
+  // Half a core spinning: ~50% CPU, well above a 10% threshold.
+  const { Id } = await docker<{ Id: string }>("POST", `/containers/create?name=${BUSY}`, {
+    Image: "alpine:3",
+    Cmd: ["sh", "-c", "while :; do :; done"],
+    Labels: { "gantry.e2e": "true" },
+    HostConfig: { NanoCpus: 500_000_000 },
+  })
+  await docker("POST", `/containers/${Id}/start`)
+  try {
+    await signIn(page)
+    await page.goto("/notifications")
+    await page.getByRole("button", { name: "Add channel" }).click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("E2E thresholds")
+    await dialog.getByRole("combobox", { name: "Type" }).click()
+    await page.getByRole("option", { name: "Webhook (JSON)" }).click()
+    await dialog.getByLabel("URL").fill(hookUrl)
+    await dialog.getByRole("button", { name: "Save" }).click()
+    await expect(dialog).toBeHidden()
+
+    const form = page.locator("form").filter({ has: page.getByRole("button", { name: "Save thresholds" }) })
+    await form.getByLabel("Container CPU").fill("10")
+    await form.getByLabel("For at least").fill("1")
+    await form.getByRole("button", { name: "Save thresholds" }).click()
+    await expect(page.getByText("Alerts above CPU 10% for 1 min")).toBeVisible()
+
+    await expect
+      .poll(() => received.find((r) => r.kind === "resource_high" && r.subject.startsWith(`${BUSY} CPU at`))?.subject, {
+        timeout: 180_000,
+        intervals: [5_000],
+      })
+      .toMatch(new RegExp(`^${BUSY} CPU at \\d+%$`))
+
+    // Turn the check off again and remove the channel.
+    await form.getByLabel("Container CPU").fill("")
+    await form.getByRole("button", { name: "Save thresholds" }).click()
+    await expect(page.getByText("Resource alerts are off")).toBeVisible()
+    const row = page.getByRole("row").filter({ hasText: "E2E thresholds" })
+    await row.getByRole("button", { name: "Remove E2E thresholds" }).click()
+    await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click()
+    await expect(page.getByRole("row").filter({ hasText: "E2E thresholds" })).toHaveCount(0)
+  } finally {
+    await removeContainer(BUSY)
+  }
+})

@@ -11,6 +11,7 @@ export const ALERT_KINDS = {
   image_update: { label: "Image update available", description: "A newer image was found for a container's tag" },
   auto_update: { label: "Auto-update result", description: "What the scheduled update changed or failed to change" },
   backup: { label: "Backup failed", description: "A scheduled backup couldn't be written" },
+  resource_high: { label: "High CPU or memory", description: "A container or host stays above the thresholds set below" },
   stack_deploy: { label: "Git stack deployed", description: "A Git stack was deployed (manually, by webhook or polling) or failed to" },
 } as const
 

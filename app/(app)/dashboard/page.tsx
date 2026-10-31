@@ -6,17 +6,21 @@ import { ContainersTable } from "@/components/gantry/containers-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { ImagesCard, ImagesCardSkeleton, SectionCards } from "@/components/section-cards"
+import { SetupChecks } from "@/components/gantry/setup-checks"
 import { formatBytes } from "@/lib/format"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { updatesFor } from "@/lib/server/image-updates"
+import { setupChecks } from "@/lib/server/setup-checks"
 import { toContainerRows, tryDocker } from "@/lib/server/views"
 
 export const metadata: Metadata = { title: "Dashboard" }
 
 export default async function DashboardPage() {
-  await requireUser()
+  const user = await requireUser()
   const can = await getPermissions()
+  // What an administrator still has to set up (HTTPS, backups, 2FA, alerts).
+  const checks = user.role === "admin" ? await setupChecks(user) : []
   const env = await getCurrentEnvironment()
 
   const result = await tryDocker(async () => {
@@ -47,6 +51,7 @@ export default async function DashboardPage() {
     return (
       <PageBody>
         {header}
+        <SetupChecks checks={checks} />
         <DockerUnavailable message={result.error} />
       </PageBody>
     )
@@ -59,6 +64,7 @@ export default async function DashboardPage() {
   return (
     <PageBody>
       {header}
+      <SetupChecks checks={checks} />
       <SectionCards
         summary={{
           containers: { total: containers.length, running, paused, stopped: containers.length - running - paused },

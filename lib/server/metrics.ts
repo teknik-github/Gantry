@@ -6,7 +6,14 @@ import { cpuPercent, memoryUsage, type DockerApi } from "@/lib/server/docker/api
 // /api/stats endpoint and the background sampler (lib/server/metrics-sampler.ts),
 // plus the helpers for storing and serving the history (/api/metrics).
 
-export type ContainerUsage = { id: string; name: string; cpu: number; memory: number }
+export type ContainerUsage = {
+  id: string
+  name: string
+  cpu: number
+  memory: number
+  /** The container's memory limit (the host's memory when it has none). */
+  memLimit: number
+}
 
 export type HostUsage = {
   /** Sum of container CPU, normalised to the whole host (100% = all CPUs busy). */
@@ -59,6 +66,7 @@ export async function sampleHost(
         name: c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12),
         cpu: cpuPercent(s),
         memory: memoryUsage(s),
+        memLimit: s.memory_stats.limit ?? 0,
       }
     } catch {
       return null // container stopped mid-request

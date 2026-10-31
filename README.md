@@ -75,6 +75,29 @@ docker logs gantry 2>&1 | grep -A2 "setup token"
 To skip `/setup` (e.g. for automated installs), set `GANTRY_ADMIN_USERNAME`
 and `GANTRY_ADMIN_PASSWORD`; the admin is created on startup.
 
+### Production checklist
+
+The dashboard shows administrators a **Setup checks** card until these are
+done (each item links to where it's fixed):
+
+1. **HTTPS.** Don't expose port 3000 directly. The simplest way is Gantry's
+   own proxy: on **Proxy** choose *Built-in (Caddy)* (ports 80/443), then open
+   Gantry's container and use **Expose via proxy** with your domain, port
+   3000 and *Let's Encrypt*. Keep `COOKIE_SECURE=auto` (cookies become
+   `Secure` over HTTPS) and set `GANTRY_URL=https://your.domain` (needed for
+   SSO). Then bind Gantry's own port to localhost only
+   (`GANTRY_PORT=127.0.0.1:3000`) or drop the port mapping.
+2. **TRUST_PROXY=true** once a proxy you control is in front and sets
+   `X-Forwarded-For`, so login rate limits see real client addresses.
+3. **Backups**: schedule a daily encrypted backup, ideally to a separate mount
+   (`BACKUP_DIR`), and keep the passphrase outside Gantry.
+4. **Two-factor authentication** for every administrator (Account), and SSO
+   if you have an identity provider.
+5. **Notifications**: at least one channel, subscribed to crashes,
+   unreachable environments, failed backups and resource thresholds.
+6. Keep `GANTRY_SECRET` (or `data/secret.key`) safe: it decrypts every stored
+   credential.
+
 ## Development
 
 ```bash
@@ -387,6 +410,12 @@ Gantry keeps one Docker event stream open per environment and raises:
 | Environment unreachable | Docker can't be reached for 2 minutes (and again when it's back) |
 | Image update available | The periodic update check finds newer images (each update is announced once) |
 | Auto-update result | A scheduled or manual auto-update run updated or failed to update something |
+| Backup failed | A scheduled backup couldn't be written |
+| High CPU or memory | A container's CPU (100% = one core) or memory (% of its limit), or all containers' memory on a host, stays at or above the thresholds for the set number of minutes |
+
+Resource thresholds are set under **Notifications → Resource thresholds**
+(empty = off) and checked on every metrics sample (`METRICS_INTERVAL_SECONDS`);
+each one repeats at most hourly while it stays high.
 
 The same alert for the same container is sent at most every 10 minutes. Every
 alert is listed under "Recent alerts" with its delivery result, for 30 days.

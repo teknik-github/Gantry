@@ -5,6 +5,7 @@ import type { Environment, NewMetric } from "@/lib/server/db/schema"
 import { docker } from "@/lib/server/docker/api"
 import { environmentTarget } from "@/lib/server/environment-target"
 import { metricsConfig, retentionCutoff, sampleHost } from "@/lib/server/metrics"
+import { evaluateThresholds } from "@/lib/server/thresholds"
 
 /**
  * Background sampler behind the dashboard's history chart: every
@@ -58,6 +59,8 @@ async function sampleEnvironment(env: Environment, ts: string, budgetMs: number)
       `sampling took longer than ${Math.round(budgetMs / 1000)}s`
     )
     if (lastErrors.delete(env.id)) console.log(`[gantry] metrics: environment "${env.name}" reachable again`)
+    // Not awaited: alert delivery must not hold up the sampling pass.
+    void evaluateThresholds(env, usage)
     return {
       environment_id: env.id,
       ts,

@@ -1,18 +1,19 @@
 import type { Metadata } from "next"
 
-import { AlertsTable, ChannelsTable } from "@/components/gantry/notifications-ui"
+import { AlertsTable, ChannelsTable, ResourceThresholds } from "@/components/gantry/notifications-ui"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
 import { timeAgo } from "@/lib/format"
 import { channelFields, channelTarget, CHANNEL_TYPES } from "@/lib/notifications"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { listChannels, recentAlerts } from "@/lib/server/notifications"
+import { getThresholds } from "@/lib/server/thresholds"
 
 export const metadata: Metadata = { title: "Notifications" }
 
 export default async function NotificationsPage() {
   await requireAdmin()
-  const [channels, alerts] = await Promise.all([listChannels(), recentAlerts()])
+  const [channels, alerts, thresholds] = await Promise.all([listChannels(), recentAlerts(), getThresholds()])
 
   return (
     <PageBody>
@@ -37,6 +38,7 @@ export default async function NotificationsPage() {
           ),
         }))}
       />
+      <ResourceThresholds thresholds={thresholds} />
       <PageHeader title="Recent alerts" description="The last 100 alerts (kept for 30 days), whether or not a channel received them." />
       <AlertsTable
         data={alerts.map((a) => ({

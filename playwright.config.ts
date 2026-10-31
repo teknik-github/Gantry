@@ -75,6 +75,8 @@ export default defineConfig({
           GANTRY_SETUP_TOKEN: "e2e-setup-token-0123456789abcdef",
           // Tests trigger update checks themselves.
           UPDATE_CHECK_INTERVAL_HOURS: "0",
+          // Resource alerts need a few samples; keep the e2e run short.
+          METRICS_INTERVAL_SECONDS: "10",
           // git-stacks.spec.ts serves its repository over http on 127.0.0.1.
           GANTRY_TEST_ALLOW_HTTP_GIT: "1",
           // Single sign-on against the fake provider sso.spec.ts runs on OIDC_PORT;
