@@ -1,3 +1,49 @@
 import type { Dictionary } from "@/lib/i18n/dictionaries/types"
 
-export const registries: Dictionary["registries"] = {}
+export const registries: Dictionary["registries"] = {
+  description:
+    "Login untuk registry privat. Gantry memakainya untuk pull, cek update, recreate, dan stack di semua environment Docker (cluster Kubernetes memakai image pull secret sendiri).",
+  columns: {
+    address: "Registry",
+    username: "Username",
+    updatedLabel: "Diperbarui",
+  },
+  searchPlaceholder: "Cari registry…",
+  empty: "Belum ada login registry. Image publik tidak memerlukannya.",
+  add: "Tambah registry",
+  addDescription: "Login ini dipakai untuk semua image dari registry ini.",
+  testLogin: "Uji login ke {address}",
+  editName: "Edit {name}",
+  removeName: "Hapus {name}",
+  removeTitle: "Hapus login untuk {address}?",
+  removeDescription: "Pull dari registry ini akan kembali anonim.",
+  fields: {
+    name: "Nama",
+    namePlaceholder: "GitHub packages",
+    registry: "Registry",
+    registryHelp: "Host seperti yang tertulis di nama image: {ghcr}, {gitlab}, {example}, atau {dockerHub} untuk Docker Hub.",
+    username: "Username",
+    password: "Password atau access token",
+    passwordKeep: "Kosongkan untuk tetap memakai yang sekarang",
+    passwordHelp: "Disimpan terenkripsi. Sebaiknya pakai token read-only (mis. GitHub PAT dengan read:packages).",
+    verify: "Cek login sebelum menyimpan",
+  },
+  errors: {
+    nameRequired: "Nama wajib diisi",
+    addressRequired: "Alamat wajib diisi",
+    addressInvalid: "Gunakan host registry, mis. ghcr.io atau registry.example.com:5000",
+    usernameRequired: "Username wajib diisi",
+    tooLong: "Terlalu panjang",
+    passwordRequired: "Password atau token wajib diisi",
+    loginFailed: "Login ke {address} gagal: {message}",
+    exists: "Login untuk {address} sudah ada; edit yang itu saja",
+    addressInUse: "{name} sudah memakai {address}",
+    cannotDecrypt: "Password yang tersimpan tidak bisa didekripsi (secret Gantry berubah). Masukkan lagi.",
+    notFound: "Registry tidak ditemukan",
+    invalid: "Registry tidak valid",
+  },
+  added: "Registry {name} ditambahkan",
+  saved: "Registry {name} disimpan",
+  removed: "Registry dihapus",
+  loggedIn: "Berhasil login ke {address} sebagai {username}",
+}

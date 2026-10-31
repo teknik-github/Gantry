@@ -9,14 +9,18 @@ import { DockerUnavailable } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { getI18n } from "@/lib/i18n/server"
 import { requirePermission } from "@/lib/server/action"
 import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
 import { getCurrentEnvironment } from "@/lib/server/environments"
 
-export const metadata: Metadata = { title: "New stack" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.stacks.new.title }
+}
 
 export default async function NewStackPage() {
   const user = await requirePermission("manage")
+  const { t, rich } = await getI18n()
   // Git stacks store repository credentials: global administrators only.
   const canUseGit = user.role === "admin"
   const env = await getCurrentEnvironment()
@@ -27,13 +31,16 @@ export default async function NewStackPage() {
         <Button asChild variant="link" size="sm" className="h-auto w-fit p-0 text-muted-foreground">
           <Link href="/stacks">
             <ArrowLeftIcon data-icon="inline-start" />
-            Stacks
+            {t.nav.pages.stacks}
           </Link>
         </Button>
-        <h2 className="text-xl font-semibold tracking-tight">New stack</h2>
+        <h2 className="text-xl font-semibold tracking-tight">{t.stacks.new.title}</h2>
         {env && env.type !== "kubernetes" ? (
           <p className="text-sm text-muted-foreground">
-            Deployed with <code>docker compose</code> on <span className="font-medium text-foreground">{env.name}</span>.
+            {rich(t.stacks.new.deployedWith, {
+              command: <code>docker compose</code>,
+              environment: <span className="font-medium text-foreground">{env.name}</span>,
+            })}
           </p>
         ) : null}
       </div>
@@ -41,8 +48,8 @@ export default async function NewStackPage() {
         <div className="px-4 lg:px-6">
           <Tabs defaultValue="editor">
             <TabsList>
-              <TabsTrigger value="editor">Web editor</TabsTrigger>
-              {canUseGit ? <TabsTrigger value="git">Git repository</TabsTrigger> : null}
+              <TabsTrigger value="editor">{t.stacks.new.webEditor}</TabsTrigger>
+              {canUseGit ? <TabsTrigger value="git">{t.stacks.new.gitRepository}</TabsTrigger> : null}
             </TabsList>
             <TabsContent value="editor">
               <Card>

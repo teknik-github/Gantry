@@ -3,15 +3,19 @@ import type { Metadata } from "next"
 import { ContainersTable } from "@/components/gantry/containers-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { lastChecked, updatesFor } from "@/lib/server/image-updates"
 import { toContainerRows, tryDocker } from "@/lib/server/views"
 
-export const metadata: Metadata = { title: "Containers" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.containers }
+}
 
 export default async function ContainersPage() {
   await requireUser()
+  const { t } = await getI18n()
   const can = await getPermissions()
   const env = await getCurrentEnvironment()
   const result = await tryDocker(async () => {
@@ -22,7 +26,7 @@ export default async function ContainersPage() {
 
   return (
     <PageBody>
-      <PageHeader title="Containers" description="All containers in this environment, running or not." />
+      <PageHeader title={t.nav.pages.containers} description={t.containers.description} />
       {result.error !== undefined ? (
         <DockerUnavailable message={result.error} />
       ) : (

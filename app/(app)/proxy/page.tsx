@@ -3,23 +3,26 @@ import type { Metadata } from "next"
 import { ProxyHostsTable, ProxySettingsCard } from "@/components/gantry/proxy-ui"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
-import { timeAgo } from "@/lib/format"
+import { getI18n } from "@/lib/i18n/server"
 import { externalSnippets } from "@/lib/proxy"
 import { requirePermission } from "@/lib/server/action"
 import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
 import { getProxySettings, listProxyHosts, PROXY_CONTAINER, PROXY_NETWORK, proxyStatus } from "@/lib/server/proxy"
 import { tryDocker } from "@/lib/server/views"
 
-export const metadata: Metadata = { title: "Proxy" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.proxy }
+}
 
 export default async function ProxyPage() {
   await requirePermission("manage")
+  const { t, format, timeAgo } = await getI18n()
   const env = await getCurrentEnvironment()
   if (!env) {
     return (
       <PageBody>
-        <PageHeader title="Proxy" />
-        <DockerUnavailable message="No Docker environment configured" />
+        <PageHeader title={t.nav.pages.proxy} />
+        <DockerUnavailable message={t.common.environment.noDockerConfigured} />
       </PageBody>
     )
   }
@@ -45,8 +48,8 @@ export default async function ProxyPage() {
   return (
     <PageBody>
       <PageHeader
-        title="Proxy"
-        description={`Serve containers on ${env.name} under domain names, with HTTPS. Use Gantry's built-in Caddy proxy or attach containers to the proxy you already run.`}
+        title={t.nav.pages.proxy}
+        description={format(t.proxy.description, { environment: env.name })}
       />
       {docker.error !== undefined ? <DockerUnavailable message={docker.error} /> : null}
       <ProxySettingsCard
@@ -56,13 +59,13 @@ export default async function ProxyPage() {
         appliedLabel={appliedAt ? timeAgo(appliedAt) : null}
       />
       <PageHeader
-        title="Proxy hosts"
+        title={t.proxy.hosts}
         description={
           settings.mode === "internal"
-            ? `Each host forwards its domains to a container port. Targets are attached to the "${PROXY_NETWORK}" network.`
+            ? format(t.proxy.hostsInternal, { network: PROXY_NETWORK })
             : settings.mode === "external"
-              ? `Targets are attached to "${settings.externalNetwork}"; copy each host's config into your proxy.`
-              : "Turn the proxy on above to serve these."
+              ? format(t.proxy.hostsExternal, { network: settings.externalNetwork })
+              : t.proxy.hostsOff
         }
       />
       <ProxyHostsTable

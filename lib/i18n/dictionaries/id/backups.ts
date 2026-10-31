@@ -1,3 +1,65 @@
 import type { Dictionary } from "@/lib/i18n/dictionaries/types"
 
-export const backups: Dictionary["backups"] = {}
+export const backups: Dictionary["backups"] = {
+  description:
+    "Backup berisi semua data Gantry (environment, pengguna, stack, pengaturan…) beserta secret yang dibutuhkan nilai-nilai terenkripsinya, dikunci dengan passphrase Anda. Backup bisa di-restore ke SQLite atau MySQL.",
+  download: {
+    title: "Unduh backup",
+    description:
+      "Simpan passphrase di tempat aman: tanpa passphrase, backup tidak bisa dibuka, dan Gantry tidak bisa memulihkannya untuk Anda.",
+    passphrase: "Passphrase",
+    repeat: "Ulangi passphrase",
+    preparing: "Menyiapkan…",
+    submit: "Unduh backup",
+    tooShort: "Gunakan minimal {min} karakter",
+    mismatch: "Passphrase tidak cocok",
+    failed: "Backup gagal",
+    downloaded: "{name} diunduh",
+  },
+  schedule: {
+    title: "Backup terjadwal",
+    writtenTo: "Ditulis ke {directory} (atur {env} untuk menyimpannya di disk atau mount lain).",
+    lastFailed: "Backup terakhir {when} gagal: {error}",
+    last: "Backup terakhir {when}: {name}",
+    daily: "Backup setiap hari",
+    at: "Pukul",
+    keep: "Simpan",
+    keepCurrent: "Kosongkan untuk memakai yang sekarang",
+    atLeast: "Minimal {min} karakter",
+    help: "Passphrase disimpan terenkripsi agar backup terjadwal bisa berjalan; Anda tetap membutuhkannya untuk restore. Kegagalan dikirim ke channel notifikasi yang berlangganan “Backup gagal”.",
+    save: "Simpan jadwal",
+    backingUp: "Membuat backup…",
+    backUpNow: "Backup sekarang",
+    timeFormat: "Gunakan format JJ:MM (24 jam)",
+    savedOn: "Backup berjalan setiap hari pukul {time} (menyimpan {keep})",
+    savedOff: "Backup terjadwal dimatikan",
+    written: "Backup {name} ditulis ({size})",
+  },
+  stored: {
+    columns: {
+      createdAt: "Ditulis",
+      size: "Ukuran",
+    },
+    backup: "Backup",
+    downloadLabel: "Unduh {name}",
+    deleteTitle: "Hapus {name}?",
+    deleteDescription: "File akan dihapus dari direktori backup.",
+    deleteLabel: "Hapus {name}",
+    empty: "Belum ada backup tersimpan.",
+    invalid: "Backup tidak valid",
+    deleted: "Backup dihapus",
+  },
+  restore: {
+    title: "Restore",
+    description:
+      "Mengganti semua data Gantry dengan data dari backup, dan me-logout semua orang. Container, volume, dan objek Docker lainnya tidak disentuh.",
+    restored: "{rows} baris di-restore dari backup yang dibuat {date}.",
+    restartRequired: "Backup ini memakai secret lain: restart Gantry sekarang (mis. docker restart gantry), lalu login.",
+    signInAgain: "Login lagi",
+    file: "File backup",
+    typeRestore: "Ketik RESTORE",
+    restoring: "Me-restore…",
+    submit: "Restore",
+    failed: "Restore gagal",
+  },
+}

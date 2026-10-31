@@ -3,6 +3,7 @@
 import { z } from "zod"
 
 import { joinPath } from "@/lib/files/paths"
+import { getI18n } from "@/lib/i18n/server"
 import { expectedEnvironment, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import { createFolder, deletePath, describe, FilesError, parseName, parsePath, parseTarget, type FileTarget } from "@/lib/server/files/service"
 import type { ActionState } from "@/lib/validation"
@@ -25,9 +26,9 @@ function parse<T>(fn: () => T): T | { error: string } {
   }
 }
 
-function target(input: unknown): FileTarget {
+function target(input: unknown, invalidMessage: string): FileTarget {
   const parsed = targetSchema.safeParse(input)
-  if (!parsed.success) throw new FilesError("Invalid target")
+  if (!parsed.success) throw new FilesError(invalidMessage)
   return parseTarget(parsed.data.kind === "container" ? { container: parsed.data.id } : { volume: parsed.data.name })
 }
 
@@ -47,20 +48,22 @@ export async function createFolderAction(
   name: string,
   environmentId?: number
 ): Promise<ActionState> {
-  const input = parse(() => ({ t: target(targetInput), dir: parsePath(dir), name: parseName(name) }))
+  const { t, format } = await getI18n()
+  const input = parse(() => ({ t: target(targetInput, t.files.errors.invalidTarget), dir: parsePath(dir), name: parseName(name) }))
   if ("error" in input) return input
   const path = joinPath(input.dir, input.name)
   return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "files.mkdir", describe(input.t, path), async ({ docker }) => {
     await asUserError(async () => createFolder(await docker(), input.t, input.dir, input.name))
-    return `Folder ${input.name} created`
+    return format(t.files.folderCreated, { name: input.name })
   })
 }
 
 export async function deletePathAction(targetInput: FileTarget, path: string, environmentId?: number): Promise<ActionState> {
-  const input = parse(() => ({ t: target(targetInput), path: parsePath(path) }))
+  const { t, format } = await getI18n()
+  const input = parse(() => ({ t: target(targetInput, t.files.errors.invalidTarget), path: parsePath(path) }))
   if ("error" in input) return input
   return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "files.delete", describe(input.t, input.path), async ({ docker }) => {
     await asUserError(async () => deletePath(await docker(), input.t, input.path))
-    return `Deleted ${input.path}`
+    return format(t.files.deleted, { path: input.path })
   })
 }

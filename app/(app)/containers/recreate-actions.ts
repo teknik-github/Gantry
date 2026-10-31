@@ -4,6 +4,8 @@ import { z } from "zod"
 
 import { containerNameField, imageField, RESTART_POLICIES } from "@/lib/container-form"
 import { BULK_LIMIT, uniqueBy } from "@/lib/bulk"
+import type { I18n } from "@/lib/i18n"
+import { getI18n } from "@/lib/i18n/server"
 import { ENVIRONMENT_FIELD } from "@/lib/permissions"
 import { authorize, expectedEnvironment, inEnvironment, runAction, runBulkAction, UserError } from "@/lib/server/action"
 import {
@@ -27,18 +29,19 @@ export type RecreateState = ActionState & { containerId?: string }
 
 const idSchema = z.string().regex(/^[a-f0-9]{12,64}$/, "Invalid container id")
 
-const editSchema = z.object({
-  id: idSchema,
-  image: imageField,
-  name: containerNameField.min(1, "Name is required"),
-  command: z.string().max(2000),
-  env: z.string().max(20000),
-  ports: z.string().max(2000),
-  volumes: z.string().max(4000),
-  restart: z.enum(RESTART_POLICIES),
-  networks: z.array(z.string().max(255)).max(50).optional(),
-  pull: z.enum(["on"]).optional(),
-})
+const editSchema = (t: I18n["t"]) =>
+  z.object({
+    id: z.string().regex(/^[a-f0-9]{12,64}$/, t.containers.invalidId),
+    image: imageField,
+    name: containerNameField.min(1, t.containers.nameRequired),
+    command: z.string().max(2000),
+    env: z.string().max(20000),
+    ports: z.string().max(2000),
+    volumes: z.string().max(4000),
+    restart: z.enum(RESTART_POLICIES),
+    networks: z.array(z.string().max(255)).max(50).optional(),
+    pull: z.enum(["on"]).optional(),
+  })
 
 async function asUserError<T>(fn: () => Promise<T>) {
   try {
@@ -66,8 +69,9 @@ export async function editContainer(_prev: RecreateState, formData: FormData): P
   const scope = inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD)))
   const auth = await authorize(scope)
   if ("error" in auth) return { error: auth.error }
+  const { t, format } = await getI18n()
 
-  const parsed = editSchema.safeParse({
+  const parsed = editSchema(t).safeParse({
     ...Object.fromEntries(formData),
     // Checkboxes: only present when the form shows the network list.
     networks: formData.get("networksShown") ? formData.getAll("networks").map(String) : undefined,
@@ -88,7 +92,7 @@ export async function editContainer(_prev: RecreateState, formData: FormData): P
   if (!diff.ok) return { error: diff.error, fieldErrors: diff.fieldErrors }
 
   const changed = Object.keys(diff.edits) as (keyof ContainerEdits)[]
-  if (changed.length === 0 && pull !== "on") return { ok: true, message: "No changes to apply", containerId: c.Id }
+  if (changed.length === 0 && pull !== "on") return { ok: true, message: t.containers.noChanges, containerId: c.Id }
 
   const name = c.Name.replace(/^\//, "")
   const target = `${name} (${changed.map((k) => FIELD_LABELS[k]).join(", ") || "pull"})`
@@ -102,7 +106,7 @@ export async function editContainer(_prev: RecreateState, formData: FormData): P
         self: selfContainerIds(),
       })
       containerId = result.id
-      return [`${result.name} recreated`, ...result.warnings].join(". ")
+      return [format(t.containers.recreated, { name: result.name }), ...result.warnings].join(". ")
     })
   )
   return { ...res, containerId }
@@ -110,8 +114,9 @@ export async function editContainer(_prev: RecreateState, formData: FormData): P
 
 /** Pulls the container's image reference and recreates it if the image changed. */
 export async function pullAndRecreateContainer(id: string, environmentId?: number): Promise<RecreateState> {
+  const { t, format } = await getI18n()
   const parsed = idSchema.safeParse(id)
-  if (!parsed.success) return { error: "Invalid container id" }
+  if (!parsed.success) return { error: t.containers.invalidId }
 
   let containerId: string | undefined
   const res = await runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "container.pull-recreate", id.slice(0, 12), async ({ docker }) =>
@@ -119,10 +124,10 @@ export async function pullAndRecreateContainer(id: string, environmentId?: numbe
       const result = await pullAndRecreate(await docker(), { id: parsed.data, self: selfContainerIds() })
       if (!result.updated) {
         containerId = parsed.data
-        return `Already up to date: ${result.image} has not changed`
+        return format(t.containers.alreadyUpToDate, { image: result.image })
       }
       containerId = result.id
-      return [`${result.name} updated to the latest image`, ...result.warnings].join(". ")
+      return [format(t.containers.updatedToLatest, { name: result.name }), ...result.warnings].join(". ")
     })
   )
   return { ...res, containerId }
@@ -133,26 +138,35 @@ export async function pullAndRecreateContainer(id: string, environmentId?: numbe
  * swaps containers, which is slow and heavy on the daemon.
  */
 export async function bulkPullAndRecreate(targets: { id: string; name: string }[], environmentId?: number): Promise<ActionState> {
+  const { t } = await getI18n()
   const parsed = z
     .array(z.object({ id: idSchema, name: z.string().max(255) }))
     .min(1)
     .max(BULK_LIMIT)
     .safeParse(targets)
-  if (!parsed.success) return { error: "Invalid request" }
+  if (!parsed.success) return { error: t.containers.invalidRequest }
 
   return runBulkAction(
     inEnvironment("manage", expectedEnvironment(environmentId)),
     "container.pull-recreate",
     uniqueBy(parsed.data, (t) => t.id),
-    { verb: "Updated", noun: "container", label: (t) => t.name || t.id.slice(0, 12), auditTarget: (t) => t.id.slice(0, 12), concurrency: 2 },
-    async (t, api) => {
-      await asUserError(() => pullAndRecreate(api, { id: t.id, self: selfContainerIds() }))
+    {
+      verb: "Updated",
+      noun: "container",
+      localized: { verb: t.containers.bulkVerbs.update, noun: t.containers.bulkNoun },
+      label: (c) => c.name || c.id.slice(0, 12),
+      auditTarget: (c) => c.id.slice(0, 12),
+      concurrency: 2,
+    },
+    async (c, api) => {
+      await asUserError(() => pullAndRecreate(api, { id: c.id, self: selfContainerIds() }))
     }
   )
 }
 
 /** Asks the registries which containers run an outdated image (no pull). */
 export async function checkForUpdates(environmentId?: number): Promise<ActionState> {
+  const { t, format } = await getI18n()
   return runAction(inEnvironment("operate", expectedEnvironment(environmentId)), "image.check-updates", "all", async ({ docker }) => {
     const env = await getCurrentEnvironment()
     if (!env) throw new UserError("No Docker environment configured")
@@ -160,12 +174,14 @@ export async function checkForUpdates(environmentId?: number): Promise<ActionSta
     const containers = await api.listContainers(true)
     const byContainer = await containerReferences(api, containers)
     const refs = referencesOf(byContainer)
-    if (!refs.length) return "No containers use an image tag that can be checked"
+    if (!refs.length) return t.containers.noCheckableTags
     const { checked, failed } = await checkReferences(env.id, api, refs)
     const updates = [...(await updatesFor(api, env.id, containers, byContainer)).updates.values()].filter(
       (u) => u.status === "update"
     ).length
-    const summary = updates ? `${updates} container(s) can be updated` : "everything is up to date"
-    return `Checked ${checked} image tag(s): ${summary}${failed ? `. ${failed} tag(s) could not be checked` : ""}`
+    const summary = updates ? format(t.containers.canBeUpdated, { count: updates }) : t.containers.allUpToDate
+    return failed
+      ? format(t.containers.checkedTagsFailed, { count: checked, summary, failed })
+      : format(t.containers.checkedTags, { count: checked, summary })
   })
 }

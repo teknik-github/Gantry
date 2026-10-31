@@ -2,6 +2,7 @@
 
 import { z } from "zod"
 
+import { getI18n } from "@/lib/i18n/server"
 import { DNS_LABEL_RE, namespaceSchema, objectNameSchema } from "@/lib/kubernetes/names"
 import { audit } from "@/lib/server/audit"
 import { getCurrentUser } from "@/lib/server/auth/dal"
@@ -28,12 +29,13 @@ const execSchema = z.object({
 export async function startPodExecSession(
   input: z.input<typeof execSchema>
 ): Promise<{ sid: string; error?: never } | { sid?: never; error: string }> {
+  const { t } = await getI18n()
   const user = await getCurrentUser()
-  if (!user) return { error: "Your session has expired. Please sign in again." }
-  if (user.role !== "admin") return { error: "Only administrators can open a console." }
+  if (!user) return { error: t.common.errors.sessionExpired }
+  if (user.role !== "admin") return { error: t.kubernetes.actions.consoleAdminsOnly }
 
   const parsed = execSchema.safeParse(input)
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid request" }
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? t.kubernetes.actions.invalidRequest }
   const v = parsed.data
 
   try {
@@ -54,6 +56,6 @@ export async function startPodExecSession(
   } catch (err) {
     if (err instanceof KubeError || err instanceof ExecSessionError) return { error: err.message }
     console.error("[gantry] pod exec failed", err)
-    return { error: "Could not start the console. Check the server logs." }
+    return { error: t.kubernetes.actions.consoleFailed }
   }
 }

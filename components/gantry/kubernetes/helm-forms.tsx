@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { useI18n } from "@/lib/i18n/client"
 import { MAX_TIMEOUT_MINUTES, type ChartSource, type ChartVersion } from "@/lib/kubernetes/helm-charts"
 import type { HelmOperationInfo } from "@/lib/server/kubernetes/helm-operations"
 
@@ -65,6 +66,8 @@ export function ChartPicker({
   onChange: (patch: Partial<ChartChoice>) => void
   versions: { list: ChartVersion[]; loading: boolean; error?: string }
 }) {
+  const { t, format, rich } = useI18n()
+  const k = t.kubernetes.charts
   const uid = React.useId()
   const repo = repos.find((r) => r.id === value.repoId) ?? null
   const chartsKey = repo && !repo.oci ? String(repo.id) : ""
@@ -76,12 +79,12 @@ export function ChartPicker({
     let cancelled = false
     listHelmCharts(environmentId, Number(chartsKey)).then(
       (res) => !cancelled && setCharts({ key: chartsKey, data: res.data ?? [], error: res.error }),
-      () => !cancelled && setCharts({ key: chartsKey, data: [], error: "Could not load the charts" })
+      () => !cancelled && setCharts({ key: chartsKey, data: [], error: k.loadChartsFailed })
     )
     return () => {
       cancelled = true
     }
-  }, [environmentId, chartsKey])
+  }, [environmentId, chartsKey, k])
 
   const chartList = charts?.key === chartsKey ? charts : null
   const chartsLoading = Boolean(chartsKey) && !chartList
@@ -89,23 +92,23 @@ export function ChartPicker({
   async function refresh() {
     if (!repo) return
     setRefreshing(true)
-    const res = await listHelmCharts(environmentId, repo.id, true).catch(() => ({ error: "Could not load the charts", data: undefined }))
+    const res = await listHelmCharts(environmentId, repo.id, true).catch(() => ({ error: k.loadChartsFailed, data: undefined }))
     setRefreshing(false)
     setCharts({ key: String(repo.id), data: res.data ?? [], error: res.error })
-    if (!res.error) toast.success(`Index of ${repo.name} downloaded`)
+    if (!res.error) toast.success(format(k.indexDownloaded, { name: repo.name }))
   }
 
   return (
     <FieldGroup>
       <Field className="max-w-md">
-        <FieldLabel htmlFor={`${uid}-mode`}>Chart source</FieldLabel>
+        <FieldLabel htmlFor={`${uid}-mode`}>{k.source}</FieldLabel>
         <Select value={value.mode} onValueChange={(mode) => onChange({ mode: mode as ChartChoice["mode"] })}>
           <SelectTrigger id={`${uid}-mode`} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="repo">Chart repository</SelectItem>
-            <SelectItem value="oci">OCI reference (oci://)</SelectItem>
+            <SelectItem value="repo">{k.sourceRepo}</SelectItem>
+            <SelectItem value="oci">{k.sourceOci}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
@@ -113,23 +116,25 @@ export function ChartPicker({
       {value.mode === "repo" ? (
         repos.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No chart repositories yet. An administrator adds them under{" "}
-            <Link href="/kubernetes/charts/repositories" className="underline">
-              Chart repositories
-            </Link>
-            ; or use an OCI reference.
+            {rich(k.noRepos, {
+              link: (
+                <Link href="/kubernetes/charts/repositories" className="underline">
+                  {t.kubernetes.helm.chartRepositories}
+                </Link>
+              ),
+            })}
           </p>
         ) : (
           <>
             <div className="flex flex-wrap items-end gap-3">
               <Field className="max-w-md flex-1">
-                <FieldLabel htmlFor={`${uid}-repo`}>Repository</FieldLabel>
+                <FieldLabel htmlFor={`${uid}-repo`}>{k.repository}</FieldLabel>
                 <Select
                   value={value.repoId ? String(value.repoId) : ""}
                   onValueChange={(id) => onChange({ repoId: Number(id), chart: "", version: "" })}
                 >
                   <SelectTrigger id={`${uid}-repo`} className="w-full">
-                    <SelectValue placeholder="Pick a repository" />
+                    <SelectValue placeholder={k.pickRepository} />
                   </SelectTrigger>
                   <SelectContent>
                     {repos.map((r) => (
@@ -143,19 +148,19 @@ export function ChartPicker({
               {repo && !repo.oci ? (
                 <Button type="button" variant="outline" onClick={refresh} disabled={refreshing}>
                   <RefreshCwIcon data-icon="inline-start" className={refreshing ? "animate-spin" : undefined} />
-                  Refresh index
+                  {k.refreshIndex}
                 </Button>
               ) : null}
             </div>
             {repo ? (
               <Field className="max-w-md">
-                <FieldLabel htmlFor={`${uid}-chart`}>Chart</FieldLabel>
+                <FieldLabel htmlFor={`${uid}-chart`}>{t.kubernetes.helm.chart}</FieldLabel>
                 <Input
                   id={`${uid}-chart`}
                   list={repo.oci ? undefined : `${uid}-charts`}
                   value={value.chart}
                   onChange={(e) => onChange({ chart: e.target.value, version: "" })}
-                  placeholder={repo.oci ? "chart name in the registry" : chartsLoading ? "Loading charts…" : "Type or pick a chart"}
+                  placeholder={repo.oci ? k.chartInRegistry : chartsLoading ? k.loadingCharts : k.typeOrPick}
                   autoComplete="off"
                   spellCheck={false}
                 />
@@ -168,15 +173,11 @@ export function ChartPicker({
                   ))}
                 </datalist>
                 <FieldDescription>
-                  {repo.oci ? (
-                    <>
-                      Installed from <Mono>{repo.url}/&lt;chart&gt;</Mono>.
-                    </>
-                  ) : chartList ? (
-                    `${chartList.data.length} chart(s) in ${repo.name}.`
-                  ) : (
-                    "Loading the repository index…"
-                  )}
+                  {repo.oci
+                    ? rich(k.installedFrom, { path: <Mono>{repo.url}/&lt;chart&gt;</Mono> })
+                    : chartList
+                      ? format(k.chartsIn, { count: chartList.data.length, name: repo.name })
+                      : k.loadingIndex}
                 </FieldDescription>
                 {chartList?.error ? <FieldError>{chartList.error}</FieldError> : null}
               </Field>
@@ -185,7 +186,7 @@ export function ChartPicker({
         )
       ) : (
         <Field className="max-w-2xl">
-          <FieldLabel htmlFor={`${uid}-oci`}>OCI reference</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-oci`}>{k.ociReference}</FieldLabel>
           <Input
             id={`${uid}-oci`}
             value={value.ociRef}
@@ -194,31 +195,28 @@ export function ChartPicker({
             autoComplete="off"
             spellCheck={false}
           />
-          <FieldDescription>
-            The login of a matching OCI chart repository is used if one was added. Except for administrators, the
-            reference must lie under an added OCI repository.
-          </FieldDescription>
+          <FieldDescription>{k.ociHelp}</FieldDescription>
         </Field>
       )}
 
       {value.mode === "oci" || repo?.oci ? (
         <Field className="max-w-xs">
-          <FieldLabel htmlFor={`${uid}-version`}>Version</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-version`}>{k.version}</FieldLabel>
           <Input
             id={`${uid}-version`}
             value={value.version}
             onChange={(e) => onChange({ version: e.target.value })}
-            placeholder="latest"
+            placeholder={k.latest}
             autoComplete="off"
             spellCheck={false}
           />
         </Field>
       ) : repo && value.chart ? (
         <Field className="max-w-xs">
-          <FieldLabel htmlFor={`${uid}-version`}>Version</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-version`}>{k.version}</FieldLabel>
           <Select value={value.version} onValueChange={(version) => onChange({ version })} disabled={!versions.list.length}>
             <SelectTrigger id={`${uid}-version`} className="w-full">
-              <SelectValue placeholder={versions.loading ? "Loading versions…" : "No versions"} />
+              <SelectValue placeholder={versions.loading ? k.loadingVersions : k.noVersions} />
             </SelectTrigger>
             <SelectContent>
               {versions.list.map((v) => (
@@ -242,6 +240,8 @@ export function ChartPicker({
  * chart doesn't have) is chosen.
  */
 function useChartVersions(environmentId: number, repos: RepoOption[], choice: ChartChoice) {
+  const { t } = useI18n()
+  const loadFailed = t.kubernetes.charts.loadVersionsFailed
   const repo = choice.mode === "repo" ? repos.find((r) => r.id === choice.repoId) : undefined
   const listed = Boolean(repo && !repo.oci)
   const key = listed && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(choice.chart.trim()) ? `${repo!.id}/${choice.chart.trim()}` : ""
@@ -255,14 +255,14 @@ function useChartVersions(environmentId: number, repos: RepoOption[], choice: Ch
       const chart = key.slice(key.indexOf("/") + 1)
       listHelmChartVersions(environmentId, id, chart).then(
         (res) => !cancelled && setLoaded({ key, data: res.data ?? [], error: res.error }),
-        () => !cancelled && setLoaded({ key, data: [], error: "Could not load the versions" })
+        () => !cancelled && setLoaded({ key, data: [], error: loadFailed })
       )
     }, 300)
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [environmentId, key])
+  }, [environmentId, key, loadFailed])
 
   const current = loaded?.key === key ? loaded : null
   const list = current?.data ?? []
@@ -287,25 +287,27 @@ function ReleaseOptions({
   onChange: (patch: Partial<ReleaseOptionsValue>) => void
   showAtomic?: boolean
 }) {
+  const { t } = useI18n()
+  const k = t.kubernetes.charts
   const uid = React.useId()
   return (
     <FieldGroup className="gap-3">
       <Field orientation="horizontal">
         <Switch id={`${uid}-wait`} checked={value.wait || value.atomic} disabled={value.atomic} onCheckedChange={(wait) => onChange({ wait })} />
         <FieldLabel htmlFor={`${uid}-wait`} className="font-normal">
-          Wait until the resources are ready (--wait)
+          {k.wait}
         </FieldLabel>
       </Field>
       {showAtomic ? (
         <Field orientation="horizontal">
           <Switch id={`${uid}-atomic`} checked={value.atomic} onCheckedChange={(atomic) => onChange({ atomic })} />
           <FieldLabel htmlFor={`${uid}-atomic`} className="font-normal">
-            Atomic: undo everything if it fails (--atomic, implies --wait)
+            {k.atomic}
           </FieldLabel>
         </Field>
       ) : null}
       <Field className="max-w-48">
-        <FieldLabel htmlFor={`${uid}-timeout`}>Timeout (minutes)</FieldLabel>
+        <FieldLabel htmlFor={`${uid}-timeout`}>{k.timeout}</FieldLabel>
         <Input
           id={`${uid}-timeout`}
           type="number"
@@ -334,9 +336,10 @@ function ValuesEditor({
   description: React.ReactNode
   error?: string
 }) {
+  const { t } = useI18n()
   return (
     <Field data-invalid={error ? true : undefined}>
-      <FieldLabel htmlFor={id}>Values</FieldLabel>
+      <FieldLabel htmlFor={id}>{t.kubernetes.helm.values}</FieldLabel>
       <Textarea
         id={id}
         value={value}
@@ -355,6 +358,7 @@ function ValuesEditor({
 }
 
 function useOperation() {
+  const { t } = useI18n()
   const [operation, setOperation] = React.useState<HelmOperationInfo | null>(null)
   const [running, setRunning] = React.useState(false)
   const [starting, startTransition] = React.useTransition()
@@ -365,11 +369,11 @@ function useOperation() {
       try {
         res = await fn()
       } catch {
-        toast.error("Request failed. Check your connection.")
+        toast.error(t.common.errors.requestFailed)
         return
       }
       if (res.error || !res.operation) {
-        toast.error(res.error ?? "The operation could not be started")
+        toast.error(res.error ?? t.kubernetes.charts.startFailed)
         return
       }
       setOperation(res.operation)
@@ -393,6 +397,8 @@ export function HelmInstallForm({
   namespaces: string[]
   defaultNamespace: string
 }) {
+  const { t, format } = useI18n()
+  const k = t.kubernetes.charts
   const uid = React.useId()
   const [choice, setChoice] = React.useState<ChartChoice>({
     mode: repos.length ? "repo" : "oci",
@@ -419,7 +425,7 @@ export function HelmInstallForm({
 
   async function fetchDefaults(src: ChartSource, version: string, isCancelled: () => boolean = () => false) {
     setLoadingValues(true)
-    const res = await loadHelmChartValues(environmentId, src, version).catch(() => ({ error: "Could not load the values", data: undefined }))
+    const res = await loadHelmChartValues(environmentId, src, version).catch(() => ({ error: k.loadValuesFailed, data: undefined }))
     setLoadingValues(false)
     if (isCancelled()) return
     if (res.error !== undefined) toast.error(res.error)
@@ -457,7 +463,7 @@ export function HelmInstallForm({
   function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!source) {
-      toast.error("Pick a chart first")
+      toast.error(k.pickChartFirst)
       return
     }
     setValuesError(undefined)
@@ -481,12 +487,12 @@ export function HelmInstallForm({
 
   return (
     <div className="flex flex-col gap-6 px-4 lg:px-6">
-      <form onSubmit={submit} className="flex flex-col gap-5" aria-label="Install chart">
+      <form onSubmit={submit} className="flex flex-col gap-5" aria-label={k.installForm}>
         <ChartPicker environmentId={environmentId} repos={repos} value={picked} onChange={patchChoice} versions={versions} />
         <FieldGroup>
           <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor={`${uid}-release`}>Release name</FieldLabel>
+              <FieldLabel htmlFor={`${uid}-release`}>{k.releaseName}</FieldLabel>
               <Input
                 id={`${uid}-release`}
                 value={release}
@@ -498,7 +504,7 @@ export function HelmInstallForm({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor={`${uid}-namespace`}>Namespace</FieldLabel>
+              <FieldLabel htmlFor={`${uid}-namespace`}>{t.kubernetes.common.namespace}</FieldLabel>
               <Input
                 id={`${uid}-namespace`}
                 list={`${uid}-namespaces`}
@@ -518,7 +524,7 @@ export function HelmInstallForm({
           <Field orientation="horizontal">
             <Switch id={`${uid}-create-ns`} checked={createNamespace} onCheckedChange={setCreateNamespace} />
             <FieldLabel htmlFor={`${uid}-create-ns`} className="font-normal">
-              Create the namespace if it doesn&apos;t exist (--create-namespace)
+              {k.createNamespace}
             </FieldLabel>
           </Field>
 
@@ -532,10 +538,10 @@ export function HelmInstallForm({
             error={valuesError}
             description={
               <span className="flex flex-wrap items-center gap-2">
-                <span>YAML passed with --values. Prefilled with the chart&apos;s defaults; keep only what you change if you like.</span>
+                <span>{k.valuesHelp}</span>
                 <Button type="button" variant="outline" size="sm" onClick={loadDefaults} disabled={!source || loadingValues}>
                   <FileDownIcon data-icon="inline-start" />
-                  {loadingValues ? "Loading…" : "Load chart defaults"}
+                  {loadingValues ? t.common.status.loading : k.loadDefaults}
                 </Button>
               </span>
             }
@@ -544,7 +550,7 @@ export function HelmInstallForm({
           <Field orientation="horizontal">
             <Button type="submit" disabled={op.busy || !source}>
               <PackagePlusIcon data-icon="inline-start" />
-              {op.busy ? "Installing…" : "Install"}
+              {op.busy ? k.installing : k.install}
             </Button>
           </Field>
         </FieldGroup>
@@ -555,7 +561,7 @@ export function HelmInstallForm({
           {!op.busy ? (
             <Button variant="outline" size="sm" className="self-start" asChild>
               <Link href={`/kubernetes/helm/${encodeURIComponent(op.operation.namespace)}/${encodeURIComponent(op.operation.release)}`}>
-                Open release {op.operation.release}
+                {format(k.openRelease, { name: op.operation.release })}
               </Link>
             </Button>
           ) : null}
@@ -588,6 +594,8 @@ export function HelmUpgradeForm({
   /** Current user-supplied values (administrators); null = keep them unseen (--reset-then-reuse-values). */
   currentValues: string | null
 }) {
+  const { t } = useI18n()
+  const k = t.kubernetes.charts
   const uid = React.useId()
   const router = useRouter()
   const [choice, setChoice] = React.useState<ChartChoice>({
@@ -608,7 +616,7 @@ export function HelmUpgradeForm({
   function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!source) {
-      toast.error("Pick a chart first")
+      toast.error(k.pickChartFirst)
       return
     }
     op.start(() =>
@@ -628,24 +636,22 @@ export function HelmUpgradeForm({
 
   return (
     <div className="flex flex-col gap-5">
-      <form onSubmit={submit} className="flex flex-col gap-5" aria-label="Upgrade release">
+      <form onSubmit={submit} className="flex flex-col gap-5" aria-label={k.upgradeForm}>
         <ChartPicker environmentId={environmentId} repos={repos} value={picked} onChange={patchChoice} versions={versions} />
         {currentValues === null ? (
-          <p className="text-sm text-muted-foreground">
-            The current values are kept (--reset-then-reuse-values). Only administrators can see and change them.
-          </p>
+          <p className="text-sm text-muted-foreground">{k.valuesKept}</p>
         ) : (
           <ValuesEditor
             id={`${uid}-values`}
             value={values}
             onChange={setValues}
-            description="The complete user-supplied values for the new revision (prefilled with the current ones). They replace the current values (--reset-values)."
+            description={k.upgradeValuesHelp}
           />
         )}
         <ReleaseOptions value={options} onChange={(p) => setOptions((o) => ({ ...o, ...p }))} />
         <Button type="submit" className="self-start" disabled={op.busy || !source}>
           <RocketIcon data-icon="inline-start" />
-          {op.busy ? "Upgrading…" : "Upgrade"}
+          {op.busy ? k.upgrading : t.kubernetes.helm.upgrade}
         </Button>
       </form>
       {op.operation ? (
@@ -676,6 +682,8 @@ export function HelmRollbackForm({
   /** Earlier revisions to offer, newest first. */
   revisions: { revision: number; label: string }[]
 }) {
+  const { t } = useI18n()
+  const k = t.kubernetes.charts
   const uid = React.useId()
   const router = useRouter()
   const [chosen, setRevision] = React.useState("")
@@ -684,7 +692,7 @@ export function HelmRollbackForm({
   const [options, setOptions] = React.useState(DEFAULT_OPTIONS)
   const op = useOperation()
 
-  if (!revisions.length) return <p className="text-sm text-muted-foreground">There is no earlier revision to roll back to.</p>
+  if (!revisions.length) return <p className="text-sm text-muted-foreground">{k.noEarlierRevision}</p>
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -702,9 +710,9 @@ export function HelmRollbackForm({
 
   return (
     <div className="flex flex-col gap-5">
-      <form onSubmit={submit} className="flex flex-col gap-5" aria-label="Roll back release">
+      <form onSubmit={submit} className="flex flex-col gap-5" aria-label={k.rollBackForm}>
         <Field className="max-w-md">
-          <FieldLabel htmlFor={`${uid}-revision`}>Revision</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-revision`}>{t.kubernetes.helm.revision}</FieldLabel>
           <Select value={revision} onValueChange={setRevision}>
             <SelectTrigger id={`${uid}-revision`} className="w-full">
               <SelectValue />
@@ -717,12 +725,12 @@ export function HelmRollbackForm({
               ))}
             </SelectContent>
           </Select>
-          <FieldDescription>Creates a new revision with that revision&apos;s chart and values.</FieldDescription>
+          <FieldDescription>{k.rollBackHelp}</FieldDescription>
         </Field>
         <ReleaseOptions value={options} onChange={(p) => setOptions((o) => ({ ...o, ...p }))} showAtomic={false} />
         <Button type="submit" variant="outline" className="self-start" disabled={op.busy || !revision}>
           <HistoryIcon data-icon="inline-start" />
-          {op.busy ? "Rolling back…" : "Roll back"}
+          {op.busy ? k.rollingBack : t.kubernetes.helm.rollBack}
         </Button>
       </form>
       {op.operation ? (

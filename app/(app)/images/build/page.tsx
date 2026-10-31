@@ -8,14 +8,17 @@ import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { timeAgo } from "@/lib/format"
 import { EMPTY_BUILD_FORM, type BuildFormValues } from "@/lib/image-build"
 import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
+import type { I18n } from "@/lib/i18n"
+import { getI18n } from "@/lib/i18n/server"
 import { requirePermission } from "@/lib/server/action"
 import { getCurrentEnvironment } from "@/lib/server/environments"
 import { getBuild, listBuilds, type BuildRecord, type BuildSummary } from "@/lib/server/images/builds"
 
-export const metadata: Metadata = { title: "Build image" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.images.build.title }
+}
 
 const lines = (record: Record<string, string>) =>
   Object.entries(record)
@@ -43,14 +46,18 @@ function rebuildValues(build: BuildRecord): BuildFormValues {
   }
 }
 
-function duration(b: BuildSummary) {
+function duration(b: BuildSummary, { t, format }: I18n) {
   if (!b.finishedAt) return null
   const s = Math.max(0, Math.round((Date.parse(b.finishedAt) - Date.parse(b.startedAt)) / 1000))
-  return s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`
+  return s >= 60
+    ? format(t.images.build.durationMinutes, { minutes: Math.floor(s / 60), seconds: s % 60 })
+    : format(t.images.build.durationSeconds, { seconds: s })
 }
 
 export default async function BuildImagePage({ searchParams }: PageProps<"/images/build">) {
   await requirePermission("manage")
+  const i18n = await getI18n()
+  const { t } = i18n
   const env = await getCurrentEnvironment()
   const { from } = await searchParams
   const fromId = typeof from === "string" && /^\d{1,12}$/.test(from) ? Number(from) : null
@@ -60,13 +67,13 @@ export default async function BuildImagePage({ searchParams }: PageProps<"/image
       <Button asChild variant="link" size="sm" className="h-auto w-fit p-0 text-muted-foreground">
         <Link href="/images">
           <ArrowLeftIcon data-icon="inline-start" />
-          Images
+          {t.nav.pages.images}
         </Link>
       </Button>
-      <h2 className="text-xl font-semibold tracking-tight">Build image</h2>
+      <h2 className="text-xl font-semibold tracking-tight">{t.images.build.title}</h2>
       {env && env.type !== "kubernetes" ? (
         <p className="text-sm text-muted-foreground">
-          Builds with Docker on <span className="font-medium text-foreground">{env.name}</span>; the image stays there.
+          {i18n.rich(t.images.build.description, { environment: <span className="font-medium text-foreground">{env.name}</span> })}
         </p>
       ) : null}
     </div>
@@ -91,8 +98,8 @@ export default async function BuildImagePage({ searchParams }: PageProps<"/image
     status: b.status,
     error: b.error,
     imageId: b.imageId,
-    startedLabel: timeAgo(b.startedAt),
-    duration: duration(b),
+    startedLabel: i18n.timeAgo(b.startedAt),
+    duration: duration(b, i18n),
   }))
 
   return (
@@ -107,8 +114,8 @@ export default async function BuildImagePage({ searchParams }: PageProps<"/image
       <div className="px-4 lg:px-6">
         <Card>
           <CardHeader>
-            <CardTitle>Recent builds</CardTitle>
-            <CardDescription>The last builds on {env.name}, with their output.</CardDescription>
+            <CardTitle>{t.images.build.recentBuilds}</CardTitle>
+            <CardDescription>{i18n.format(t.images.build.recentBuildsDescription, { environment: env.name })}</CardDescription>
           </CardHeader>
           <CardContent>
             <ImageBuildHistory builds={rows} />

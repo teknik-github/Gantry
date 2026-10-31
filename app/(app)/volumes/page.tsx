@@ -3,15 +3,18 @@ import type { Metadata } from "next"
 import { VolumesTable, type VolumeRow } from "@/components/gantry/volumes-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
-import { timeAgo } from "@/lib/format"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getDocker, getPermissions } from "@/lib/server/environments"
 import { tryDocker } from "@/lib/server/views"
 
-export const metadata: Metadata = { title: "Volumes" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.volumes }
+}
 
 export default async function VolumesPage() {
   await requireUser()
+  const { t, format, timeAgo } = await getI18n()
   const can = await getPermissions()
   const result = await tryDocker(async () => {
     const api = await getDocker()
@@ -22,7 +25,7 @@ export default async function VolumesPage() {
   if (result.error !== undefined) {
     return (
       <PageBody>
-        <PageHeader title="Volumes" />
+        <PageHeader title={t.nav.pages.volumes} />
         <DockerUnavailable message={result.error} />
       </PageBody>
     )
@@ -52,7 +55,7 @@ export default async function VolumesPage() {
 
   return (
     <PageBody>
-      <PageHeader title="Volumes" description={`${rows.length} volume(s)`} />
+      <PageHeader title={t.nav.pages.volumes} description={format(t.volumes.count, { count: rows.length })} />
       <VolumesTable data={rows} canManage={can.manage} canBrowse={can.operate} />
     </PageBody>
   )

@@ -140,7 +140,7 @@ export function DataTable<T extends RowData>({
   emptyMessage?: string
   pageSize?: number
   selection?: TableSelection<T>
-  /** Names shown in the Columns menu, by column id (default: the id). */
+  /** Translated names for the Columns menu, by column id (English shows the ids). */
   columnLabels?: Record<string, string>
 }) {
   const i18n = useI18n()
@@ -257,7 +257,8 @@ export function DataTable<T extends RowData>({
                     checked={column.getIsVisible()}
                     onCheckedChange={(value) => column.toggleVisibility(!!value)}
                   >
-                    {columnLabels?.[column.id] ?? column.id}
+                    {/* English keeps showing the column ids, as it always did. */}
+                    {(i18n.locale !== "en" && columnLabels?.[column.id]) || column.id}
                   </DropdownMenuCheckboxItem>
                 ))}
             </DropdownMenuContent>

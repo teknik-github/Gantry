@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
+import { useI18n } from "@/lib/i18n/client"
 import type { DiffResult } from "@/lib/kubernetes/diff"
 import { cn } from "@/lib/utils"
 
@@ -67,6 +68,8 @@ export function YamlEditor({
   yaml: string
   resourceVersion: string
 }) {
+  const { t, format, rich } = useI18n()
+  const k = t.kubernetes.edit
   const uid = React.useId()
   const router = useRouter()
   const [text, setText] = React.useState(yaml)
@@ -81,7 +84,7 @@ export function YamlEditor({
   function onReview() {
     setProblem(null)
     startTransition(async () => {
-      const res = await reviewKubeEdit(input).catch(() => ({ error: "Request failed. Check your connection." }) as EditResult)
+      const res = await reviewKubeEdit(input).catch(() => ({ error: t.common.errors.requestFailed }) as EditResult)
       if (res.error) {
         setReview(null)
         setProblem({ message: res.error, conflict: Boolean(res.conflict) })
@@ -94,14 +97,14 @@ export function YamlEditor({
   function onApply() {
     setProblem(null)
     startTransition(async () => {
-      const res = await applyKubeEdit(input).catch(() => ({ error: "Request failed. Check your connection." }) as EditResult)
+      const res = await applyKubeEdit(input).catch(() => ({ error: t.common.errors.requestFailed }) as EditResult)
       if (res.error) {
         setProblem({ message: res.error, conflict: Boolean(res.conflict) })
         if (res.conflict) setReview(null)
         return
       }
       // The action refreshes the page: it reloads the object and the editor restarts at the new version.
-      toast.success(res.message ?? `${kind} ${name} updated`)
+      toast.success(res.message ?? format(k.updated, { kind, name }))
     })
   }
 
@@ -116,21 +119,21 @@ export function YamlEditor({
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-destructive">
               <CircleAlertIcon className="size-4" />
-              {problem.conflict ? "Conflict: the object changed" : "Not applied"}
+              {problem.conflict ? k.conflictTitle : k.notApplied}
             </CardTitle>
             <CardDescription className="break-words">{problem.message}</CardDescription>
             {problem.conflict ? (
               <CardAction>
                 <Button variant="outline" size="sm" onClick={onReload} disabled={reloading}>
                   <RefreshCwIcon data-icon="inline-start" className={reloading ? "animate-spin" : undefined} />
-                  Load latest version
+                  {k.loadLatest}
                 </Button>
               </CardAction>
             ) : null}
           </CardHeader>
           {problem.conflict ? (
             <CardContent className="text-sm text-muted-foreground">
-              Loading the latest version replaces your edits; copy them first if you want to keep them.
+              {k.loadLatestHelp}
             </CardContent>
           ) : null}
         </Card>
@@ -149,20 +152,18 @@ export function YamlEditor({
           wrap="off"
         />
         <FieldDescription>
-          Status and server-managed metadata are left out. Saved as a whole (like <code>kubectl replace</code>) at
-          resourceVersion {resourceVersion}: fields you delete are removed, and a change made by someone else in the
-          meantime is reported as a conflict instead of being overwritten.
+          {rich(k.yamlHelp, { command: <code>kubectl replace</code>, version: resourceVersion })}
         </FieldDescription>
       </Field>
 
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" onClick={onReview} disabled={pending}>
           <FileDiffIcon data-icon="inline-start" />
-          {pending && !reviewed ? "Checking…" : "Review changes"}
+          {pending && !reviewed ? k.checking : k.review}
         </Button>
         <Button type="button" onClick={onApply} disabled={pending || !reviewed || reviewed.unchanged}>
           <SaveIcon data-icon="inline-start" />
-          {pending && reviewed ? "Applying…" : "Apply changes"}
+          {pending && reviewed ? k.applying : k.applyChanges}
         </Button>
         {text !== yaml ? (
           <Button
@@ -175,23 +176,26 @@ export function YamlEditor({
             }}
             disabled={pending}
           >
-            Discard edits
+            {k.discard}
           </Button>
         ) : null}
       </div>
 
       {review?.ok && review.text !== text ? (
-        <FieldError>The YAML changed after the review. Review the changes again before applying.</FieldError>
+        <FieldError>{k.staleReview}</FieldError>
       ) : null}
 
       {reviewed ? (
         <Card>
           <CardHeader>
-            <CardTitle>Changes</CardTitle>
+            <CardTitle>{k.changes}</CardTitle>
             <CardDescription>
               {reviewed.unchanged
-                ? "No changes: the server would store the object as it is."
-                : `Server-side dry run compared with the live object: ${reviewed.diff?.added ?? 0} line(s) added, ${reviewed.diff?.removed ?? 0} removed.${reviewed.diff?.approximate ? " (Large change: shown as a full replacement.)" : ""}`}
+                ? k.unchanged
+                : format(reviewed.diff?.approximate ? k.diffSummaryApproximate : k.diffSummary, {
+                    added: reviewed.diff?.added ?? 0,
+                    removed: reviewed.diff?.removed ?? 0,
+                  })}
             </CardDescription>
           </CardHeader>
           {reviewed.diff && !reviewed.unchanged ? (

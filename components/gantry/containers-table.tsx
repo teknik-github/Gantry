@@ -55,7 +55,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { timeAgo } from "@/lib/format"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 import type { ContainerUpdate } from "@/lib/image-updates"
 import type { ContainerAction } from "@/lib/server/docker/api"
 
@@ -75,10 +76,10 @@ export type ContainerRow = {
 
 const helper = columnHelperFor<ContainerRow>()
 
-function buildColumns(can: ContainerRights) {
+function buildColumns(can: ContainerRights, t: I18n["t"]) {
   return helper.columns([
     helper.accessor("name", {
-      header: ({ column }) => <SortHeader column={column} title="Name" />,
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.name} />,
       cell: ({ row }) => (
         <Link
           href={`/containers/${row.original.id}`}
@@ -90,11 +91,11 @@ function buildColumns(can: ContainerRights) {
       enableHiding: false,
     }),
     helper.accessor("state", {
-      header: ({ column }) => <SortHeader column={column} title="State" />,
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.state} />,
       cell: ({ row }) => <StateBadge state={row.original.state} />,
     }),
     helper.accessor("image", {
-      header: ({ column }) => <SortHeader column={column} title="Image" />,
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.image} />,
       cell: ({ row }) => (
         <div className="flex max-w-72 items-center gap-1.5">
           <Mono className="truncate">{row.original.image}</Mono>
@@ -103,11 +104,11 @@ function buildColumns(can: ContainerRights) {
       ),
     }),
     helper.accessor("stack", {
-      header: "Stack",
+      header: t.common.fields.stack,
       cell: ({ row }) => row.original.stack ?? <span className="text-muted-foreground">—</span>,
     }),
     helper.accessor("ports", {
-      header: "Ports",
+      header: t.common.fields.ports,
       enableSorting: false,
       cell: ({ row }) =>
         row.original.ports.length ? (
@@ -123,7 +124,7 @@ function buildColumns(can: ContainerRights) {
         ),
     }),
     helper.accessor("created", {
-      header: ({ column }) => <SortHeader column={column} title="Created" />,
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.created} />,
       cell: ({ row }) => <span className="text-muted-foreground">{row.original.createdLabel}</span>,
     }),
     helper.display({
@@ -135,16 +136,17 @@ function buildColumns(can: ContainerRights) {
 }
 
 function UpdateBadge({ update }: { update: ContainerRow["update"] }) {
+  const { t, format } = useI18n()
   if (update?.status === "update") {
     return (
       <Badge
         variant="outline"
         className="shrink-0 gap-1 border-amber-500/50 px-1.5 text-amber-700 dark:text-amber-400"
-        title={`A newer image is available for ${update.reference}`}
+        title={format(t.containers.updateTitle, { reference: update.reference })}
         data-testid="update-badge"
       >
         <ArrowUpCircleIcon />
-        update
+        {t.containers.updateBadge}
       </Badge>
     )
   }
@@ -152,7 +154,7 @@ function UpdateBadge({ update }: { update: ContainerRow["update"] }) {
   if (update?.status === "unknown" && update.reason && !update.reason.startsWith("Built or loaded locally")) {
     return (
       <Badge variant="outline" className="shrink-0 px-1.5 text-muted-foreground" title={update.reason}>
-        unchecked
+        {t.containers.unchecked}
       </Badge>
     )
   }
@@ -160,6 +162,8 @@ function UpdateBadge({ update }: { update: ContainerRow["update"] }) {
 }
 
 function CheckUpdatesButton({ lastChecked }: { lastChecked: number | null }) {
+  const i18n = useI18n()
+  const { t } = i18n
   const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   return (
@@ -168,10 +172,10 @@ function CheckUpdatesButton({ lastChecked }: { lastChecked: number | null }) {
       variant="outline"
       disabled={pending}
       onClick={() => run(() => checkForUpdates(environmentId))}
-      title={lastChecked ? `Last checked ${timeAgo(new Date(lastChecked))}` : "Not checked yet"}
+      title={lastChecked ? i18n.format(t.containers.lastChecked, { time: i18n.timeAgo(new Date(lastChecked)) }) : t.containers.notChecked}
     >
       <RefreshCwIcon data-icon="inline-start" className={pending ? "animate-spin" : undefined} />
-      <span className="hidden lg:inline">{pending ? "Checking…" : "Check updates"}</span>
+      <span className="hidden lg:inline">{pending ? t.containers.checking : t.containers.checkUpdates}</span>
     </Button>
   )
 }
@@ -191,8 +195,9 @@ export function ContainersTable({
   /** Shows the "Check updates" button (undefined hides it). */
   lastUpdateCheck?: number | null
 }) {
+  const { t } = useI18n()
   const rights = React.useMemo(() => ({ operate: can.operate, manage: can.manage }), [can.operate, can.manage])
-  const columns = React.useMemo(() => buildColumns(rights), [rights])
+  const columns = React.useMemo(() => buildColumns(rights, t), [rights, t])
   const selection: TableSelection<ContainerRow> | undefined = rights.operate
     ? {
         rowLabel: (r) => r.name,
@@ -205,9 +210,10 @@ export function ContainersTable({
       columns={columns}
       getRowId={(r) => r.id}
       selection={selection}
-      searchText={(r) => `${r.name} ${r.image} ${r.state} ${r.stack ?? ""} ${r.update?.status === "update" ? "update available" : ""}`}
-      searchPlaceholder="Search containers…"
-      emptyMessage="No containers."
+      searchText={(r) => `${r.name} ${r.image} ${r.state} ${r.stack ?? ""} ${r.update?.status === "update" ? t.containers.updateAvailable : ""}`}
+      searchPlaceholder={t.containers.searchPlaceholder}
+      emptyMessage={t.containers.empty}
+      columnLabels={t.containers.columnMenu}
       pageSize={pageSize}
       toolbar={
         <>
@@ -229,18 +235,19 @@ const APPLIES: Record<ContainerAction, (state: string) => boolean> = {
   kill: (s) => s === "running" || s === "paused" || s === "restarting",
 }
 
-const BULK_BUTTONS: { action: ContainerAction; label: string; icon: React.ReactNode }[] = [
-  { action: "start", label: "Start", icon: <PlayIcon data-icon="inline-start" /> },
-  { action: "stop", label: "Stop", icon: <SquareIcon data-icon="inline-start" /> },
-  { action: "restart", label: "Restart", icon: <RotateCwIcon data-icon="inline-start" /> },
-  { action: "pause", label: "Pause", icon: <PauseIcon data-icon="inline-start" /> },
-  { action: "unpause", label: "Resume", icon: <PlayIcon data-icon="inline-start" /> },
-  { action: "kill", label: "Kill", icon: <ZapIcon data-icon="inline-start" /> },
+const BULK_BUTTONS: { action: ContainerAction; label: (t: I18n["t"]) => string; icon: React.ReactNode }[] = [
+  { action: "start", label: (t) => t.common.actions.start, icon: <PlayIcon data-icon="inline-start" /> },
+  { action: "stop", label: (t) => t.common.actions.stop, icon: <SquareIcon data-icon="inline-start" /> },
+  { action: "restart", label: (t) => t.common.actions.restart, icon: <RotateCwIcon data-icon="inline-start" /> },
+  { action: "pause", label: (t) => t.containers.actions.pause, icon: <PauseIcon data-icon="inline-start" /> },
+  { action: "unpause", label: (t) => t.containers.actions.resume, icon: <PlayIcon data-icon="inline-start" /> },
+  { action: "kill", label: (t) => t.containers.actions.kill, icon: <ZapIcon data-icon="inline-start" /> },
 ]
 
 const toTarget = (r: ContainerRow) => ({ id: r.id, name: r.name })
 
 function BulkActions({ selected, clear, canManage }: { selected: ContainerRow[]; clear: () => void; canManage: boolean }) {
+  const { t, format } = useI18n()
   const environmentId = useEnvironmentId()
   const [force, setForce] = React.useState(false)
   const [volumes, setVolumes] = React.useState(false)
@@ -253,7 +260,7 @@ function BulkActions({ selected, clear, canManage }: { selected: ContainerRow[];
         return (
           <BulkButton
             key={action}
-            label={label}
+            label={label(t)}
             icon={icon}
             count={targets.length}
             onRun={() => bulkContainerAction(targets.map(toTarget), action, environmentId)}
@@ -264,23 +271,23 @@ function BulkActions({ selected, clear, canManage }: { selected: ContainerRow[];
       {canManage ? <BulkUpdate selected={selected} clear={clear} /> : null}
       {canManage ? (
         <BulkConfirm
-          label="Remove"
+          label={t.common.actions.remove}
           icon={<Trash2Icon data-icon="inline-start" />}
-          title={`Remove ${selected.length} container(s)?`}
-          description="These containers and their writable layers will be deleted. This cannot be undone."
+          title={format(t.containers.bulkRemoveTitle, { count: selected.length })}
+          description={t.containers.bulkRemoveDescription}
           names={selected.map((r) => r.name)}
-          warning={running && !force ? `${running} of them are running and will fail unless you force it.` : null}
+          warning={running && !force ? format(t.containers.bulkRemoveWarning, { count: running }) : null}
           onConfirm={() => removeContainers(selected.map(toTarget), { force, volumes }, environmentId)}
           onDone={clear}
           extra={
             <div className="flex flex-col gap-3">
               <Label className="font-normal">
                 <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
-                Force (stop running ones first)
+                {t.containers.forceRunning}
               </Label>
               <Label className="font-normal">
                 <Checkbox checked={volumes} onCheckedChange={(v) => setVolumes(v === true)} />
-                Also remove anonymous volumes
+                {t.containers.removeVolumes}
               </Label>
             </div>
           }
@@ -291,21 +298,18 @@ function BulkActions({ selected, clear, canManage }: { selected: ContainerRow[];
 }
 
 function BulkUpdate({ selected, clear }: { selected: ContainerRow[]; clear: () => void }) {
+  const { t, format } = useI18n()
   const environmentId = useEnvironmentId()
   const targets = selected.filter((r) => r.update?.status === "update")
   const compose = targets.filter((r) => r.stack).length
   return (
     <BulkConfirm
-      label="Update"
+      label={t.common.actions.update}
       icon={<ArrowUpCircleIcon data-icon="inline-start" />}
-      title={`Update ${targets.length} container(s)?`}
-      description="Each one pulls its image tag and is recreated with the same settings. If anything fails, the old container is put back."
+      title={format(t.containers.bulkUpdateTitle, { count: targets.length })}
+      description={t.containers.bulkUpdateDescription}
       names={targets.map((r) => `${r.name} (${r.image})`)}
-      warning={
-        compose
-          ? `${compose} belong to a compose project; its next "docker compose up" uses the compose file again.`
-          : null
-      }
+      warning={compose ? format(t.containers.bulkUpdateCompose, { count: compose }) : null}
       destructive={false}
       onConfirm={() => bulkPullAndRecreate(targets.map(toTarget), environmentId)}
       onDone={clear}
@@ -314,6 +318,7 @@ function BulkUpdate({ selected, clear }: { selected: ContainerRow[]; clear: () =
 }
 
 function RowActions({ row, can }: { row: ContainerRow; can: ContainerRights }) {
+  const { t, format } = useI18n()
   const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   const [confirmRemove, setConfirmRemove] = React.useState(false)
@@ -323,8 +328,11 @@ function RowActions({ row, can }: { row: ContainerRow; can: ContainerRights }) {
 
   const running = row.state === "running"
   const paused = row.state === "paused"
-  const act = (action: ContainerAction, label: string) =>
-    run(() => containerAction(row.id, action, environmentId), `${row.name}: ${label}`)
+  const act = (action: ContainerAction) =>
+    run(
+      () => containerAction(row.id, action, environmentId),
+      format(t.containers.actionDone, { name: row.name, action: t.containers.done[action] })
+    )
 
   return (
     <div className="flex justify-end">
@@ -332,59 +340,59 @@ function RowActions({ row, can }: { row: ContainerRow; can: ContainerRights }) {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" disabled={pending}>
             <EllipsisVerticalIcon />
-            <span className="sr-only">Open menu</span>
+            <span className="sr-only">{t.common.actions.openMenu}</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuItem asChild>
             <Link href={`/containers/${row.id}`}>
               <FileTextIcon />
-              {can.operate ? "Details & logs" : "Details"}
+              {can.operate ? t.containers.actions.detailsLogs : t.containers.actions.details}
             </Link>
           </DropdownMenuItem>
           {can.manage && running ? (
             <DropdownMenuItem asChild>
               <Link href={`/containers/${row.id}?tab=console`}>
                 <TerminalSquareIcon />
-                Console
+                {t.containers.actions.console}
               </Link>
             </DropdownMenuItem>
           ) : null}
           {can.operate ? <DropdownMenuSeparator /> : null}
           {can.operate && !running && !paused ? (
-            <DropdownMenuItem onSelect={() => act("start", "started")}>
+            <DropdownMenuItem onSelect={() => act("start")}>
               <PlayIcon />
-              Start
+              {t.common.actions.start}
             </DropdownMenuItem>
           ) : null}
           {can.operate && running ? (
-            <DropdownMenuItem onSelect={() => act("stop", "stopped")}>
+            <DropdownMenuItem onSelect={() => act("stop")}>
               <SquareIcon />
-              Stop
+              {t.common.actions.stop}
             </DropdownMenuItem>
           ) : null}
           {can.operate ? (
-            <DropdownMenuItem onSelect={() => act("restart", "restarted")}>
+            <DropdownMenuItem onSelect={() => act("restart")}>
               <RotateCwIcon />
-              Restart
+              {t.common.actions.restart}
             </DropdownMenuItem>
           ) : null}
           {can.operate && running ? (
-            <DropdownMenuItem onSelect={() => act("pause", "paused")}>
+            <DropdownMenuItem onSelect={() => act("pause")}>
               <PauseIcon />
-              Pause
+              {t.containers.actions.pause}
             </DropdownMenuItem>
           ) : null}
           {can.operate && paused ? (
-            <DropdownMenuItem onSelect={() => act("unpause", "resumed")}>
+            <DropdownMenuItem onSelect={() => act("unpause")}>
               <PlayIcon />
-              Resume
+              {t.containers.actions.resume}
             </DropdownMenuItem>
           ) : null}
           {can.operate && running ? (
-            <DropdownMenuItem onSelect={() => act("kill", "killed")}>
+            <DropdownMenuItem onSelect={() => act("kill")}>
               <ZapIcon />
-              Kill
+              {t.containers.actions.kill}
             </DropdownMenuItem>
           ) : null}
           {can.manage ? (
@@ -392,11 +400,11 @@ function RowActions({ row, can }: { row: ContainerRow; can: ContainerRights }) {
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => setConfirmPull(true)}>
                 <CloudDownloadIcon />
-                Pull & recreate
+                {t.containers.actions.pullRecreate}
               </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onSelect={() => setConfirmRemove(true)}>
                 <Trash2Icon />
-                Remove
+                {t.common.actions.remove}
               </DropdownMenuItem>
             </>
           ) : null}
@@ -415,19 +423,19 @@ function RowActions({ row, can }: { row: ContainerRow; can: ContainerRights }) {
       <ConfirmAction
         open={confirmRemove}
         onOpenChange={setConfirmRemove}
-        title={`Remove ${row.name}?`}
-        description="The container and its writable layer will be deleted. This cannot be undone."
-        confirmLabel="Remove"
+        title={format(t.containers.removeTitle, { name: row.name })}
+        description={t.containers.removeDescription}
+        confirmLabel={t.common.actions.remove}
         onConfirm={() => removeContainer(row.id, { force, volumes }, environmentId)}
         extra={
           <div className="flex flex-col gap-3">
             <Label className="font-normal">
               <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
-              Force (stop it first if running)
+              {t.containers.forceOne}
             </Label>
             <Label className="font-normal">
               <Checkbox checked={volumes} onCheckedChange={(v) => setVolumes(v === true)} />
-              Also remove anonymous volumes
+              {t.containers.removeVolumes}
             </Label>
           </div>
         }
@@ -437,75 +445,77 @@ function RowActions({ row, can }: { row: ContainerRow; can: ContainerRights }) {
 }
 
 function CreateContainerDialog() {
+  const { t } = useI18n()
+  const text = t.containers.form
   return (
     <FormDialog
       trigger={
         <Button size="sm">
           <PlusIcon data-icon="inline-start" />
-          <span className="hidden lg:inline">Add container</span>
+          <span className="hidden lg:inline">{text.add}</span>
         </Button>
       }
-      title="Create container"
-      description="Run a new container from an image."
-      submitLabel="Create"
+      title={text.createTitle}
+      description={text.createDescription}
+      submitLabel={t.common.actions.create}
       action={createContainer}
       className="sm:max-w-lg"
     >
       {(errors) => (
         <FieldGroup className="max-h-[65vh] gap-4 overflow-y-auto pr-1">
           <Field data-invalid={errors.image ? true : undefined}>
-            <FieldLabel htmlFor="c-image">Image</FieldLabel>
+            <FieldLabel htmlFor="c-image">{t.common.fields.image}</FieldLabel>
             <Input id="c-image" name="image" placeholder="nginx:latest" required />
             <FieldError>{errors.image?.[0]}</FieldError>
           </Field>
           <Field data-invalid={errors.name ? true : undefined}>
-            <FieldLabel htmlFor="c-name">Name</FieldLabel>
-            <Input id="c-name" name="name" placeholder="web (optional)" />
+            <FieldLabel htmlFor="c-name">{t.common.fields.name}</FieldLabel>
+            <Input id="c-name" name="name" placeholder={text.namePlaceholder} />
             <FieldError>{errors.name?.[0]}</FieldError>
           </Field>
           <Field data-invalid={errors.ports ? true : undefined}>
-            <FieldLabel htmlFor="c-ports">Port mappings</FieldLabel>
+            <FieldLabel htmlFor="c-ports">{text.portMappings}</FieldLabel>
             <Textarea id="c-ports" name="ports" placeholder={"8080:80\n127.0.0.1:5432:5432/tcp"} rows={2} className="font-mono text-xs" />
-            <FieldDescription>One per line: host:container[/tcp|udp]</FieldDescription>
+            <FieldDescription>{text.portsHelp}</FieldDescription>
             <FieldError>{errors.ports?.[0]}</FieldError>
           </Field>
           <Field data-invalid={errors.env ? true : undefined}>
-            <FieldLabel htmlFor="c-env">Environment variables</FieldLabel>
+            <FieldLabel htmlFor="c-env">{text.envVars}</FieldLabel>
             <Textarea id="c-env" name="env" placeholder={"TZ=Asia/Jakarta\nNODE_ENV=production"} rows={3} className="font-mono text-xs" />
             <FieldError>{errors.env?.[0]}</FieldError>
           </Field>
           <Field data-invalid={errors.volumes ? true : undefined}>
-            <FieldLabel htmlFor="c-volumes">Volumes</FieldLabel>
+            <FieldLabel htmlFor="c-volumes">{text.volumes}</FieldLabel>
             <Textarea id="c-volumes" name="volumes" placeholder={"app-data:/data\n/srv/config:/etc/app:ro"} rows={2} className="font-mono text-xs" />
-            <FieldDescription>One per line: volume-or-host-path:/container/path[:ro]</FieldDescription>
+            <FieldDescription>{text.volumesHelp}</FieldDescription>
             <FieldError>{errors.volumes?.[0]}</FieldError>
           </Field>
           <Field>
-            <FieldLabel htmlFor="c-command">Command</FieldLabel>
-            <Input id="c-command" name="command" placeholder="(image default)" className="font-mono text-xs" />
+            <FieldLabel htmlFor="c-command">{text.command}</FieldLabel>
+            <Input id="c-command" name="command" placeholder={text.commandPlaceholder} className="font-mono text-xs" />
           </Field>
           <Field>
-            <FieldLabel htmlFor="c-restart">Restart policy</FieldLabel>
+            <FieldLabel htmlFor="c-restart">{text.restartPolicy}</FieldLabel>
             <Select name="restart" defaultValue="unless-stopped">
               <SelectTrigger id="c-restart" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="no">Never</SelectItem>
-                <SelectItem value="always">Always</SelectItem>
-                <SelectItem value="unless-stopped">Unless stopped</SelectItem>
-                <SelectItem value="on-failure">On failure</SelectItem>
+                <SelectItem value="no">{text.restartPolicies.no}</SelectItem>
+                <SelectItem value="always">{text.restartPolicies.always}</SelectItem>
+                <SelectItem value="unless-stopped">{text.restartPolicies["unless-stopped"]}</SelectItem>
+                <SelectItem value="on-failure">{text.restartPolicies["on-failure"]}</SelectItem>
               </SelectContent>
             </Select>
           </Field>
           <div className="flex flex-wrap gap-6">
             <Label className="font-normal">
               <Checkbox name="pull" value="on" defaultChecked />
-              Pull image first
+              {text.pullFirst}
             </Label>
             <Label className="font-normal">
               <Checkbox name="start" value="on" defaultChecked />
-              Start after creating
+              {text.startAfter}
             </Label>
           </div>
         </FieldGroup>

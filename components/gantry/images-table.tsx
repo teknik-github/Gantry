@@ -18,6 +18,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 
 export type ImageRow = {
   id: string
@@ -32,51 +34,53 @@ export type ImageRow = {
 
 const helper = columnHelperFor<ImageRow>()
 
-function buildColumns(canManage: boolean, canOperate: boolean) {
+function buildColumns(i18n: I18n, canManage: boolean, canOperate: boolean) {
+  const { t } = i18n
+  const c = t.images.columns
   return helper.columns([
     helper.accessor((r) => r.tags[0] ?? "<none>", {
       id: "tags",
-      header: ({ column }) => <SortHeader column={column} title="Tags" />,
+      header: ({ column }) => <SortHeader column={column} title={c.tags} />,
       cell: ({ row }) =>
         row.original.tags.length ? (
           <div className="flex max-w-96 flex-wrap gap-1">
-            {row.original.tags.map((t) => (
-              <Mono key={t} className="rounded bg-muted px-1.5 py-0.5">
-                {t}
+            {row.original.tags.map((tag) => (
+              <Mono key={tag} className="rounded bg-muted px-1.5 py-0.5">
+                {tag}
               </Mono>
             ))}
           </div>
         ) : (
           <Badge variant="outline" className="text-muted-foreground">
-            dangling
+            {t.images.dangling}
           </Badge>
         ),
       enableHiding: false,
     }),
     helper.accessor("shortId", {
-      header: "ID",
+      header: c.id,
       cell: ({ row }) => <Mono className="text-muted-foreground">{row.original.shortId}</Mono>,
     }),
     helper.accessor("inUse", {
-      header: ({ column }) => <SortHeader column={column} title="Used by" />,
+      header: ({ column }) => <SortHeader column={column} title={c.usedBy} />,
       cell: ({ row }) =>
         row.original.inUse > 0 ? (
-          <Badge variant="outline">{row.original.inUse} container(s)</Badge>
+          <Badge variant="outline">{i18n.format(t.images.containersCount, { count: row.original.inUse })}</Badge>
         ) : (
-          <span className="text-muted-foreground">Unused</span>
+          <span className="text-muted-foreground">{t.images.unused}</span>
         ),
     }),
     helper.display({
       id: "vulnerabilities",
-      header: "Vulnerabilities",
+      header: c.vulnerabilities,
       cell: ({ row }) => <VulnerabilityCell imageId={row.original.id} name={imageName(row.original)} />,
     }),
     helper.accessor("size", {
-      header: ({ column }) => <SortHeader column={column} title="Size" />,
+      header: ({ column }) => <SortHeader column={column} title={c.size} />,
       cell: ({ row }) => <span className="tabular-nums">{row.original.sizeLabel}</span>,
     }),
     helper.accessor("created", {
-      header: ({ column }) => <SortHeader column={column} title="Created" />,
+      header: ({ column }) => <SortHeader column={column} title={c.created} />,
       cell: ({ row }) => <span className="text-muted-foreground">{row.original.createdLabel}</span>,
     }),
     helper.display({
@@ -98,8 +102,10 @@ function buildColumns(canManage: boolean, canOperate: boolean) {
 }
 
 export function ImagesTable({ data, canManage, canOperate = false }: { data: ImageRow[]; canManage: boolean; canOperate?: boolean }) {
+  const i18n = useI18n()
+  const { t } = i18n
   const environmentId = useEnvironmentId()
-  const columns = React.useMemo(() => buildColumns(canManage, canOperate), [canManage, canOperate])
+  const columns = React.useMemo(() => buildColumns(i18n, canManage, canOperate), [i18n, canManage, canOperate])
   const selection = React.useMemo(() => imageSelection(canManage), [canManage])
   return (
     <DataTable
@@ -108,21 +114,22 @@ export function ImagesTable({ data, canManage, canOperate = false }: { data: Ima
       getRowId={(r) => r.id}
       selection={canOperate ? selection : undefined}
       searchText={(r) => `${r.tags.join(" ")} ${r.shortId}`}
-      searchPlaceholder="Search images…"
-      emptyMessage="No images."
+      searchPlaceholder={t.images.searchPlaceholder}
+      emptyMessage={t.images.empty}
+      columnLabels={{ ...t.images.columns, shortId: t.images.columns.id, inUse: t.images.columns.usedBy }}
       pageSize={20}
       toolbar={
         canManage ? (
           <>
             <ConfirmAction
-              title="Prune dangling images?"
-              description="Untagged images that no container uses will be deleted."
-              confirmLabel="Prune"
+              title={t.images.pruneTitle}
+              description={t.images.pruneDescription}
+              confirmLabel={t.images.prune}
               onConfirm={() => pruneImages(environmentId)}
             >
               <Button size="sm" variant="outline">
                 <EraserIcon data-icon="inline-start" />
-                <span className="hidden lg:inline">Prune</span>
+                <span className="hidden lg:inline">{t.images.prune}</span>
               </Button>
             </ConfirmAction>
             <PullImageDialog />
@@ -146,28 +153,30 @@ const imageSelection = (canManage: boolean): TableSelection<ImageRow> => ({
 })
 
 function BulkRemoveImages({ selected, clear }: { selected: ImageRow[]; clear: () => void }) {
+  const i18n = useI18n()
+  const { t } = i18n
   const environmentId = useEnvironmentId()
   const [force, setForce] = React.useState(false)
   const inUse = selected.filter((r) => r.inUse > 0).length
   const multiTag = selected.filter((r) => r.tags.length > 1).length
   const warnings = [
-    inUse ? `${inUse} in use by containers` : null,
-    !force && multiTag ? `${multiTag} with several tags (needs force)` : null,
+    inUse ? i18n.format(t.images.bulkInUse, { count: inUse }) : null,
+    !force && multiTag ? i18n.format(t.images.bulkMultiTag, { count: multiTag }) : null,
   ].filter(Boolean)
   return (
     <BulkConfirm
-      label="Remove"
+      label={t.common.actions.remove}
       icon={<Trash2Icon data-icon="inline-start" />}
-      title={`Remove ${selected.length} image(s)?`}
-      description="These images will be deleted from this environment."
+      title={i18n.format(t.images.bulkRemoveTitle, { count: selected.length })}
+      description={t.images.bulkRemoveDescription}
       names={selected.map(imageName)}
-      warning={warnings.length ? `Some may fail: ${warnings.join(", ")}.` : null}
+      warning={warnings.length ? i18n.format(t.images.bulkRemoveWarning, { reasons: warnings.join(", ") }) : null}
       onConfirm={() => removeImages(selected.map((r) => ({ id: r.id, name: imageName(r) })), force, environmentId)}
       onDone={clear}
       extra={
         <Label className="font-normal">
           <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
-          Force (remove even if tagged multiple times or used by stopped containers)
+          {t.images.force}
         </Label>
       }
     />
@@ -175,23 +184,25 @@ function BulkRemoveImages({ selected, clear }: { selected: ImageRow[]; clear: ()
 }
 
 function RemoveImage({ row }: { row: ImageRow }) {
+  const i18n = useI18n()
+  const { t } = i18n
   const environmentId = useEnvironmentId()
   const [force, setForce] = React.useState(false)
   return (
     <div className="flex justify-end">
       <ConfirmAction
-        title={`Remove ${row.tags[0] ?? row.shortId}?`}
-        description="The image will be deleted from this environment."
-        confirmLabel="Remove"
+        title={i18n.format(t.images.removeTitle, { name: row.tags[0] ?? row.shortId })}
+        description={t.images.removeDescription}
+        confirmLabel={t.common.actions.remove}
         onConfirm={() => removeImage(row.id, force, environmentId)}
         extra={
           <Label className="font-normal">
             <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
-            Force (remove even if tagged multiple times or used by stopped containers)
+            {t.images.force}
           </Label>
         }
       >
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Remove image">
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={t.images.removeLabel}>
           <Trash2Icon />
         </Button>
       </ConfirmAction>
@@ -200,24 +211,25 @@ function RemoveImage({ row }: { row: ImageRow }) {
 }
 
 function PullImageDialog() {
+  const { t } = useI18n()
   return (
     <FormDialog
       trigger={
         <Button size="sm">
           <DownloadIcon data-icon="inline-start" />
-          <span className="hidden lg:inline">Pull image</span>
+          <span className="hidden lg:inline">{t.images.pull.trigger}</span>
         </Button>
       }
-      title="Pull image"
-      description="Download an image from a registry. Large images can take a while."
-      submitLabel="Pull"
+      title={t.images.pull.title}
+      description={t.images.pull.description}
+      submitLabel={t.common.actions.pull}
       action={pullImage}
     >
       {(errors) => (
         <Field data-invalid={errors.image ? true : undefined}>
-          <FieldLabel htmlFor="image">Image</FieldLabel>
+          <FieldLabel htmlFor="image">{t.images.pull.image}</FieldLabel>
           <Input id="image" name="image" placeholder="nginx:latest" required autoFocus />
-          <FieldDescription>Defaults to the :latest tag when none is given.</FieldDescription>
+          <FieldDescription>{t.images.pull.help}</FieldDescription>
           <FieldError>{errors.image?.[0]}</FieldError>
         </Field>
       )}

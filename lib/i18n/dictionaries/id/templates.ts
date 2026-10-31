@@ -1,3 +1,92 @@
 import type { Dictionary } from "@/lib/i18n/dictionaries/types"
 
-export const templates: Dictionary["templates"] = {}
+export const templates: Dictionary["templates"] = {
+  list: {
+    descriptionManage:
+      "Stack compose siap pakai. Pilih satu, isi beberapa nilai, lalu template di-deploy sebagai stack yang bisa Anda edit nanti.",
+    descriptionView: "Stack compose siap pakai. Untuk men-deploy-nya Anda perlu peran manager di environment ini.",
+    newTemplate: "Template baru",
+  },
+  gallery: {
+    searchPlaceholder: "Cari template…",
+    search: "Cari template",
+    category: "Kategori",
+    all: "Semua",
+    custom: "Kustom",
+    customBadge: "kustom",
+    templateLabel: "Template {title}",
+    noDescription: "Tidak ada deskripsi",
+    services: { one: "{count} service", other: "{count} service" },
+    noMatch: "Tidak ada template yang cocok.",
+  },
+  detail: {
+    pageTitle: "Template {title}",
+    template: "Template",
+    website: "Situs web",
+    deployDescription: "Membuat stack di {environment} dan menjalankan {command}.",
+    deployNeedsManager: "Untuk men-deploy template Anda perlu peran manager di environment ini.",
+    composeFile: "File compose",
+    composeDescription: "{variables} diisi dari .env milik stack.",
+  },
+  deploy: {
+    stackName: "Nama stack",
+    stackNameDescription: "Nama project compose. Huruf kecil, angka, - dan _.",
+    settings: "Pengaturan",
+    settingsDescription: "Ditulis ke .env milik stack; Anda bisa mengubahnya nanti di halaman stack.",
+    deploying: "Men-deploy…",
+    generatedWhenEmpty: "Dibuat otomatis jika kosong",
+    hide: "Sembunyikan {name}",
+    show: "Tampilkan {name}",
+    generate: "Buat {name}",
+    generateTitle: "Buat password acak",
+    domainOptional: "Domain (opsional)",
+    domainProxyOff: "Disimpan sebagai proxy host; baru dilayani setelah proxy diaktifkan (halaman Proxy).",
+    domainProxyOn: "Membuat proxy host setelah deploy. Arahkan DNS domain ke host Docker ini.",
+    domain: "Domain",
+    service: "Service",
+    tls: "TLS",
+  },
+  editor: {
+    newTitle: "Template baru",
+    newDescription:
+      "File docker compose Anda sendiri, bisa dipakai ulang di environment mana pun. Tip: stack yang sudah ada bisa disimpan sebagai template dari halamannya.",
+    editTitle: "Edit template",
+    title: "Judul",
+    titlePlaceholder: "API internal",
+    category: "Kategori",
+    descriptionPlaceholder: "Apa yang dijalankan",
+    stackName: "Nama stack default",
+    stackNameDescription: "Disarankan saat deploy; bisa diubah setiap kali.",
+    composeFile: "File compose",
+    composeDescription:
+      "Gunakan {ask} untuk nilai yang ditanyakan saat deploy, {withDefault} untuk nilai default dan {required} untuk nilai wajib.",
+    defaultValues: "Nilai default",
+    envPlaceholder: "# nilai default .env, mis.\nHTTP_PORT=8080",
+    envDescription:
+      "Satu KEY=value per baris. Nama yang mengandung PASSWORD, SECRET, TOKEN atau berakhiran KEY menjadi kolom password (dibuat otomatis jika dikosongkan).",
+    asksFor: "Form deploy menanyakan:",
+    noVariables: "tidak ada (tanpa variabel)",
+    save: "Simpan template",
+  },
+  admin: {
+    deleteTitle: "Hapus template {title}?",
+    deleteDescription: "Stack yang di-deploy dari template ini tidak terpengaruh.",
+  },
+  messages: {
+    notFound: "Template tidak ditemukan",
+    pickExpose: "Pilih service dan port yang akan diekspos",
+    titleRequired: "Judul wajib diisi",
+    descriptionTooLong: "Maksimal 500 karakter",
+    reserved: {
+      one: "Ganti nama {names}: docker compose akan mengambilnya dari environment Gantry, bukan dari .env",
+      other: "Ganti nama {names}: docker compose akan mengambilnya dari environment Gantry, bukan dari .env",
+    },
+    exists: "Template bernama \"{title}\" sudah ada",
+    saved: "Template {title} disimpan",
+    onlyCustomEditable: "Hanya template kustom yang bisa diedit",
+    builtinNotDeletable: "Template bawaan tidak bisa dihapus",
+    deleted: "Template {title} dihapus",
+    stackNotFound: "Stack tidak ditemukan di environment ini",
+    savedAsTemplate: "Disimpan sebagai template {title}",
+  },
+}

@@ -44,6 +44,8 @@ import {
   type TopologyNode,
 } from "@/lib/topology"
 import { layoutTopology, type TopologyLayout } from "@/lib/topology-layout"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 
 const ALL = ":all"
 
@@ -57,24 +59,18 @@ function useMounted() {
   )
 }
 
-function edgeLabel(e: TopologyEdge) {
+function edgeLabel(e: TopologyEdge, t: I18n["t"]) {
   switch (e.kind) {
     case "network":
       return [e.ip, ...e.aliases].filter(Boolean).join(" · ") || null
     case "volume":
     case "bind":
-      return `${e.destination}${e.readOnly ? " (ro)" : ""}`
+      return `${e.destination}${e.readOnly ? t.topology.readOnlyShort : ""}`
     case "depends":
-      return SHORT_CONDITIONS[e.condition] ?? e.condition
+      return (t.topology.edgeConditions as Record<string, string>)[e.condition] ?? e.condition
     case "netns":
-      return "network stack"
+      return t.topology.networkStack
   }
-}
-
-const SHORT_CONDITIONS: Record<string, string> = {
-  service_started: "started",
-  service_healthy: "healthy",
-  service_completed_successfully: "completed",
 }
 
 const EDGE_COLOR: Record<Exclude<TopologyEdge["kind"], "network">, string> = {
@@ -109,7 +105,8 @@ function toFlow(
   titles: Map<string, string>,
   matches: Set<string>,
   searching: boolean,
-  selected: string | null
+  selected: string | null,
+  t: I18n["t"]
 ) {
   const parentOf = new Map<string, string>()
   for (const p of graph.projects) for (const id of p.containerIds) parentOf.set(id, p.id)
@@ -185,7 +182,7 @@ function toFlow(
       target,
       animated: e.kind === "depends",
       markerEnd: arrow ? { type: MarkerType.ArrowClosed, color, width: 14, height: 14 } : undefined,
-      data: { edge: e, route: layout.edges[e.id] ?? [], label: edgeLabel(e), color, emphasis },
+      data: { edge: e, route: layout.edges[e.id] ?? [], label: edgeLabel(e, t), color, emphasis },
     }
   })
   // Paint focused edges last so they sit on top of the others.
@@ -209,6 +206,8 @@ function minimapColor(node: Node) {
 }
 
 function Legend() {
+  const { t } = useI18n()
+  const text = t.topology.legend
   const item = (label: string, stroke: string, dash?: string) => (
     <span className="flex items-center gap-1.5">
       <svg width="22" height="6" aria-hidden>
@@ -219,10 +218,10 @@ function Legend() {
   )
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-md border bg-background/90 px-2 py-1 text-[11px] text-muted-foreground shadow-xs">
-      {item("network", networkColor("network"))}
-      {item("volume", "var(--muted-foreground)")}
-      {item("bind mount", "var(--muted-foreground)", "2 3")}
-      {item("depends on", EDGE_COLOR.depends, "5 3")}
+      {item(text.network, networkColor("network"))}
+      {item(text.volume, "var(--muted-foreground)")}
+      {item(text.bind, "var(--muted-foreground)", "2 3")}
+      {item(text.depends, EDGE_COLOR.depends, "5 3")}
     </div>
   )
 }
@@ -242,6 +241,7 @@ function Canvas({
   selected: string | null
   onSelect: (id: string | null) => void
 }) {
+  const { t } = useI18n()
   const { resolvedTheme } = useTheme()
   const searching = query.trim() !== ""
   const matches = React.useMemo(
@@ -249,8 +249,8 @@ function Canvas({
     [graph, query, searching]
   )
   const { nodes, edges } = React.useMemo(
-    () => toFlow(graph, layout, titles, matches, searching, selected),
-    [graph, layout, titles, matches, searching, selected]
+    () => toFlow(graph, layout, titles, matches, searching, selected, t),
+    [graph, layout, titles, matches, searching, selected, t]
   )
 
   return (
@@ -305,6 +305,8 @@ function Toolbar({
   setQuery: (q: string) => void
   matchIds: string[]
 }) {
+  const i18n = useI18n()
+  const text = i18n.t.topology.toolbar
   const { fitView } = useReactFlow()
   const hasStandalone = graph.containers.some((c) => c.project === null)
   const toggle = (key: "hideStopped" | "showBuiltinNetworks" | "showBindMounts", label: string) => (
@@ -322,11 +324,11 @@ function Toolbar({
         value={filters.project ?? ALL}
         onValueChange={(v) => setFilters({ ...filters, project: v === ALL ? null : v })}
       >
-        <SelectTrigger className="w-56" aria-label="Compose project">
+        <SelectTrigger className="w-56" aria-label={text.project}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>All projects</SelectItem>
+          <SelectItem value={ALL}>{text.allProjects}</SelectItem>
           {graph.projects.length ? <SelectSeparator /> : null}
           {graph.projects.map((p) => (
             <SelectItem key={p.name} value={p.name}>
@@ -336,7 +338,7 @@ function Toolbar({
           {hasStandalone ? (
             <>
               <SelectSeparator />
-              <SelectItem value={STANDALONE}>Standalone containers</SelectItem>
+              <SelectItem value={STANDALONE}>{text.standalone}</SelectItem>
             </>
           ) : null}
         </SelectContent>
@@ -345,8 +347,8 @@ function Toolbar({
         <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           type="search"
-          placeholder="Search… (Enter to zoom)"
-          aria-label="Search topology"
+          placeholder={text.searchPlaceholder}
+          aria-label={text.search}
           className="pl-8"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -359,17 +361,19 @@ function Toolbar({
       </div>
       {query.trim() ? (
         <span className="text-sm text-muted-foreground" aria-live="polite">
-          {matchIds.length} match{matchIds.length === 1 ? "" : "es"}
+          {i18n.plural(text.matches, matchIds.length)}
         </span>
       ) : null}
-      {toggle("hideStopped", "Hide stopped")}
-      {toggle("showBuiltinNetworks", "Built-in networks")}
-      {toggle("showBindMounts", "Bind mounts")}
+      {toggle("hideStopped", text.hideStopped)}
+      {toggle("showBuiltinNetworks", text.builtinNetworks)}
+      {toggle("showBindMounts", text.bindMounts)}
     </div>
   )
 }
 
 export function TopologyView({ graph, initialProject }: { graph: TopologyGraph; initialProject: string | null }) {
+  const i18n = useI18n()
+  const { t } = i18n
   const mounted = useMounted()
   const known = initialProject !== null && (initialProject === STANDALONE || graph.projects.some((p) => p.name === initialProject))
   const [filters, setFiltersState] = React.useState<TopologyFilters>({ ...DEFAULT_FILTERS, project: known ? initialProject : null })
@@ -400,6 +404,7 @@ export function TopologyView({ graph, initialProject }: { graph: TopologyGraph; 
     }
   }
 
+  const summary = t.topology.summary
   const hiddenStopped = filters.hideStopped
     ? graph.containers.filter((c) => !visible.containers.includes(c) && (filters.project === null || c.project === filters.project)).length
     : 0
@@ -409,26 +414,33 @@ export function TopologyView({ graph, initialProject }: { graph: TopologyGraph; 
       <div className="grid gap-3 px-4 lg:px-6">
         <Toolbar graph={graph} filters={filters} setFilters={setFilters} query={query} setQuery={setQuery} matchIds={matchIds} />
         <p className="text-sm text-muted-foreground" data-testid="topology-summary">
-          {visible.containers.length} container{visible.containers.length === 1 ? "" : "s"} · {visible.projects.length} project
-          {visible.projects.length === 1 ? "" : "s"} · {visible.networks.length} network{visible.networks.length === 1 ? "" : "s"} ·{" "}
-          {visible.volumes.length} volume{visible.volumes.length === 1 ? "" : "s"}
-          {hiddenStopped ? ` · ${hiddenStopped} stopped hidden` : ""}
-          {graph.unused.volumes || graph.unused.networks
-            ? ` · not shown: ${[
-                graph.unused.volumes ? `${graph.unused.volumes} unused volume${graph.unused.volumes === 1 ? "" : "s"}` : null,
-                graph.unused.networks ? `${graph.unused.networks} unused network${graph.unused.networks === 1 ? "" : "s"}` : null,
-              ]
-                .filter(Boolean)
-                .join(", ")}`
-            : ""}
-          {notice ? ` · Compose project “${notice}” has no containers here; showing everything.` : ""}
+          {[
+            i18n.plural(summary.containers, visible.containers.length),
+            i18n.plural(summary.projects, visible.projects.length),
+            i18n.plural(summary.networks, visible.networks.length),
+            i18n.plural(summary.volumes, visible.volumes.length),
+            hiddenStopped ? i18n.format(summary.stoppedHidden, { count: hiddenStopped }) : null,
+            graph.unused.volumes || graph.unused.networks
+              ? i18n.format(summary.notShown, {
+                  list: [
+                    graph.unused.volumes ? i18n.plural(summary.unusedVolumes, graph.unused.volumes) : null,
+                    graph.unused.networks ? i18n.plural(summary.unusedNetworks, graph.unused.networks) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(", "),
+                })
+              : null,
+            notice ? i18n.format(summary.unknownProject, { name: notice }) : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </p>
         <div className="relative h-[calc(100svh-15rem)] min-h-[480px] overflow-hidden rounded-xl border bg-background" data-testid="topology-canvas">
           {!mounted ? (
             <Skeleton className="size-full rounded-none" />
           ) : visible.containers.length === 0 ? (
             <div className="flex size-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
-              {graph.containers.length ? "No containers match these filters." : "There are no containers on this environment yet."}
+              {graph.containers.length ? t.topology.noMatch : t.topology.noContainers}
             </div>
           ) : (
             <Canvas

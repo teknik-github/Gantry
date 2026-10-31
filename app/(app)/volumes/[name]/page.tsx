@@ -8,6 +8,7 @@ import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, Mono, StateBadge } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getDocker, getPermissions } from "@/lib/server/environments"
 import { filesLimits } from "@/lib/server/files/config"
@@ -19,11 +20,13 @@ const VOLUME_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,254}$/
 
 export async function generateMetadata({ params }: PageProps<"/volumes/[name]">): Promise<Metadata> {
   const { name } = await params
-  return { title: `Volume ${decodeURIComponent(name)}` }
+  const { t, format } = await getI18n()
+  return { title: format(t.volumes.pageTitle, { name: decodeURIComponent(name) }) }
 }
 
 export default async function VolumePage({ params }: PageProps<"/volumes/[name]">) {
   await requireUser()
+  const { t, format } = await getI18n()
   const name = decodeURIComponent((await params).name)
   if (!VOLUME_NAME.test(name)) notFound()
   const can = await getPermissions()
@@ -59,11 +62,11 @@ export default async function VolumePage({ params }: PageProps<"/volumes/[name]"
     })
   const running = usedBy.filter((c) => c.state === "running")
   const writeWarning = usedBy.length
-    ? `${name} is mounted by ${usedBy.map((c) => `${c.name} (${c.state})`).join(", ")}. ${
-        running.length
-          ? "Changing files that a running application uses can corrupt its data."
-          : "The containers will see your changes when they start."
-      } Continue?`
+    ? format(t.volumes.writeWarning, {
+        name,
+        containers: usedBy.map((c) => `${c.name} (${c.state})`).join(", "),
+        consequence: running.length ? t.volumes.writeWarningRunning : t.volumes.writeWarningStopped,
+      })
     : null
 
   return (
@@ -72,7 +75,7 @@ export default async function VolumePage({ params }: PageProps<"/volumes/[name]"
         <Button asChild variant="link" size="sm" className="h-auto w-fit p-0 text-muted-foreground">
           <Link href="/volumes">
             <ArrowLeftIcon data-icon="inline-start" />
-            Volumes
+            {t.nav.pages.volumes}
           </Link>
         </Button>
         <h2 className="text-xl font-semibold tracking-tight">{volume.Name}</h2>
@@ -84,9 +87,9 @@ export default async function VolumePage({ params }: PageProps<"/volumes/[name]"
       <div className="px-4 lg:px-6">
         <Card>
           <CardHeader>
-            <CardTitle>Used by</CardTitle>
+            <CardTitle>{t.volumes.usedBy}</CardTitle>
             <CardDescription>
-              {usedBy.length ? `${usedBy.length} container(s) mount this volume.` : "No container mounts this volume."}
+              {usedBy.length ? format(t.volumes.mountedBy, { count: usedBy.length }) : t.volumes.notMounted}
             </CardDescription>
           </CardHeader>
           {usedBy.length ? (
@@ -94,7 +97,7 @@ export default async function VolumePage({ params }: PageProps<"/volumes/[name]"
               {running.length ? (
                 <p className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
                   <TriangleAlertIcon className="size-4" />
-                  In use by a running container: be careful when changing files.
+                  {t.volumes.runningWarning}
                 </p>
               ) : null}
               {usedBy.map((c) => (
@@ -104,7 +107,7 @@ export default async function VolumePage({ params }: PageProps<"/volumes/[name]"
                   </Link>
                   <StateBadge state={c.state} />
                   <Mono className="text-muted-foreground">
-                    {c.target} · {c.rw ? "read-write" : "read-only"}
+                    {c.target} · {c.rw ? t.volumes.readWrite : t.volumes.readOnly}
                   </Mono>
                 </div>
               ))}
@@ -124,7 +127,7 @@ export default async function VolumePage({ params }: PageProps<"/volumes/[name]"
           />
         ) : (
           <p className="text-sm text-muted-foreground" data-testid="files-hidden">
-            Browsing files needs the operator role in this environment.
+            {t.volumes.filesNeedOperator}
           </p>
         )}
       </div>

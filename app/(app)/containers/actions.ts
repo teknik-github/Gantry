@@ -4,6 +4,8 @@ import { z } from "zod"
 
 import { containerNameField, imageField, parseEnv, parsePorts, parseVolumes, splitArgs } from "@/lib/container-form"
 import { BULK_LIMIT, uniqueBy } from "@/lib/bulk"
+import type { I18n } from "@/lib/i18n"
+import { getI18n } from "@/lib/i18n/server"
 import { ENVIRONMENT_FIELD } from "@/lib/permissions"
 import { authorize, expectedEnvironment, inEnvironment, runAction, runBulkAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
@@ -22,11 +24,12 @@ const idSchema = z.string().regex(/^[a-f0-9]{12,64}$/, "Invalid container id")
 // environment changed since.
 
 export async function containerAction(id: string, action: ContainerAction, environmentId?: number): Promise<ActionState> {
+  const { t } = await getI18n()
   const parsed = z.object({ id: idSchema, action: z.enum(CONTAINER_ACTIONS) }).safeParse({ id, action })
-  if (!parsed.success) return { error: "Invalid request" }
+  if (!parsed.success) return { error: t.containers.invalidRequest }
 
   return runAction(inEnvironment("operate", expectedEnvironment(environmentId)), `container.${action}`, id, async ({ docker }) => {
-    if (parsed.data.action !== "start" && parsed.data.action !== "unpause") refuseSelf(parsed.data.id)
+    if (parsed.data.action !== "start" && parsed.data.action !== "unpause") refuseSelf(parsed.data.id, t)
     await (await docker()).containerAction(parsed.data.id, parsed.data.action)
   })
 }
@@ -36,15 +39,16 @@ export async function removeContainer(
   opts: { force?: boolean; volumes?: boolean } = {},
   environmentId?: number
 ): Promise<ActionState> {
+  const { t } = await getI18n()
   const parsed = idSchema.safeParse(id)
-  if (!parsed.success) return { error: "Invalid container id" }
+  if (!parsed.success) return { error: t.containers.invalidId }
 
   return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "container.remove", id, async ({ docker }) => {
     await (await docker()).removeContainer(parsed.data, {
       force: opts.force === true,
       volumes: opts.volumes === true,
     })
-    return "Container removed"
+    return t.containers.removed
   })
 }
 
@@ -55,6 +59,7 @@ const targetsSchema = z
 
 export type BulkTarget = { id: string; name: string }
 
+// English wording for runBulkAction; the summary is shown with t.containers.bulkVerbs.
 const PAST: Record<ContainerAction, string> = {
   start: "Started",
   stop: "Stopped",
@@ -65,8 +70,8 @@ const PAST: Record<ContainerAction, string> = {
 }
 
 /** Stopping (or removing) the container Gantry runs in would cut the request off halfway. */
-function refuseSelf(id: string) {
-  if (isSelfContainer({ Id: id }, selfContainerIds())) throw new UserError("Gantry runs in this container; do it on its own")
+function refuseSelf(id: string, t: I18n["t"]) {
+  if (isSelfContainer({ Id: id }, selfContainerIds())) throw new UserError(t.containers.selfContainer)
 }
 
 export async function bulkContainerAction(
@@ -74,18 +79,25 @@ export async function bulkContainerAction(
   action: ContainerAction,
   environmentId?: number
 ): Promise<ActionState> {
+  const { t } = await getI18n()
   const parsed = z.object({ targets: targetsSchema, action: z.enum(CONTAINER_ACTIONS) }).safeParse({ targets, action })
-  if (!parsed.success) return { error: "Invalid request" }
+  if (!parsed.success) return { error: t.containers.invalidRequest }
   const { action: act } = parsed.data
 
   return runBulkAction(
     inEnvironment("operate", expectedEnvironment(environmentId)),
     `container.${act}`,
     uniqueBy(parsed.data.targets, (t) => t.id),
-    { verb: PAST[act], noun: "container", label: (t) => t.name || t.id.slice(0, 12), auditTarget: (t) => t.id },
-    async (t, docker) => {
-      if (act !== "start" && act !== "unpause") refuseSelf(t.id)
-      await docker.containerAction(t.id, act)
+    {
+      verb: PAST[act],
+      noun: "container",
+      localized: { verb: t.containers.bulkVerbs[act], noun: t.containers.bulkNoun },
+      label: (c) => c.name || c.id.slice(0, 12),
+      auditTarget: (c) => c.id,
+    },
+    async (c, docker) => {
+      if (act !== "start" && act !== "unpause") refuseSelf(c.id, t)
+      await docker.containerAction(c.id, act)
     }
   )
 }
@@ -95,17 +107,24 @@ export async function removeContainers(
   opts: { force?: boolean; volumes?: boolean } = {},
   environmentId?: number
 ): Promise<ActionState> {
+  const { t } = await getI18n()
   const parsed = targetsSchema.safeParse(targets)
-  if (!parsed.success) return { error: "Invalid request" }
+  if (!parsed.success) return { error: t.containers.invalidRequest }
 
   return runBulkAction(
     inEnvironment("manage", expectedEnvironment(environmentId)),
     "container.remove",
     uniqueBy(parsed.data, (t) => t.id),
-    { verb: "Removed", noun: "container", label: (t) => t.name || t.id.slice(0, 12), auditTarget: (t) => t.id },
-    async (t, docker) => {
-      refuseSelf(t.id)
-      await docker.removeContainer(t.id, { force: opts.force === true, volumes: opts.volumes === true })
+    {
+      verb: "Removed",
+      noun: "container",
+      localized: { verb: t.containers.bulkVerbs.remove, noun: t.containers.bulkNoun },
+      label: (c) => c.name || c.id.slice(0, 12),
+      auditTarget: (c) => c.id,
+    },
+    async (c, docker) => {
+      refuseSelf(c.id, t)
+      await docker.removeContainer(c.id, { force: opts.force === true, volumes: opts.volumes === true })
     }
   )
 }
@@ -139,6 +158,7 @@ export async function createContainer(_prev: ActionState, formData: FormData): P
   if (!volumes.ok) return { error: volumes.error, fieldErrors: { volumes: [volumes.fieldError] } }
   const binds = volumes.value
 
+  const { t, format } = await getI18n()
   return runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), "container.create", v.name || v.image, async ({ docker }) => {
     const api = await docker()
     if (v.pull === "on") await api.pullImage(v.image)
@@ -159,12 +179,12 @@ export async function createContainer(_prev: ActionState, formData: FormData): P
       })
     } catch (err) {
       const msg = (err as Error).message
-      if (/No such image/i.test(msg)) throw new UserError(`Image "${v.image}" not found locally. Enable "Pull image" and try again.`)
+      if (/No such image/i.test(msg)) throw new UserError(format(t.containers.imageNotFound, { image: v.image }))
       throw err
     }
 
     if (v.start === "on") await api.containerAction(created.Id, "start")
-    return `Container ${v.name || created.Id.slice(0, 12)} created`
+    return format(t.containers.created, { name: v.name || created.Id.slice(0, 12) })
   })
 }
 
@@ -177,18 +197,19 @@ const SHELLS = {
 
 export type ExecShell = keyof typeof SHELLS
 
-const execSchema = z.object({
-  id: idSchema,
-  shell: z.enum(Object.keys(SHELLS) as [ExecShell, ...ExecShell[]]),
-  user: z
-    .string()
-    .trim()
-    .max(64)
-    .regex(/^([a-zA-Z0-9_.-]+(:[a-zA-Z0-9_.-]+)?)?$/, "Use user or user:group"),
-  cols: z.number().int().min(10).max(500),
-  rows: z.number().int().min(4).max(200),
-  environmentId: z.number().int().positive().optional(),
-})
+const execSchema = (t: I18n["t"]) =>
+  z.object({
+    id: z.string().regex(/^[a-f0-9]{12,64}$/, t.containers.invalidId),
+    shell: z.enum(Object.keys(SHELLS) as [ExecShell, ...ExecShell[]]),
+    user: z
+      .string()
+      .trim()
+      .max(64)
+      .regex(/^([a-zA-Z0-9_.-]+(:[a-zA-Z0-9_.-]+)?)?$/, t.containers.userFormat),
+    cols: z.number().int().min(10).max(500),
+    rows: z.number().int().min(4).max(200),
+    environmentId: z.number().int().positive().optional(),
+  })
 
 /**
  * Opens an interactive shell in a container. Exec is equivalent to full
@@ -202,14 +223,15 @@ export async function startExecSession(input: {
   rows: number
   environmentId?: number
 }): Promise<{ sid: string; error?: never } | { sid?: never; error: string }> {
-  const parsed = execSchema.safeParse(input)
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid request" }
+  const { t } = await getI18n()
+  const parsed = execSchema(t).safeParse(input)
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? t.containers.invalidRequest }
   const { id, shell, cols, rows } = parsed.data
 
   const auth = await authorize(inEnvironment("manage", parsed.data.environmentId))
   if ("error" in auth) return { error: auth.error }
   const { user, environment: env } = auth
-  if (!env) return { error: "No Docker environment configured" }
+  if (!env) return { error: t.common.environment.noDockerConfigured }
 
   try {
     const sid = await openExecSession({
@@ -227,6 +249,6 @@ export async function startExecSession(input: {
   } catch (err) {
     if (err instanceof DockerError || err instanceof ExecSessionError) return { error: err.message }
     console.error("[gantry] exec failed", err)
-    return { error: "Could not start the console. Check the server logs." }
+    return { error: t.containers.consoleStartFailed }
   }
 }

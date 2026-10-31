@@ -6,6 +6,8 @@ import { z } from "zod"
 
 import { customTemplateId, customTemplateKey, checkVariables, generatePassword, mergeVariables, renderDotenv, templateDefaultsFromEnv } from "@/lib/templates"
 import { composeContainerName, composeServicePorts } from "@/lib/compose-ports"
+import type { I18n } from "@/lib/i18n"
+import { getI18n } from "@/lib/i18n/server"
 import { ENVIRONMENT_FIELD } from "@/lib/permissions"
 import { checkHost, type ProxyHost } from "@/lib/proxy"
 import { authorize, expectedEnvironment, inEnvironment, runAction, UserError } from "@/lib/server/action"
@@ -39,9 +41,10 @@ function formValues(formData: FormData, keys: string[]) {
 // ---------------------------------------------------------------- Deploy
 
 export async function deployTemplate(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const key = String(formData.get("template") ?? "")
   const template = await getTemplate(key)
-  if (!template) return { error: "Template not found" }
+  if (!template) return { error: t.templates.messages.notFound }
 
   const submitted: Record<string, string> = {}
   for (const v of template.variables) submitted[v.name] = String(formData.get(`var:${v.name}`) ?? "")
@@ -51,7 +54,7 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
 
   const fieldErrors: Record<string, string[]> = {}
   const name = stackNameSchema.safeParse(values.name)
-  if (!name.success) fieldErrors.name = [name.error.issues[0]?.message ?? "Invalid name"]
+  if (!name.success) fieldErrors.name = [name.error.issues[0]?.message ?? t.stacks.messages.invalidName]
   const check = checkVariables(template.variables, submitted, () => generatePassword(randomBytes))
   for (const [k, msg] of Object.entries(check.errors)) fieldErrors[`var:${k}`] = [msg]
 
@@ -64,11 +67,11 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
     const auth = await authorize(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))))
     if ("error" in auth) return { error: auth.error, values }
     const environment = auth.environment
-    if (!environment) return { error: "No Docker environment configured" }
+    if (!environment) return { error: t.common.environment.noDockerConfigured }
     environmentId = environment.id
     const [service = "", port = ""] = values.expose.split(":")
     const known = composeServicePorts(template.compose).some((p) => p.service === service && String(p.port) === port)
-    if (!known) fieldErrors.expose = ["Pick the service and port to expose"]
+    if (!known) fieldErrors.expose = [t.templates.messages.pickExpose]
     else {
       const checked = checkHost(
         { domains: values.domains, target: composeContainerName(name.data, service), port, tls: values.tls },
@@ -79,7 +82,7 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
     }
   }
   if (!name.success || Object.keys(fieldErrors).length) {
-    return { error: "Please fix the highlighted fields", fieldErrors, values }
+    return { error: t.common.errors.fixFields, fieldErrors, values }
   }
 
   const env = renderDotenv(template.variables, check.values)
@@ -104,7 +107,7 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
         )
       }
     }
-    return `Stack ${name.data} created`
+    return format(t.stacks.messages.created, { name: name.data })
   })
   if (!res.ok) {
     const nameTaken = res.error && /already exists/.test(res.error)
@@ -118,17 +121,20 @@ export async function deployTemplate(_prev: ActionState, formData: FormData): Pr
 
 const TEMPLATE_FIELDS = ["title", "description", "category", "stack_name", "compose", "env"]
 
-const templateSchema = z.object({
-  title: z.string().trim().min(1, "Title is required").max(100),
-  description: z.string().trim().max(500, "At most 500 characters"),
-  category: z.string().trim().max(64).transform((v) => v || "Custom"),
-  stack_name: stackNameSchema,
-})
+function templateSchema(t: I18n["t"]) {
+  return z.object({
+    title: z.string().trim().min(1, t.templates.messages.titleRequired).max(100),
+    description: z.string().trim().max(500, t.templates.messages.descriptionTooLong),
+    category: z.string().trim().max(64).transform((v) => v || "Custom"),
+    stack_name: stackNameSchema,
+  })
+}
 
 /** Validates the template form; returns normalized values or field errors. */
-function checkTemplate(formData: FormData) {
+function checkTemplate(formData: FormData, i18n: I18n) {
+  const { t } = i18n
   const values = formValues(formData, TEMPLATE_FIELDS)
-  const parsed = templateSchema.safeParse(values)
+  const parsed = templateSchema(t).safeParse(values)
   const fieldErrors: Record<string, string[]> = {}
   if (!parsed.success) {
     for (const issue of parsed.error.issues) fieldErrors[String(issue.path[0])] ??= [issue.message]
@@ -142,55 +148,60 @@ function checkTemplate(formData: FormData) {
   if (composeCheck.ok && !envError) {
     const reserved = mergeVariables([], compose, env).filter((v) => RESERVED.has(v.name)).map((v) => v.name)
     if (reserved.length) {
-      fieldErrors.compose = [`Rename ${reserved.join(", ")}: docker compose would take ${reserved.length > 1 ? "them" : "it"} from Gantry's environment, not from .env`]
+      fieldErrors.compose = [i18n.plural(t.templates.messages.reserved, reserved.length, { names: reserved.join(", ") })]
     }
   }
   if (!parsed.success || Object.keys(fieldErrors).length) {
-    return { state: { error: "Please fix the highlighted fields", fieldErrors, values } as ActionState }
+    return { state: { error: t.common.errors.fixFields, fieldErrors, values } as ActionState }
   }
   return { data: { ...parsed.data, compose, env }, values }
 }
 
 export async function createTemplate(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const checked = checkTemplate(formData)
+  const i18n = await getI18n()
+  const { t, format } = i18n
+  const checked = checkTemplate(formData, i18n)
   if (checked.state) return checked.state
   const { data, values } = checked
 
   let id = 0
   const res = await runAction("admin", "template.create", data.title, async ({ user }) => {
-    if (await findCustomTemplateByTitle(data.title)) throw new UserError(`A template called "${data.title}" already exists`)
+    if (await findCustomTemplateByTitle(data.title)) throw new UserError(format(t.templates.messages.exists, { title: data.title }))
     id = await insertTemplate({ ...data, created_by: user.username })
-    return `Template ${data.title} saved`
+    return format(t.templates.messages.saved, { title: data.title })
   })
   if (!res.ok) return { ...res, values }
   redirect(`/templates/${customTemplateKey(id)}`)
 }
 
 export async function updateTemplate(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const i18n = await getI18n()
+  const { t, format } = i18n
   const id = customTemplateId(String(formData.get("template") ?? ""))
-  if (id === null) return { error: "Only custom templates can be edited" }
-  const checked = checkTemplate(formData)
+  if (id === null) return { error: t.templates.messages.onlyCustomEditable }
+  const checked = checkTemplate(formData, i18n)
   if (checked.state) return checked.state
   const { data, values } = checked
 
   const res = await runAction("admin", "template.update", data.title, async () => {
-    if (!(await getCustomTemplate(id))) throw new UserError("Template not found")
+    if (!(await getCustomTemplate(id))) throw new UserError(t.templates.messages.notFound)
     const other = await findCustomTemplateByTitle(data.title)
-    if (other && other.id !== id) throw new UserError(`A template called "${data.title}" already exists`)
+    if (other && other.id !== id) throw new UserError(format(t.templates.messages.exists, { title: data.title }))
     await updateTemplateRecord(id, data)
-    return `Template ${data.title} saved`
+    return format(t.templates.messages.saved, { title: data.title })
   })
   if (!res.ok) return { ...res, values }
   redirect(`/templates/${customTemplateKey(id)}`)
 }
 
 export async function deleteTemplate(key: string): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const id = customTemplateId(key)
-  if (id === null) return { error: "Built-in templates can't be deleted" }
+  if (id === null) return { error: t.templates.messages.builtinNotDeletable }
   const title = (await getCustomTemplate(id))?.title ?? key
   return runAction("admin", "template.delete", title, async () => {
     await deleteTemplateRecord(id)
-    return `Template ${title} deleted`
+    return format(t.templates.messages.deleted, { title })
   })
 }
 
@@ -199,14 +210,15 @@ export async function deleteTemplate(key: string): Promise<ActionState> {
  * values are left out. `href` is the new template's page.
  */
 export async function saveStackAsTemplate(stackId: number): Promise<ActionState & { href?: string }> {
+  const { t, format } = await getI18n()
   const parsed = z.number().int().positive().safeParse(stackId)
-  if (!parsed.success) return { error: "Invalid stack" }
+  if (!parsed.success) return { error: t.stacks.messages.invalidStack }
 
   let id = 0
   const res = await runAction("admin", "template.create", `stack #${parsed.data}`, async ({ user }) => {
     const stack = await getStack(parsed.data)
     const env = await getCurrentEnvironment()
-    if (!stack || stack.environment_id !== env?.id) throw new UserError("Stack not found in this environment")
+    if (!stack || stack.environment_id !== env?.id) throw new UserError(t.templates.messages.stackNotFound)
     let title = stack.name
     for (let n = 2; await findCustomTemplateByTitle(title); n++) title = `${stack.name} (${n})`
     id = await insertTemplate({
@@ -218,7 +230,7 @@ export async function saveStackAsTemplate(stackId: number): Promise<ActionState 
       env: normalizeText(templateDefaultsFromEnv(stack.env)),
       created_by: user.username,
     })
-    return `Saved as template ${title}`
+    return format(t.templates.messages.savedAsTemplate, { title })
   })
   return res.ok ? { ...res, href: `/templates/${customTemplateKey(id)}` } : res
 }

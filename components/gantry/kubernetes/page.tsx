@@ -5,6 +5,7 @@ import { CircleAlertIcon } from "lucide-react"
 import { NamespaceSelect } from "@/components/gantry/kubernetes/namespace-select"
 import { NoEnvironment, WrongEnvironmentKind } from "@/components/gantry/ui"
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser, type CurrentUser } from "@/lib/server/auth/dal"
 import type { Environment } from "@/lib/server/db/schema"
 import type { Permissions } from "@/lib/permissions"
@@ -33,8 +34,9 @@ export async function loadKubePage(): Promise<{ page: KubePage; blocked?: never 
   const user = await requireUser()
   const env = await getCurrentEnvironment()
   if (!env) {
+    const { t } = await getI18n()
     return {
-      blocked: user.role === "admin" ? <KubeUnavailable message="No environment configured. Add one on the Environments page." /> : <NoEnvironment />,
+      blocked: user.role === "admin" ? <KubeUnavailable message={t.kubernetes.common.noEnvironment} /> : <NoEnvironment />,
     }
   }
   if (env.type !== "kubernetes") return { blocked: <WrongEnvironmentKind kind="docker" /> }
@@ -55,14 +57,15 @@ export async function NamespaceFilter({ page }: { page: KubePage }) {
   return <NamespaceSelect environmentId={page.env.id} namespaces={namespaces} selected={page.namespace} />
 }
 
-export function KubeUnavailable({ message }: { message: string }) {
+export async function KubeUnavailable({ message }: { message: string }) {
+  const { t } = await getI18n()
   return (
     <div className="px-4 lg:px-6">
       <Card className="border-destructive/40" data-testid="kube-error">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-destructive">
             <CircleAlertIcon className="size-4" />
-            Kubernetes API error
+            {t.kubernetes.common.apiError}
           </CardTitle>
           <CardDescription className="break-words">{message}</CardDescription>
         </CardHeader>

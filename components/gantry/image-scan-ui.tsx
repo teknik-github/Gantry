@@ -36,6 +36,8 @@ import {
   type Severity,
   type SeverityCounts,
 } from "@/lib/image-scan"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 import type { ActionState } from "@/lib/validation"
 
 // Image vulnerability scans in the UI: the "Vulnerabilities" column of the
@@ -121,11 +123,12 @@ export function useImageScan(imageId: string) {
 
 /** Count badges per severity (Critical, High, Medium, Low; Unknown when any). */
 export function SeverityBadges({ counts, className }: { counts: SeverityCounts; className?: string }) {
+  const { t } = useI18n()
   if (totalCount(counts) === 0) {
     return (
       <Badge variant="outline" className="border-sea/40 text-sea" data-testid="vuln-none">
         <ShieldCheckIcon />
-        No vulnerabilities
+        {t.images.scan.noVulnerabilities}
       </Badge>
     )
   }
@@ -151,40 +154,42 @@ export function SeverityBadges({ counts, className }: { counts: SeverityCounts; 
 
 /** Scan state of one image: badges linking to the findings, or why there are none. */
 export function ScanStatus({ summary, imageId, name }: { summary: ScanSummary | undefined; imageId: string; name: string }) {
+  const i18n = useI18n()
+  const text = i18n.t.images.scan
   if (summary?.pending === "running") {
     return (
       <Badge variant="outline" className="text-muted-foreground" title={summary.phase ?? undefined} data-testid="vuln-scanning">
         <Loader2Icon className="animate-spin" />
-        {summary.phase?.startsWith("Pulling") ? summary.phase : "Scanning…"}
+        {summary.phase?.startsWith("Pulling") ? summary.phase : text.scanning}
       </Badge>
     )
   }
   if (summary?.pending === "queued") {
     return (
       <Badge variant="outline" className="text-muted-foreground" data-testid="vuln-queued">
-        Queued
+        {text.queued}
       </Badge>
     )
   }
-  if (!summary) return <span className="text-sm text-muted-foreground">Not scanned</span>
+  if (!summary) return <span className="text-sm text-muted-foreground">{text.notScanned}</span>
   const href = imageScanPath(imageId)
   if (!summary.scannedAt) {
     return (
-      <Link href={href} title={summary.error ?? undefined} aria-label={`Scan error for ${name}`}>
+      <Link href={href} title={summary.error ?? undefined} aria-label={i18n.format(text.errorFor, { name })}>
         <Badge variant="outline" className="border-destructive/50 text-destructive" data-testid="vuln-failed">
           <TriangleAlertIcon />
-          Scan failed
+          {text.failed}
         </Badge>
       </Link>
     )
   }
   return (
     <span className="flex items-center gap-1.5">
-      <Link href={href} aria-label={`Vulnerabilities of ${name}`} className="rounded-md hover:opacity-80">
+      <Link href={href} aria-label={i18n.format(text.vulnerabilitiesOf, { name })} className="rounded-md hover:opacity-80">
         <SeverityBadges counts={summary.counts} />
       </Link>
       {summary.error ? (
-        <TriangleAlertIcon className="size-4 text-destructive" aria-label={`Last scan failed: ${summary.error}`} />
+        <TriangleAlertIcon className="size-4 text-destructive" aria-label={i18n.format(text.lastFailed, { error: summary.error })} />
       ) : null}
     </span>
   )
@@ -197,6 +202,7 @@ export function VulnerabilityCell({ imageId, name }: { imageId: string; name: st
 
 /** Row action: scan one image (operators and up). */
 export function ScanImageButton({ imageId, name }: { imageId: string; name: string }) {
+  const i18n = useI18n()
   const environmentId = useEnvironmentId()
   const { watch } = React.useContext(ScanContext)
   const busy = Boolean(useImageScan(imageId)?.pending)
@@ -206,8 +212,8 @@ export function ScanImageButton({ imageId, name }: { imageId: string; name: stri
       variant="ghost"
       size="icon"
       className="size-8 text-muted-foreground"
-      aria-label={`Scan ${name}`}
-      title="Scan for vulnerabilities"
+      aria-label={i18n.format(i18n.t.images.scan.scanLabel, { name })}
+      title={i18n.t.images.scan.scanTitle}
       disabled={pending || busy}
       onClick={async () => {
         if (await run(() => scanImages([{ id: imageId, name }], environmentId))) watch()
@@ -220,11 +226,12 @@ export function ScanImageButton({ imageId, name }: { imageId: string; name: stri
 
 /** Bulk action: scan the selected images. */
 export function BulkScanImages({ selected, clear }: { selected: { id: string; name: string }[]; clear: () => void }) {
+  const { t } = useI18n()
   const environmentId = useEnvironmentId()
   const { watch } = React.useContext(ScanContext)
   return (
     <BulkButton
-      label="Scan"
+      label={t.images.scan.scan}
       icon={<ScanSearchIcon data-icon="inline-start" />}
       count={selected.length}
       onRun={() => scanImages(selected, environmentId)}
@@ -254,11 +261,15 @@ export function ImageScanSettingsCard({
   scanner: string
   lastRun: string | null
 }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const text = t.images.scan
   const [state, formAction, saving] = useActionState<ActionState, FormData>(saveScanSettings, {})
+  const saved = t.common.status.saved
   React.useEffect(() => {
-    if (state.ok) toast.success(state.message ?? "Saved")
+    if (state.ok) toast.success(state.message ?? saved)
     else if (state.error && !state.fieldErrors) toast.error(state.error)
-  }, [state])
+  }, [state, saved])
   const [runPending, run] = useRunAction()
   const uid = React.useId()
 
@@ -266,9 +277,9 @@ export function ImageScanSettingsCard({
     <div className="px-4 lg:px-6">
       <Card>
         <CardHeader>
-          <CardTitle>Vulnerability scanning</CardTitle>
+          <CardTitle>{text.settingsTitle}</CardTitle>
           <CardDescription>
-            Scans run Trivy ({scanner}) on the environment that holds the image. Server time is {serverTime} ({timeZone}).
+            {i18n.format(text.settingsDescription, { scanner, time: serverTime, timeZone })}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -276,24 +287,23 @@ export function ImageScanSettingsCard({
           <form method="post" onSubmit={submitKeepingValues(formAction)} className="flex flex-wrap items-end gap-4">
             <Label className="h-8 font-normal">
               <Checkbox name="enabled" value="on" defaultChecked={enabled} />
-              Scan images in use every day
+              {text.daily}
             </Label>
             <Field data-invalid={state.fieldErrors?.time ? true : undefined} className="w-32">
-              <FieldLabel htmlFor={`${uid}-time`}>At</FieldLabel>
+              <FieldLabel htmlFor={`${uid}-time`}>{text.at}</FieldLabel>
               <Input id={`${uid}-time`} name="time" type="time" defaultValue={time} required />
               <FieldError>{state.fieldErrors?.time?.[0]}</FieldError>
             </Field>
             <Field data-invalid={state.fieldErrors?.minSeverity ? true : undefined} className="w-44">
-              <FieldLabel htmlFor={`${uid}-severity`}>Alert from</FieldLabel>
+              <FieldLabel htmlFor={`${uid}-severity`}>{text.alertFrom}</FieldLabel>
               <Select name="minSeverity" defaultValue={minSeverity}>
-                <SelectTrigger id={`${uid}-severity`} aria-label="Alert from">
+                <SelectTrigger id={`${uid}-severity`} aria-label={text.alertFrom}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {ALERT_SEVERITIES.map((s) => (
                     <SelectItem key={s} value={s}>
-                      {SEVERITY_LABELS[s]}
-                      {s === "CRITICAL" ? "" : " and up"}
+                      {s === "CRITICAL" ? SEVERITY_LABELS[s] : i18n.format(text.andUp, { severity: SEVERITY_LABELS[s] })}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -302,16 +312,16 @@ export function ImageScanSettingsCard({
             </Field>
             <Button type="submit" variant="outline" disabled={saving}>
               <SaveIcon data-icon="inline-start" />
-              {saving ? "Saving…" : "Save"}
+              {saving ? t.common.status.saving : t.common.actions.save}
             </Button>
             <Button type="button" disabled={runPending} onClick={() => run(scanImagesInUseNow)}>
               <PlayIcon data-icon="inline-start" />
-              Scan images in use now
+              {text.scanInUseNow}
             </Button>
           </form>
           <FieldDescription className="mt-3">
-            Covers every environment. Alerts (&quot;Vulnerabilities found&quot;) only name findings the previous scan of that image didn&apos;t
-            have.{lastRun ? ` ${lastRun}` : ""}
+            {text.settingsHelp}
+            {lastRun ? ` ${lastRun}` : ""}
           </FieldDescription>
         </CardContent>
       </Card>
@@ -329,6 +339,8 @@ export function RescanButton({
   name: string
   pending: boolean
 }) {
+  const { t } = useI18n()
+  const queued = t.images.scan.queued
   const router = useRouter()
   const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
@@ -343,7 +355,7 @@ export function RescanButton({
         if (!res.ok) return
         const data = (await res.json()) as { scans: ScanSummary[] }
         const mine = data.scans.find((s) => s.imageId === imageId)
-        setPhase(mine?.pending === "queued" ? "Queued" : (mine?.phase ?? null))
+        setPhase(mine?.pending === "queued" ? queued : (mine?.phase ?? null))
         if (!mine?.pending) {
           clearInterval(timer)
           setFollowing(false)
@@ -353,7 +365,7 @@ export function RescanButton({
       } catch {}
     }, POLL_MS)
     return () => clearInterval(timer)
-  }, [following, environmentId, imageId, router])
+  }, [following, environmentId, imageId, router, queued])
 
   const busy = pending || following
   return (
@@ -365,7 +377,7 @@ export function RescanButton({
       }}
     >
       {busy ? <Loader2Icon data-icon="inline-start" className="animate-spin" /> : <ScanSearchIcon data-icon="inline-start" />}
-      {busy ? (phase ?? "Scanning…") : "Scan now"}
+      {busy ? (phase ?? t.images.scan.scanning) : t.images.scan.scanNow}
     </Button>
   )
 }
@@ -373,10 +385,10 @@ export function RescanButton({
 type FindingRow = Finding & { key: string }
 
 const helper = columnHelperFor<FindingRow>()
-const columns = helper.columns([
+const buildColumns = (t: I18n["t"]) => helper.columns([
   helper.accessor((r) => severityRank(r.severity), {
     id: "severity",
-    header: ({ column }) => <SortHeader column={column} title="Severity" />,
+    header: ({ column }) => <SortHeader column={column} title={t.images.findings.columns.severity} />,
     cell: ({ row }) => (
       <Badge variant="outline" className={SEVERITY_CLASSES[row.original.severity]}>
         {SEVERITY_LABELS[row.original.severity]}
@@ -385,7 +397,7 @@ const columns = helper.columns([
     enableHiding: false,
   }),
   helper.accessor("id", {
-    header: ({ column }) => <SortHeader column={column} title="Vulnerability" />,
+    header: ({ column }) => <SortHeader column={column} title={t.images.findings.columns.vulnerability} />,
     cell: ({ row }) =>
       row.original.url ? (
         <a
@@ -403,7 +415,7 @@ const columns = helper.columns([
     enableHiding: false,
   }),
   helper.accessor("pkg", {
-    header: ({ column }) => <SortHeader column={column} title="Package" />,
+    header: ({ column }) => <SortHeader column={column} title={t.images.findings.columns.package} />,
     cell: ({ row }) => (
       <div className="flex flex-col">
         <span className="font-medium">{row.original.pkg}</span>
@@ -411,24 +423,27 @@ const columns = helper.columns([
       </div>
     ),
   }),
-  helper.accessor("installed", { header: "Installed", cell: ({ row }) => <Mono>{row.original.installed || "—"}</Mono> }),
+  helper.accessor("installed", { header: t.images.findings.columns.installed, cell: ({ row }) => <Mono>{row.original.installed || "—"}</Mono> }),
   helper.accessor("fixed", {
-    header: "Fixed in",
+    header: t.images.findings.columns.fixed,
     cell: ({ row }) =>
       row.original.fixed ? (
         <Mono className="text-sea">{row.original.fixed}</Mono>
       ) : (
-        <span className="text-xs text-muted-foreground">no fix yet</span>
+        <span className="text-xs text-muted-foreground">{t.images.findings.noFix}</span>
       ),
   }),
   helper.accessor("title", {
-    header: "Title",
+    header: t.images.findings.columns.title,
     cell: ({ row }) => <span className="line-clamp-2 max-w-md text-xs text-muted-foreground">{row.original.title || "—"}</span>,
   }),
 ])
 
 /** Findings with a severity filter, a "fixable only" switch and a search. */
 export function FindingsTable({ findings }: { findings: Finding[] }) {
+  const { t } = useI18n()
+  const text = t.images.findings
+  const columns = React.useMemo(() => buildColumns(t), [t])
   const uid = React.useId()
   const present = SEVERITIES.filter((s) => findings.some((f) => f.severity === s))
   const [severities, setSeverities] = React.useState<string[]>(present)
@@ -451,7 +466,7 @@ export function FindingsTable({ findings }: { findings: Finding[] }) {
           size="sm"
           value={severities}
           onValueChange={setSeverities}
-          aria-label="Severity filter"
+          aria-label={text.severityFilter}
         >
           {present.map((s) => (
             <ToggleGroupItem key={s} value={s} aria-label={`${SEVERITY_LABELS[s]} (${counts(s)})`} className="gap-1.5">
@@ -463,7 +478,7 @@ export function FindingsTable({ findings }: { findings: Finding[] }) {
         </ToggleGroup>
         <Label htmlFor={`${uid}-fixable`} className="font-normal">
           <Switch id={`${uid}-fixable`} checked={fixable} onCheckedChange={setFixable} />
-          Fixable only
+          {text.fixableOnly}
         </Label>
       </div>
       <DataTable
@@ -471,8 +486,9 @@ export function FindingsTable({ findings }: { findings: Finding[] }) {
         columns={columns}
         getRowId={(r) => r.key}
         searchText={(r) => `${r.id} ${r.pkg} ${r.title} ${r.target}`}
-        searchPlaceholder="Search CVE, package or title…"
-        emptyMessage={findings.length ? "No findings match the filters." : "No vulnerabilities found."}
+        searchPlaceholder={text.searchPlaceholder}
+        emptyMessage={findings.length ? text.noMatch : text.none}
+        columnLabels={{ pkg: text.columns.package, installed: text.columns.installed, fixed: text.columns.fixed, title: text.columns.title }}
         pageSize={25}
       />
     </div>

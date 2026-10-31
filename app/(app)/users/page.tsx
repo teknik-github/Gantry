@@ -3,12 +3,14 @@ import type { Metadata } from "next"
 import { UsersTable } from "@/components/gantry/admin-tables"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
-import { timeAgo } from "@/lib/format"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { getDb } from "@/lib/server/db"
 import { listGrants } from "@/lib/server/environment-access"
+import { getI18n } from "@/lib/i18n/server"
 
-export const metadata: Metadata = { title: "Users" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.users }
+}
 
 export default async function UsersPage() {
   const me = await requireAdmin()
@@ -22,12 +24,13 @@ export default async function UsersPage() {
     db.selectFrom("environments").select(["id", "name"]).orderBy("id").execute(),
     listGrants(db),
   ])
+  const { t, timeAgo } = await getI18n()
 
   return (
     <PageBody>
       <PageHeader
-        title="Users"
-        description="Administrators manage Gantry and have full control of every environment. Standard users only use the environments they were given, as viewer (read-only), operator (start, stop, restart, logs) or manager (full control of that environment)."
+        title={t.nav.pages.users}
+        description={t.users.description}
       />
       <UsersTable
         // Plain objects: node:sqlite rows have a null prototype.

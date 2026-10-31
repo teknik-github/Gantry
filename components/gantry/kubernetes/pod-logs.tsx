@@ -9,6 +9,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { useI18n } from "@/lib/i18n/client"
 
 /** The viewer keeps at most this much text; older lines scroll away. */
 const MAX_CHARS = 1_000_000
@@ -38,6 +39,8 @@ export function PodLogViewer({
   containers: string[]
 }) {
   const router = useRouter()
+  const { t, format } = useI18n()
+  const k = t.kubernetes.logs
   const [container, setContainer] = React.useState(containers[0] ?? "")
   const [logs, setLogs] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
@@ -81,7 +84,7 @@ export function PodLogViewer({
         const res = await fetch(query(streaming ? { follow: "1" } : {}), { cache: "no-store", signal: abort.signal })
         if (res.status === 401) return router.replace("/login")
         if (!res.ok) {
-          setError(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Failed to load logs")
+          setError(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? k.loadFailed)
           setState("idle")
           return
         }
@@ -105,7 +108,7 @@ export function PodLogViewer({
         if (abort.signal.aborted) return
         clearTimeout(flushTimer)
         flush()
-        setError("The log stream was interrupted")
+        setError(k.interrupted)
         setState("ended")
       }
     }
@@ -115,7 +118,7 @@ export function PodLogViewer({
       abort.abort()
       clearTimeout(flushTimer)
     }
-  }, [query, streaming, refreshKey, router])
+  }, [query, streaming, refreshKey, router, k])
 
   React.useEffect(() => {
     const el = preRef.current
@@ -125,26 +128,26 @@ export function PodLogViewer({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Logs</CardTitle>
+        <CardTitle>{k.title}</CardTitle>
         <CardDescription>
           {state === "streaming"
-            ? "Following: new lines appear as they are written"
+            ? k.following
             : state === "ended" && streaming
-              ? "The stream ended (the container stopped or the connection dropped)"
-              : "Most recent lines, with timestamps"}
+              ? k.ended
+              : k.recent}
         </CardDescription>
         <CardAction className="flex flex-wrap items-center gap-3">
           <Label className="font-normal">
-            <Switch checked={follow} onCheckedChange={setFollow} disabled={previous} aria-label="Follow" />
-            Follow
+            <Switch checked={follow} onCheckedChange={setFollow} disabled={previous} aria-label={k.follow} />
+            {k.follow}
           </Label>
           <Label className="font-normal">
-            <Switch checked={previous} onCheckedChange={setPrevious} aria-label="Previous container" />
-            Previous
+            <Switch checked={previous} onCheckedChange={setPrevious} aria-label={k.previousContainer} />
+            {k.previous}
           </Label>
           {containers.length > 1 ? (
             <Select value={container} onValueChange={setContainer}>
-              <SelectTrigger size="sm" className="w-44" aria-label="Container">
+              <SelectTrigger size="sm" className="w-44" aria-label={k.container}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -157,13 +160,13 @@ export function PodLogViewer({
             </Select>
           ) : null}
           <Select value={tail} onValueChange={setTail}>
-            <SelectTrigger size="sm" className="w-40" aria-label="Lines">
+            <SelectTrigger size="sm" className="w-40" aria-label={k.lines}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {["100", "500", "1000", "5000"].map((n) => (
                 <SelectItem key={n} value={n}>
-                  Last {n} lines
+                  {format(k.lastLines, { count: n })}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -173,12 +176,12 @@ export function PodLogViewer({
             variant="outline"
             onClick={() => setRefreshKey((k) => k + 1)}
             disabled={state === "loading"}
-            aria-label="Reload logs"
+            aria-label={k.reload}
           >
             <RefreshCwIcon className={state === "loading" ? "animate-spin" : undefined} />
           </Button>
           <Button size="icon-sm" variant="outline" asChild>
-            <a href={query({ download: "1" })} download aria-label="Download logs">
+            <a href={query({ download: "1" })} download aria-label={k.download}>
               <DownloadIcon />
             </a>
           </Button>
@@ -192,7 +195,7 @@ export function PodLogViewer({
           data-state={state}
           className="h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap"
         >
-          {logs || (state === "loading" ? "Loading…" : "No log output.")}
+          {logs || (state === "loading" ? t.common.status.loading : k.empty)}
         </pre>
       </CardContent>
     </Card>

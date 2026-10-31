@@ -6,7 +6,6 @@ import { PageBody } from "@/components/gantry/page-body"
 import { LanguageSelect } from "@/components/i18n/language-switcher"
 import { Mono, PageHeader } from "@/components/gantry/ui"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { formatDate, timeAgo } from "@/lib/format"
 import { listApiTokens } from "@/lib/server/auth/api-tokens"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getOidcConfig, NO_PASSWORD } from "@/lib/server/auth/oidc"
@@ -14,14 +13,8 @@ import { twoFactorStatus } from "@/lib/server/auth/two-factor"
 import { getDb } from "@/lib/server/db"
 import { getI18n } from "@/lib/i18n/server"
 
-export const metadata: Metadata = { title: "Account" }
-
-const SSO_MESSAGES: Record<string, string> = {
-  linked: "Your account is now linked to single sign-on.",
-  taken: "That SSO identity is already linked to another Gantry user.",
-  failed: "Linking failed. Try again or ask an administrator to check the server logs.",
-  denied: "Linking was cancelled.",
-  expired: "The linking attempt expired. Try again.",
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.account }
 }
 
 export default async function AccountPage({ searchParams }: PageProps<"/account">) {
@@ -37,18 +30,24 @@ export default async function AccountPage({ searchParams }: PageProps<"/account"
   // SSO-only accounts have no password to change or to protect with a second factor.
   const hasPassword = row.password_hash !== NO_PASSWORD
   const now = new Date().getTime()
-  const { t } = await getI18n()
+  const i18n = await getI18n()
+  const { t, format } = i18n
+  const ssoMessages: Record<string, string> = t.account.ssoMessages
+  const ssoMessage = typeof sso === "string" && Object.hasOwn(ssoMessages, sso) ? ssoMessages[sso] : undefined
 
   return (
     <PageBody>
       <PageHeader
-        title="Account"
-        description={`Signed in as ${user.username} (${user.role === "admin" ? "administrator" : "standard user"})`}
+        title={t.nav.pages.account}
+        description={format(t.account.signedInAs, {
+          username: user.username,
+          role: user.role === "admin" ? t.account.roleAdmin : t.account.roleUser,
+        })}
       />
       <div className="grid gap-4 px-4 lg:px-6">
-        {typeof sso === "string" && SSO_MESSAGES[sso] ? (
+        {ssoMessage ? (
           <p role="status" className="rounded-md border p-3 text-sm" data-testid="sso-message">
-            {SSO_MESSAGES[sso]}
+            {ssoMessage}
           </p>
         ) : null}
         <Card>
@@ -63,8 +62,8 @@ export default async function AccountPage({ searchParams }: PageProps<"/account"
         {hasPassword ? (
           <Card>
             <CardHeader>
-              <CardTitle>Change password</CardTitle>
-              <CardDescription>Use at least 8 characters. Your other sessions are signed out.</CardDescription>
+              <CardTitle>{t.account.password.title}</CardTitle>
+              <CardDescription>{t.account.password.description}</CardDescription>
             </CardHeader>
             <CardContent>
               <ChangePasswordForm />
@@ -74,11 +73,8 @@ export default async function AccountPage({ searchParams }: PageProps<"/account"
         {hasPassword ? (
           <Card>
             <CardHeader>
-              <CardTitle>Two-factor authentication</CardTitle>
-              <CardDescription>
-                Ask for a code from an authenticator app (TOTP) after your password. Single sign-on logins use your
-                identity provider&apos;s own MFA instead.
-              </CardDescription>
+              <CardTitle>{t.account.twoFactor.title}</CardTitle>
+              <CardDescription>{t.account.twoFactor.description}</CardDescription>
             </CardHeader>
             <CardContent>
               <TwoFactorCard enabled={twoFactor.enabled} recoveryCodesLeft={twoFactor.recoveryCodesLeft} />
@@ -88,18 +84,12 @@ export default async function AccountPage({ searchParams }: PageProps<"/account"
         {oidc ? (
           <Card>
             <CardHeader>
-              <CardTitle>Single sign-on</CardTitle>
-              <CardDescription>
-                {row.oidc_issuer
-                  ? "This account can sign in with SSO."
-                  : "Link your identity provider account to sign in with SSO. Gantry never links accounts by email."}
-              </CardDescription>
+              <CardTitle>{t.account.sso.title}</CardTitle>
+              <CardDescription>{row.oidc_issuer ? t.account.sso.linkedDescription : t.account.sso.linkDescription}</CardDescription>
             </CardHeader>
             <CardContent>
               {row.oidc_issuer ? (
-                <p className="text-sm">
-                  Linked to <Mono>{row.oidc_issuer}</Mono>
-                </p>
+                <p className="text-sm">{i18n.rich(t.account.sso.linkedTo, { issuer: <Mono>{row.oidc_issuer}</Mono> })}</p>
               ) : (
                 <LinkSsoButton />
               )}
@@ -108,22 +98,19 @@ export default async function AccountPage({ searchParams }: PageProps<"/account"
         ) : null}
         <Card>
           <CardHeader>
-            <CardTitle>API tokens</CardTitle>
-            <CardDescription>
-              Personal tokens for scripts calling Gantry&apos;s <Mono>/api</Mono> endpoints with your permissions. They
-              can&apos;t sign in to the web interface.
-            </CardDescription>
+            <CardTitle>{t.account.tokens.title}</CardTitle>
+            <CardDescription>{i18n.rich(t.account.tokens.description, { api: <Mono>/api</Mono> })}</CardDescription>
           </CardHeader>
           <CardContent>
             <ApiTokensCard
-              tokens={tokens.map((t) => ({
-                id: t.id,
-                name: t.name,
-                prefix: t.prefix,
-                createdLabel: timeAgo(t.created_at),
-                expiresLabel: t.expires_at ? formatDate(t.expires_at) : "never",
-                lastUsedLabel: t.last_used_at ? timeAgo(t.last_used_at) : "never",
-                expired: Boolean(t.expires_at && Date.parse(t.expires_at) <= now),
+              tokens={tokens.map((token) => ({
+                id: token.id,
+                name: token.name,
+                prefix: token.prefix,
+                createdLabel: i18n.timeAgo(token.created_at),
+                expiresLabel: token.expires_at ? i18n.formatDate(token.expires_at) : t.common.status.never,
+                lastUsedLabel: token.last_used_at ? i18n.timeAgo(token.last_used_at) : t.common.status.never,
+                expired: Boolean(token.expires_at && Date.parse(token.expires_at) <= now),
               }))}
             />
           </CardContent>

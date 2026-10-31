@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { EnvironmentsTable, type EnvironmentRow } from "@/components/gantry/admin-tables"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
+import { getI18n } from "@/lib/i18n/server"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { getDb } from "@/lib/server/db"
 import { docker } from "@/lib/server/docker/api"
@@ -12,7 +13,9 @@ import { environmentTarget, getCurrentEnvironment, listEnvironments } from "@/li
 import { kube } from "@/lib/server/kubernetes/api"
 import { credentialSummary, kubeTarget } from "@/lib/server/kubernetes/target"
 
-export const metadata: Metadata = { title: "Environments" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.environments }
+}
 
 export default async function EnvironmentsPage() {
   await requireAdmin()
@@ -56,12 +59,10 @@ export default async function EnvironmentsPage() {
     })
   )
 
+  const { t } = await getI18n()
   return (
     <PageBody>
-      <PageHeader
-        title="Environments"
-        description="Docker hosts and Kubernetes clusters managed by Gantry. Administrators can use all of them; standard users only those they were given access to, as viewer, operator or manager."
-      />
+      <PageHeader title={t.nav.pages.environments} description={t.environments.description} />
       <EnvironmentsTable data={rows} users={users.map(({ id, username }) => ({ id, username }))} />
     </PageBody>
   )

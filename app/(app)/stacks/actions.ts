@@ -6,6 +6,7 @@ import { refresh } from "next/cache"
 import { redirect } from "next/navigation"
 import { z } from "zod"
 
+import { getI18n } from "@/lib/i18n/server"
 import { ENVIRONMENT_FIELD } from "@/lib/permissions"
 import { expectedEnvironment, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
@@ -32,15 +33,6 @@ import type { ActionState } from "@/lib/validation"
 
 const idSchema = z.coerce.number().int().positive()
 
-const OP_LABELS: Record<StackOperation, string> = {
-  deploy: "deployed",
-  redeploy: "pulled and redeployed",
-  start: "started",
-  stop: "stopped",
-  restart: "restarted",
-  down: "taken down",
-}
-
 /** Field-level validation shared by create and update. Returns normalized text or errors. */
 function checkContent(formData: FormData) {
   const compose = normalizeText(String(formData.get("compose") ?? ""))
@@ -57,18 +49,19 @@ export async function createStack(_prev: ActionState, formData: FormData): Promi
   const rawName = String(formData.get("name") ?? "")
   const values = { name: rawName, compose: String(formData.get("compose") ?? ""), env: String(formData.get("env") ?? "") }
   const deploy = formData.get("intent") === "deploy"
+  const { t, format } = await getI18n()
 
   const name = stackNameSchema.safeParse(rawName)
   const { compose, env, fieldErrors } = checkContent(formData)
-  if (!name.success) fieldErrors.name = [name.error.issues[0]?.message ?? "Invalid name"]
+  if (!name.success) fieldErrors.name = [name.error.issues[0]?.message ?? t.stacks.messages.invalidName]
   if (Object.keys(fieldErrors).length || !name.success) {
-    return { error: "Please fix the highlighted fields", fieldErrors, values }
+    return { error: t.common.errors.fixFields, fieldErrors, values }
   }
 
   let createdId = 0
   const res = await runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), "stack.create", name.data, async (ctx) => {
     createdId = await createStackInCurrentEnvironment(ctx, { name: name.data, compose, env, deploy })
-    return `Stack ${name.data} created`
+    return format(t.stacks.messages.created, { name: name.data })
   })
 
   if (!res.ok) {
@@ -81,22 +74,23 @@ export async function createStack(_prev: ActionState, formData: FormData): Promi
 
 export async function updateStack(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const values = { compose: String(formData.get("compose") ?? ""), env: String(formData.get("env") ?? "") }
+  const { t, format } = await getI18n()
   const id = idSchema.safeParse(formData.get("id"))
-  if (!id.success) return { error: "Invalid stack", values }
+  if (!id.success) return { error: t.stacks.messages.invalidStack, values }
   const deploy = formData.get("intent") === "deploy"
 
   const { compose, env, fieldErrors } = checkContent(formData)
-  if (Object.keys(fieldErrors).length) return { error: "Please fix the highlighted fields", fieldErrors, values }
+  if (Object.keys(fieldErrors).length) return { error: t.common.errors.fixFields, fieldErrors, values }
 
   // runAction audits the deploy; the save is audited separately so it's recorded even if the deploy fails.
   const res = await runAction(inEnvironment("manage", expectedEnvironment(formData.get(ENVIRONMENT_FIELD))), deploy ? "stack.deploy" : "stack.update", await auditName(id.data), async (ctx) => {
     const stack = await loadStack(id.data)
-    if (await getStackGit(stack.id)) throw new UserError("This stack's compose file comes from its Git repository")
+    if (await getStackGit(stack.id)) throw new UserError(t.stacks.messages.composeFromGit)
     await updateStackContent(stack.id, compose, env)
-    if (!deploy) return `Stack ${stack.name} saved`
+    if (!deploy) return format(t.stacks.messages.saved, { name: stack.name })
     await audit(ctx.user, "stack.update", stack.name)
     await operate({ ...stack, compose, env }, "deploy", ctx)
-    return `Stack ${stack.name} saved and deployed`
+    return format(t.stacks.messages.savedDeployed, { name: stack.name })
   })
   return { ...res, values }
 }
@@ -119,17 +113,20 @@ export async function stackOperation(
   opts: { removeVolumes?: boolean; force?: boolean } = {},
   environmentId?: number
 ): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const parsed = operationSchema.safeParse({ id, op, removeVolumes: opts.removeVolumes, force: opts.force })
-  if (!parsed.success) return { error: "Invalid request" }
+  if (!parsed.success) return { error: t.stacks.messages.invalidRequest }
   const { removeVolumes, force } = parsed.data
 
   const target = `${await auditName(parsed.data.id)}${removeVolumes ? " (with volumes)" : ""}${force ? " (forced)" : ""}`
   return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), `stack.${parsed.data.op}`, target, async (ctx) => {
     const stack = await loadStack(parsed.data.id)
     const run = await operate(stack, parsed.data.op, ctx, { removeVolumes: removeVolumes === true, force: force === true })
-    if (run.skipped) return `${stack.name} is already at ${shortSha(run.commit?.sha)} with the same .env; nothing to redeploy`
-    const at = run.commit ? ` at ${shortSha(run.commit.sha)}` : ""
-    return `${stack.name} ${OP_LABELS[parsed.data.op]}${at}`
+    if (run.skipped) return format(t.stacks.messages.nothingToRedeploy, { name: stack.name, sha: shortSha(run.commit?.sha) })
+    const done = t.stacks.messages.operationDone[parsed.data.op]
+    return run.commit
+      ? format(t.stacks.messages.operationAt, { name: stack.name, done, sha: shortSha(run.commit.sha) })
+      : format(t.stacks.messages.operation, { name: stack.name, done })
   })
 }
 
@@ -139,8 +136,9 @@ export async function deleteStack(
   opts: { removeVolumes?: boolean } = {},
   environmentId?: number
 ): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const parsed = idSchema.safeParse(id)
-  if (!parsed.success) return { error: "Invalid stack" }
+  if (!parsed.success) return { error: t.stacks.messages.invalidStack }
 
   const target = `${await auditName(parsed.data)}${opts.removeVolumes ? " (with volumes)" : ""}`
   return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "stack.delete", target, async (ctx) => {
@@ -161,16 +159,14 @@ export async function deleteStack(
       if (left.length > 0) {
         await audit(ctx.user, "stack.down.failed", stack.name)
         refresh()
-        throw new UserError(
-          `Could not take ${stack.name} down, so it was not deleted. See the output on the stack page.`
-        )
+        throw new UserError(format(t.stacks.messages.downFailed, { name: stack.name }))
       }
     }
     await deleteStackRecord(stack.id)
     await removeStackDir(stackDir(stack.environment_id, stack.name)).catch((err) =>
       console.error(`[gantry] could not remove stack directory for ${stack.name}`, err)
     )
-    return `Stack ${stack.name} deleted`
+    return format(t.stacks.messages.deleted, { name: stack.name })
   })
 }
 
@@ -182,48 +178,44 @@ export async function deleteStack(
  * containers controls.
  */
 export async function importProject(project: string): Promise<ActionState> {
+  const { t, format } = await getI18n()
+  const msg = t.stacks.messages
   const name = stackNameSchema.safeParse(project)
-  if (!name.success) return { error: "This project name can't be used for a Gantry stack" }
+  if (!name.success) return { error: msg.importBadName }
 
   return runAction("admin", "stack.import", name.data, async (ctx) => {
     // The labels naming the compose file come from the daemon; only trust them
     // for the local socket, whose files are the ones Gantry can see.
     const environment = await getCurrentEnvironment()
     if (environment?.type !== "socket") {
-      throw new UserError("Import only works for the local Docker socket environment. Create the stack by pasting its compose file.")
+      throw new UserError(msg.importSocketOnly)
     }
     const environmentId = environment.id
     if (await findStackByName(environmentId, name.data)) {
-      throw new UserError(`A stack named "${name.data}" already exists in this environment`)
+      throw new UserError(format(msg.importExists, { name: name.data }))
     }
 
     const api = await ctx.docker()
     const containers = groupByProject(await api.listContainers(true)).get(name.data) ?? []
-    if (containers.length === 0) throw new UserError(`No containers found for project "${name.data}"`)
+    if (containers.length === 0) throw new UserError(format(msg.importNoContainers, { name: name.data }))
 
     const labels = containers[0].Labels ?? {}
     const files = (labels[CONFIG_FILES_LABEL] ?? "").split(",").map((f) => f.trim()).filter(Boolean)
     if (files.length !== 1) {
-      throw new UserError(
-        files.length === 0
-          ? "The project's containers don't record their compose file."
-          : "Projects made of several compose files can't be imported. Create a stack and paste the merged file (docker compose config)."
-      )
+      throw new UserError(files.length === 0 ? msg.importNoFile : msg.importSeveralFiles)
     }
     const file = files[0]
-    if (!path.isAbsolute(file) || !/\.ya?ml$/i.test(file)) throw new UserError(`Unsupported compose file path: ${file}`)
+    if (!path.isAbsolute(file) || !/\.ya?ml$/i.test(file)) throw new UserError(format(msg.importUnsupportedPath, { file }))
 
     let compose: string
     try {
       const stat = await fs.stat(/* turbopackIgnore: true */ file)
       if (!stat.isFile()) throw new Error("not a file")
-      if (stat.size > MAX_COMPOSE_BYTES) throw new UserError("The compose file is too large to import")
+      if (stat.size > MAX_COMPOSE_BYTES) throw new UserError(msg.importTooLarge)
       compose = normalizeText(await fs.readFile(/* turbopackIgnore: true */ file, "utf8"))
     } catch (err) {
       if (err instanceof UserError) throw err
-      throw new UserError(
-        `Gantry can't read ${file}. When Gantry runs in a container it only sees its own filesystem; create the stack by pasting the file instead.`
-      )
+      throw new UserError(format(msg.importUnreadable, { file }))
     }
     const check = validateCompose(compose)
     if (!check.ok) throw new UserError(`${file}: ${check.error}`)
@@ -237,6 +229,6 @@ export async function importProject(project: string): Promise<ActionState> {
     }
 
     await insertStack({ environment_id: environmentId, name: name.data, compose, env, created_by: ctx.user.username })
-    return `Imported ${name.data}`
+    return format(msg.imported, { name: name.data })
   })
 }

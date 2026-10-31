@@ -12,6 +12,7 @@ import { Mono, PageHeader } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { getI18n } from "@/lib/i18n/server"
 import { namespaceSchema, objectNameSchema } from "@/lib/kubernetes/names"
 import { podStatus } from "@/lib/kubernetes/rows"
 import type { ContainerState } from "@/lib/server/kubernetes/api"
@@ -19,7 +20,8 @@ import { tryKube } from "@/lib/server/kubernetes"
 
 export async function generateMetadata({ params }: PageProps<"/kubernetes/pods/[namespace]/[name]">): Promise<Metadata> {
   const { name } = await params
-  return { title: `Pod ${decodeURIComponent(name)}` }
+  const { t, format } = await getI18n()
+  return { title: format(t.kubernetes.pods.title, { name: decodeURIComponent(name) }) }
 }
 
 function stateLabel(state?: ContainerState) {
@@ -33,11 +35,13 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
   const { namespace: rawNs, name: rawName } = await params
   const namespace = decodeURIComponent(rawNs)
   const name = decodeURIComponent(rawName)
+  const { t, format, rich } = await getI18n()
+  const k = t.kubernetes
   const back = (
     <Button variant="outline" size="sm" asChild>
       <Link href="/kubernetes/pods">
         <ArrowLeftIcon data-icon="inline-start" />
-        Pods
+        {t.nav.pages.pods}
       </Link>
     </Button>
   )
@@ -54,8 +58,8 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
   if (!namespaceSchema.safeParse(namespace).success || !objectNameSchema.safeParse(name).success) {
     return (
       <PageBody>
-        <PageHeader title="Pod" actions={back} />
-        <KubeUnavailable message="Invalid pod name" />
+        <PageHeader title={k.pods.pod} actions={back} />
+        <KubeUnavailable message={k.pods.invalidName} />
       </PageBody>
     )
   }
@@ -64,7 +68,7 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
   if (result.error !== undefined) {
     return (
       <PageBody>
-        <PageHeader title={name} description={`Pod in ${namespace}`} actions={back} />
+        <PageHeader title={name} description={format(k.pods.podIn, { namespace })} actions={back} />
         <KubeUnavailable message={result.error} />
       </PageBody>
     )
@@ -80,12 +84,10 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
         title={name}
         description={
           <span className="flex flex-wrap items-center gap-2">
-            Pod in {namespace} · <KubeStatus status={podStatus(pod)} />
-            {pod.spec?.nodeName ? <span>on {pod.spec.nodeName}</span> : null}
+            {rich(k.pods.podInStatus, { namespace, status: <KubeStatus status={podStatus(pod)} /> })}
+            {pod.spec?.nodeName ? <span>{format(k.pods.onNode, { node: pod.spec.nodeName })}</span> : null}
             {pod.status?.podIP ? <Mono>{pod.status.podIP}</Mono> : null}
-            <span>
-              created <Age at={pod.metadata.creationTimestamp ?? ""} />
-            </span>
+            <span>{rich(k.pods.created, { age: <Age at={pod.metadata.creationTimestamp ?? ""} /> })}</span>
           </span>
         }
         actions={
@@ -98,17 +100,17 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
       <div className="px-4 lg:px-6">
         <Card>
           <CardHeader>
-            <CardTitle>Containers</CardTitle>
+            <CardTitle>{k.pods.containers}</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Image</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead>Ready</TableHead>
-                  <TableHead>Restarts</TableHead>
+                  <TableHead>{t.common.fields.name}</TableHead>
+                  <TableHead>{t.common.fields.image}</TableHead>
+                  <TableHead>{t.common.fields.state}</TableHead>
+                  <TableHead>{k.common.ready}</TableHead>
+                  <TableHead>{k.pods.restarts}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -121,7 +123,7 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
                     <TableCell>
                       <KubeStatus status={stateLabel(c.status?.state)} />
                     </TableCell>
-                    <TableCell>{c.status?.ready ? "yes" : "no"}</TableCell>
+                    <TableCell>{c.status?.ready ? k.common.yes : k.common.no}</TableCell>
                     <TableCell className="tabular-nums">{c.status?.restartCount ?? 0}</TableCell>
                   </TableRow>
                 ))}
@@ -151,7 +153,7 @@ export default async function PodPage({ params }: PageProps<"/kubernetes/pods/[n
           />
         ) : (
           <p className="text-sm text-muted-foreground" data-testid="logs-hidden">
-            Logs need the operator role in this environment.
+            {k.pods.logsHidden}
           </p>
         )}
       </div>

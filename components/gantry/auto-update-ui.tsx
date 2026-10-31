@@ -18,6 +18,8 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 import type { ActionState } from "@/lib/validation"
 
 export function AutoUpdateSchedule({
@@ -33,11 +35,15 @@ export function AutoUpdateSchedule({
   timeZone: string
   running: boolean
 }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const text = t.autoUpdate.schedule
   const [state, formAction, saving] = useActionState<ActionState, FormData>(saveSchedule, {})
+  const savedMessage = t.common.status.saved
   React.useEffect(() => {
-    if (state.ok) toast.success(state.message ?? "Saved")
+    if (state.ok) toast.success(state.message ?? savedMessage)
     else if (state.error && !state.fieldErrors) toast.error(state.error)
-  }, [state])
+  }, [state, savedMessage])
   const [runPending, run] = useRunAction()
   const uid = React.useId()
 
@@ -45,9 +51,9 @@ export function AutoUpdateSchedule({
     <div className="px-4 lg:px-6">
       <Card>
         <CardHeader>
-          <CardTitle>Schedule</CardTitle>
+          <CardTitle>{text.title}</CardTitle>
           <CardDescription>
-            Server time is {serverTime} ({timeZone}). Set <code>TZ</code> on the Gantry container to change the time zone.
+            {i18n.rich(text.serverTime, { time: serverTime, zone: timeZone, tz: <code>TZ</code> })}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -55,24 +61,24 @@ export function AutoUpdateSchedule({
           <form method="post" onSubmit={submitKeepingValues(formAction)} className="flex flex-wrap items-end gap-4">
             <Label className="h-8 font-normal">
               <Checkbox name="enabled" value="on" defaultChecked={enabled} />
-              Run every day
+              {text.runDaily}
             </Label>
             <Field data-invalid={state.fieldErrors?.time ? true : undefined} className="w-32">
-              <FieldLabel htmlFor={`${uid}-time`}>At</FieldLabel>
+              <FieldLabel htmlFor={`${uid}-time`}>{text.at}</FieldLabel>
               <Input id={`${uid}-time`} name="time" type="time" defaultValue={time} required />
               <FieldError>{state.fieldErrors?.time?.[0]}</FieldError>
             </Field>
             <Button type="submit" variant="outline" disabled={saving}>
               <SaveIcon data-icon="inline-start" />
-              {saving ? "Saving…" : "Save schedule"}
+              {saving ? t.common.status.saving : text.save}
             </Button>
             <Button type="button" disabled={runPending || running} onClick={() => run(runAutoUpdateNow)}>
               <PlayIcon data-icon="inline-start" />
-              {runPending || running ? "Updating…" : "Run now"}
+              {runPending || running ? text.updating : text.runNow}
             </Button>
           </form>
           <FieldDescription className="mt-3">
-            Runs on every environment. Results are sent to the notification channels that subscribe to auto-update results.
+            {text.help}
           </FieldDescription>
         </CardContent>
       </Card>
@@ -97,27 +103,30 @@ const STATUS_BADGE: Record<AutoUpdateResultRow["status"], string> = {
 }
 
 const resultHelper = columnHelperFor<AutoUpdateResultRow>()
-const resultColumns = resultHelper.columns([
-  resultHelper.accessor("container", {
-    header: ({ column }) => <SortHeader column={column} title="Container" />,
-    cell: ({ row }) => <span className="font-medium">{row.original.container}</span>,
-    enableHiding: false,
-  }),
-  resultHelper.accessor("status", {
-    header: ({ column }) => <SortHeader column={column} title="Result" />,
-    cell: ({ row }) => (
-      <Badge variant="outline" className={STATUS_BADGE[row.original.status]}>
-        {row.original.status === "current" ? "up to date" : row.original.status}
-      </Badge>
-    ),
-  }),
-  resultHelper.accessor("image", { header: "Image", cell: ({ row }) => <Mono>{row.original.image}</Mono> }),
-  resultHelper.accessor("environment", { header: "Environment" }),
-  resultHelper.accessor("message", {
-    header: "Details",
-    cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.original.message || "—"}</span>,
-  }),
-])
+function buildResultColumns({ t }: I18n) {
+  const c = t.autoUpdate.columns
+  return resultHelper.columns([
+    resultHelper.accessor("container", {
+      header: ({ column }) => <SortHeader column={column} title={c.container} />,
+      cell: ({ row }) => <span className="font-medium">{row.original.container}</span>,
+      enableHiding: false,
+    }),
+    resultHelper.accessor("status", {
+      header: ({ column }) => <SortHeader column={column} title={c.status} />,
+      cell: ({ row }) => (
+        <Badge variant="outline" className={STATUS_BADGE[row.original.status]}>
+          {t.autoUpdate.results.status[row.original.status]}
+        </Badge>
+      ),
+    }),
+    resultHelper.accessor("image", { header: c.image, cell: ({ row }) => <Mono>{row.original.image}</Mono> }),
+    resultHelper.accessor("environment", { header: c.environment }),
+    resultHelper.accessor("message", {
+      header: c.message,
+      cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.original.message || "—"}</span>,
+    }),
+  ])
+}
 
 export function AutoUpdateResults({
   trigger,
@@ -128,14 +137,26 @@ export function AutoUpdateResults({
   finishedLabel: string
   results: AutoUpdateResultRow[]
 }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const r = t.autoUpdate.results
+  const resultColumns = React.useMemo(() => buildResultColumns(i18n), [i18n])
   return (
     <div className="flex flex-col gap-2">
       <p className="px-4 text-sm text-muted-foreground lg:px-6" data-testid="auto-update-last-run">
-        Last run ({trigger === "manual" ? "started by hand" : "scheduled"}) finished {finishedLabel}
-        {results.length ? "" : ": no running containers had auto-update on"}.
+        {i18n.format(results.length ? r.lastRun : r.lastRunEmpty, {
+          trigger: trigger === "manual" ? r.manual : r.scheduled,
+          finished: finishedLabel,
+        })}
       </p>
       {results.length ? (
-        <DataTable data={results} columns={resultColumns} getRowId={(r) => r.id} emptyMessage="Nothing to update." />
+        <DataTable
+          data={results}
+          columns={resultColumns}
+          getRowId={(row) => row.id}
+          emptyMessage={r.empty}
+          columnLabels={t.autoUpdate.columns}
+        />
       ) : null}
     </div>
   )
@@ -152,12 +173,13 @@ export type AutoUpdateContainerRow = {
 }
 
 function EnrolSwitch({ row }: { row: AutoUpdateContainerRow }) {
+  const { t, format } = useI18n()
   const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   if (row.enrolment === "label") {
     return (
-      <Badge variant="secondary" title="Enabled by the gantry.auto-update=true label">
-        label
+      <Badge variant="secondary" title={t.autoUpdate.labelTitle}>
+        {t.autoUpdate.labelBadge}
       </Badge>
     )
   }
@@ -165,57 +187,64 @@ function EnrolSwitch({ row }: { row: AutoUpdateContainerRow }) {
     <Switch
       checked={row.enrolment === "rule"}
       disabled={pending}
-      aria-label={`Auto-update ${row.name}`}
+      aria-label={format(t.autoUpdate.toggle, { name: row.name })}
       onCheckedChange={(on) => run(() => setContainerAutoUpdate(row.name, on, environmentId))}
     />
   )
 }
 
 const containerHelper = columnHelperFor<AutoUpdateContainerRow>()
-const containerColumns = containerHelper.columns([
-  containerHelper.accessor((r) => r.enrolment !== null, {
-    id: "auto-update",
-    header: ({ column }) => <SortHeader column={column} title="Auto-update" />,
-    cell: ({ row }) => <EnrolSwitch row={row.original} />,
-    enableHiding: false,
-  }),
-  containerHelper.accessor("name", {
-    header: ({ column }) => <SortHeader column={column} title="Name" />,
-    cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
-    enableHiding: false,
-  }),
-  containerHelper.accessor("state", {
-    header: "State",
-    cell: ({ row }) => <StateBadge state={row.original.state} />,
-  }),
-  containerHelper.accessor("image", {
-    header: "Image",
-    cell: ({ row }) => (
-      <div className="flex items-center gap-1.5">
-        <Mono className="max-w-72 truncate">{row.original.image}</Mono>
-        {row.original.update === "update" ? (
-          <Badge variant="outline" className="border-amber-500/50 px-1.5 text-amber-700 dark:text-amber-400">
-            update
-          </Badge>
-        ) : null}
-      </div>
-    ),
-  }),
-  containerHelper.accessor("stack", {
-    header: "Stack",
-    cell: ({ row }) => row.original.stack ?? <span className="text-muted-foreground">—</span>,
-  }),
-])
+function buildContainerColumns({ t }: I18n) {
+  const c = t.autoUpdate.columns
+  return containerHelper.columns([
+    containerHelper.accessor((r) => r.enrolment !== null, {
+      id: "auto-update",
+      header: ({ column }) => <SortHeader column={column} title={c["auto-update"]} />,
+      cell: ({ row }) => <EnrolSwitch row={row.original} />,
+      enableHiding: false,
+    }),
+    containerHelper.accessor("name", {
+      header: ({ column }) => <SortHeader column={column} title={c.name} />,
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+      enableHiding: false,
+    }),
+    containerHelper.accessor("state", {
+      header: c.state,
+      cell: ({ row }) => <StateBadge state={row.original.state} />,
+    }),
+    containerHelper.accessor("image", {
+      header: c.image,
+      cell: ({ row }) => (
+        <div className="flex items-center gap-1.5">
+          <Mono className="max-w-72 truncate">{row.original.image}</Mono>
+          {row.original.update === "update" ? (
+            <Badge variant="outline" className="border-amber-500/50 px-1.5 text-amber-700 dark:text-amber-400">
+              {t.autoUpdate.updateBadge}
+            </Badge>
+          ) : null}
+        </div>
+      ),
+    }),
+    containerHelper.accessor("stack", {
+      header: c.stack,
+      cell: ({ row }) => row.original.stack ?? <span className="text-muted-foreground">—</span>,
+    }),
+  ])
+}
 
 export function AutoUpdateContainers({ data }: { data: AutoUpdateContainerRow[] }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const containerColumns = React.useMemo(() => buildContainerColumns(i18n), [i18n])
   return (
     <DataTable
       data={data}
       columns={containerColumns}
       getRowId={(r) => r.id}
       searchText={(r) => `${r.name} ${r.image} ${r.stack ?? ""} ${r.enrolment ? "auto-update on" : ""}`}
-      searchPlaceholder="Search containers…"
-      emptyMessage="No containers."
+      searchPlaceholder={t.autoUpdate.searchPlaceholder}
+      emptyMessage={t.autoUpdate.empty}
+      columnLabels={t.autoUpdate.columns}
       pageSize={20}
     />
   )

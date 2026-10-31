@@ -21,16 +21,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useI18n } from "@/lib/i18n/client"
 import { cn } from "@/lib/utils"
 
 type Status = "idle" | "connecting" | "connected" | "exited" | "error"
 
-const STATUS: Record<Status, { label: string; dot: string }> = {
-  idle: { label: "Not connected", dot: "bg-muted-foreground" },
-  connecting: { label: "Connecting…", dot: "bg-amber-500" },
-  connected: { label: "Connected", dot: "bg-emerald-500" },
-  exited: { label: "Exited", dot: "bg-muted-foreground" },
-  error: { label: "Error", dot: "bg-red-500" },
+// Labels: t.containers.console.status.
+const STATUS_DOT: Record<Status, string> = {
+  idle: "bg-muted-foreground",
+  connecting: "bg-amber-500",
+  connected: "bg-emerald-500",
+  exited: "bg-muted-foreground",
+  error: "bg-red-500",
 }
 
 const THEME = {
@@ -59,7 +61,7 @@ export function ExecConsole({
   containerId,
   open,
   running,
-  description = "Interactive shell inside the container (docker exec)",
+  description,
   allowUser = true,
   controls,
 }: {
@@ -72,6 +74,8 @@ export function ExecConsole({
   controls?: React.ReactNode
 }) {
   const router = useRouter()
+  const i18n = useI18n()
+  const text = i18n.t.containers.console
   const environmentId = useEnvironmentId()
   const hostRef = React.useRef<HTMLDivElement>(null)
   const termRef = React.useRef<Terminal | null>(null)
@@ -180,13 +184,13 @@ export function ExecConsole({
       response = await api(sid, { signal: abort.signal, cache: "no-store" })
     } catch {
       setStatus("error")
-      setError("Lost connection to the console.")
+      setError(text.lostConnection)
       return
     }
     if (response.status === 401) return router.replace("/login")
     if (!response.ok || !response.body) {
       setStatus("error")
-      setError(((await response.json().catch(() => null)) as { error?: string } | null)?.error ?? "Console failed")
+      setError(((await response.json().catch(() => null)) as { error?: string } | null)?.error ?? text.failed)
       return
     }
 
@@ -207,7 +211,8 @@ export function ExecConsole({
     if (abort.signal.aborted || sidRef.current !== sid) return // disconnected on purpose
     sidRef.current = null
     const exitCode = await closeRemote(sid)
-    term.write(`\r\n\x1b[2m[process exited${exitCode === null ? "" : ` with code ${exitCode}`}]\x1b[0m\r\n`)
+    const exited = exitCode === null ? text.processExited : i18n.format(text.processExitedCode, { code: exitCode })
+    term.write(`\r\n\x1b[2m${exited}\x1b[0m\r\n`)
     setStatus("exited")
   }
 
@@ -216,7 +221,7 @@ export function ExecConsole({
     sidRef.current = null
     abortRef.current?.abort()
     if (sid) await closeRemote(sid)
-    termRef.current?.write("\r\n\x1b[2m[disconnected]\x1b[0m\r\n")
+    termRef.current?.write(`\r\n\x1b[2m${text.disconnected}\x1b[0m\r\n`)
     setStatus("idle")
   }
 
@@ -250,21 +255,21 @@ export function ExecConsole({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          Console
+          {text.title}
           <Badge variant="outline" className="gap-1.5 px-1.5 font-normal text-muted-foreground">
-            <span className={cn("size-2 rounded-full", STATUS[status].dot)} />
-            {STATUS[status].label}
+            <span className={cn("size-2 rounded-full", STATUS_DOT[status])} />
+            {text.status[status]}
           </Badge>
         </CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <CardDescription>{description ?? text.description}</CardDescription>
         <CardAction className="flex flex-wrap items-center gap-2">
           {controls}
           <Select value={shell} onValueChange={(v) => setShell(v as ExecShell)} disabled={live || busy}>
-            <SelectTrigger size="sm" className="w-32" aria-label="Shell">
+            <SelectTrigger size="sm" className="w-32" aria-label={text.shell}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">Auto shell</SelectItem>
+              <SelectItem value="auto">{text.autoShell}</SelectItem>
               <SelectItem value="bash">/bin/bash</SelectItem>
               <SelectItem value="sh">/bin/sh</SelectItem>
             </SelectContent>
@@ -273,8 +278,8 @@ export function ExecConsole({
             <Input
               value={user}
               onChange={(e) => setUser(e.target.value)}
-              placeholder="User (default)"
-              aria-label="Run as user"
+              placeholder={text.userPlaceholder}
+              aria-label={text.runAsUser}
               disabled={live || busy}
               className="h-7 w-36 text-xs"
             />
@@ -282,12 +287,12 @@ export function ExecConsole({
           {live ? (
             <Button size="sm" variant="outline" onClick={disconnect}>
               <PlugIcon data-icon="inline-start" />
-              Disconnect
+              {text.disconnect}
             </Button>
           ) : (
             <Button size="sm" onClick={connect} disabled={!running || busy}>
               <PlugZapIcon data-icon="inline-start" />
-              {status === "exited" || status === "error" ? "Reconnect" : "Connect"}
+              {status === "exited" || status === "error" ? text.reconnect : text.connect}
             </Button>
           )}
         </CardAction>
@@ -295,14 +300,14 @@ export function ExecConsole({
       <CardContent className="flex flex-col gap-2">
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {!running ? (
-          <p className="text-sm text-muted-foreground">Start the container to open a console.</p>
+          <p className="text-sm text-muted-foreground">{text.notRunning}</p>
         ) : null}
         <div className="relative h-[28rem] overflow-hidden rounded-lg border bg-[#0a0a0a] p-2">
           <div ref={hostRef} className="size-full" data-testid="exec-terminal" />
           {!started ? (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-neutral-400">
               <TerminalSquareIcon className="size-6" />
-              Choose a shell and press Connect
+              {text.hint}
             </div>
           ) : null}
         </div>

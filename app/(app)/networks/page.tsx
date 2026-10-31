@@ -3,16 +3,20 @@ import type { Metadata } from "next"
 import { NetworksTable, type NetworkRow } from "@/components/gantry/networks-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getDocker, getPermissions } from "@/lib/server/environments"
 import { tryDocker } from "@/lib/server/views"
 
-export const metadata: Metadata = { title: "Networks" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.networks }
+}
 
 const BUILTIN = new Set(["bridge", "host", "none"])
 
 export default async function NetworksPage() {
   await requireUser()
+  const { t, format } = await getI18n()
   const can = await getPermissions()
   const result = await tryDocker(async () => {
     const api = await getDocker()
@@ -23,7 +27,7 @@ export default async function NetworksPage() {
   if (result.error !== undefined) {
     return (
       <PageBody>
-        <PageHeader title="Networks" />
+        <PageHeader title={t.nav.pages.networks} />
         <DockerUnavailable message={result.error} />
       </PageBody>
     )
@@ -51,7 +55,7 @@ export default async function NetworksPage() {
 
   return (
     <PageBody>
-      <PageHeader title="Networks" description={`${rows.length} network(s)`} />
+      <PageHeader title={t.nav.pages.networks} description={format(t.networks.count, { count: rows.length })} />
       <NetworksTable data={rows} canManage={can.manage} />
     </PageBody>
   )

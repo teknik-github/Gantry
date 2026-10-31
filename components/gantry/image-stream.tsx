@@ -5,6 +5,7 @@ import Link from "next/link"
 import { CircleAlertIcon, CircleCheckIcon, CircleSlashIcon, LoaderIcon } from "lucide-react"
 
 import { Mono } from "@/components/gantry/ui"
+import { useI18n } from "@/lib/i18n/client"
 import { JsonLineParser, type BuildStreamEvent, type DockerProgress, type FieldErrors } from "@/lib/image-build"
 import { cn } from "@/lib/utils"
 
@@ -61,6 +62,7 @@ export type StartError = { error: string; fieldErrors?: FieldErrors }
  * stream ended (state.done tells how).
  */
 export function useImageStream() {
+  const { t, format } = useI18n()
   const [state, setState] = React.useState<StreamState>(EMPTY)
   const abortRef = React.useRef<AbortController | null>(null)
 
@@ -76,12 +78,12 @@ export function useImageStream() {
       res = await fetch(url, { ...init, signal: controller.signal })
     } catch {
       setState(EMPTY)
-      return controller.signal.aborted ? null : { error: "Request failed. Check your connection." }
+      return controller.signal.aborted ? null : { error: t.common.errors.requestFailed }
     }
     if (!res.ok || !res.body) {
       setState(EMPTY)
       const body = (await res.json().catch(() => null)) as StartError | null
-      return { error: body?.error ?? `Request failed (${res.status})`, fieldErrors: body?.fieldErrors }
+      return { error: body?.error ?? format(t.images.stream.requestFailedStatus, { status: res.status }), fieldErrors: body?.fieldErrors }
     }
 
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -126,13 +128,13 @@ export function useImageStream() {
           status: cancelled ? "cancelled" : "error",
           tags: [],
           pushed: [],
-          error: cancelled ? "Cancelled" : "The connection to Gantry was lost; the build was stopped.",
+          error: cancelled ? t.images.stream.cancelled : t.images.stream.connectionLost,
         },
       }))
     }
     if (abortRef.current === controller) abortRef.current = null
     return null
-  }, [])
+  }, [t, format])
 
   const cancel = React.useCallback(() => abortRef.current?.abort(), [])
   const reset = React.useCallback(() => setState(EMPTY), [])
@@ -141,6 +143,7 @@ export function useImageStream() {
 
 /** Live output: Docker/git lines, Gantry's steps highlighted, layer progress below. */
 export function StreamLog({ state, label, className }: { state: StreamState; label: string; className?: string }) {
+  const { t } = useI18n()
   const ref = React.useRef<HTMLPreElement>(null)
   const stick = React.useRef(true)
   React.useEffect(() => {
@@ -173,11 +176,11 @@ export function StreamLog({ state, label, className }: { state: StreamState; lab
             )
           )
         ) : (
-          <span className="text-slate-400">{state.running ? "Starting…" : "No output yet."}</span>
+          <span className="text-slate-400">{state.running ? t.images.stream.starting : t.images.stream.noOutput}</span>
         )}
       </pre>
       {state.progress.length ? (
-        <ul className="grid gap-0.5 text-xs text-muted-foreground" aria-label="Layer progress">
+        <ul className="grid gap-0.5 text-xs text-muted-foreground" aria-label={t.images.stream.layerProgress}>
           {state.progress.map((p) => (
             <li key={p.id} className="flex gap-2 font-mono">
               <span className="w-28 shrink-0 truncate">{p.id}</span>
@@ -193,24 +196,26 @@ export function StreamLog({ state, label, className }: { state: StreamState; lab
 
 /** Outcome banner: image id and tags, pushed digests, or the error (with a Registries link for login problems). */
 export function StreamResult({ done, what }: { done: DoneEvent; what: "build" | "push" }) {
+  const i18n = useI18n()
+  const text = i18n.t.images.stream
   if (done.status === "success") {
     return (
       <div role="status" className="grid gap-2 rounded-lg border border-sea/40 bg-sea/12 p-3 text-sm" data-testid="stream-result">
         <p className="flex items-center gap-2 font-medium text-sea">
           <CircleCheckIcon className="size-4" />
-          {what === "build" ? "Build succeeded" : "Push succeeded"}
+          {what === "build" ? text.buildSucceeded : text.pushSucceeded}
         </p>
         {done.imageId ? (
           <p>
-            Image <Mono data-testid="built-image-id">{done.imageId}</Mono>
+            {i18n.rich(text.image, { id: <Mono data-testid="built-image-id">{done.imageId}</Mono> })}
           </p>
         ) : null}
         {done.tags.length && what === "build" ? (
           <div className="flex flex-wrap items-center gap-1">
-            Tagged
-            {done.tags.map((t) => (
-              <Link key={t} href="/images" className="rounded bg-background px-1.5 py-0.5 font-mono text-xs underline-offset-4 hover:underline">
-                {t}
+            {text.tagged}
+            {done.tags.map((tag) => (
+              <Link key={tag} href="/images" className="rounded bg-background px-1.5 py-0.5 font-mono text-xs underline-offset-4 hover:underline">
+                {tag}
               </Link>
             ))}
           </div>
@@ -219,7 +224,7 @@ export function StreamResult({ done, what }: { done: DoneEvent; what: "build" | 
           <ul className="grid gap-0.5">
             {done.pushed.map((p) => (
               <li key={p.reference}>
-                Pushed <Mono>{p.reference}</Mono>
+                {i18n.rich(text.pushed, { reference: <Mono>{p.reference}</Mono> })}
                 {p.digest ? (
                   <>
                     {" "}
@@ -237,7 +242,7 @@ export function StreamResult({ done, what }: { done: DoneEvent; what: "build" | 
     return (
       <div role="status" className="flex items-center gap-2 rounded-lg border p-3 text-sm text-muted-foreground" data-testid="stream-result">
         <CircleSlashIcon className="size-4" />
-        {what === "build" ? "Build cancelled" : "Push cancelled"}
+        {what === "build" ? text.buildCancelled : text.pushCancelled}
       </div>
     )
   }
@@ -245,13 +250,13 @@ export function StreamResult({ done, what }: { done: DoneEvent; what: "build" | 
     <div role="alert" className="grid gap-1 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm" data-testid="stream-result">
       <p className="flex items-center gap-2 font-medium text-destructive">
         <CircleAlertIcon className="size-4" />
-        {what === "build" ? "Build failed" : "Push failed"}
+        {what === "build" ? text.buildFailed : text.pushFailed}
       </p>
       <p className="break-words whitespace-pre-wrap">{done.error}</p>
       {done.hint === "registries" ? (
         <p>
           <Link href="/registries" className="font-medium underline underline-offset-4">
-            Open Registries
+            {text.openRegistries}
           </Link>
         </p>
       ) : null}

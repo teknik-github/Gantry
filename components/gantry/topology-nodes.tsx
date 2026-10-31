@@ -13,6 +13,7 @@ import {
 } from "@xyflow/react"
 import { FolderIcon, HardDriveIcon, LayersIcon, NetworkIcon } from "lucide-react"
 
+import { useI18n } from "@/lib/i18n/client"
 import { cn } from "@/lib/utils"
 import type { BindNode, ContainerNode, NetworkNode, ProjectNode, TopologyEdge, VolumeNode } from "@/lib/topology"
 import { portBadges, type Point } from "@/lib/topology-layout"
@@ -67,14 +68,15 @@ function shell({ dim, match, focus }: Highlight) {
 }
 
 export function ContainerNodeView({ data }: NodeProps<ContainerFlowNode>) {
+  const { t, format } = useI18n()
   const c = data.node
   const { shown, hidden: more } = portBadges(c.ports)
-  const special = c.builtinNetworks.length ? c.builtinNetworks : c.networkMode?.startsWith("container:") ? ["shared net"] : []
+  const special = c.builtinNetworks.length ? c.builtinNetworks : c.networkMode?.startsWith("container:") ? [t.topology.nodes.sharedNet] : []
   return (
     <div
       className={cn(shell(data), "flex cursor-pointer flex-col justify-center gap-1 px-3")}
       data-testid="topology-container"
-      aria-label={`Container ${c.name}`}
+      aria-label={format(t.topology.nodes.container, { name: c.name })}
       title={`${c.name} (${c.state})`}
     >
       <Handle type="target" position={Position.Left} className={hidden} isConnectable={false} />
@@ -147,10 +149,11 @@ function ResourceNode({
 }
 
 export function NetworkNodeView({ data }: NodeProps<NetworkFlowNode>) {
+  const { t, format } = useI18n()
   const n = data.node
   const subtitle = n.missing
-    ? "not found"
-    : [n.driver, n.subnets[0], n.internal ? "internal" : null].filter(Boolean).join(" · ")
+    ? t.topology.nodes.notFound
+    : [n.driver, n.subnets[0], n.internal ? t.topology.nodes.internal : null].filter(Boolean).join(" · ")
   return (
     <ResourceNode
       icon={<NetworkIcon />}
@@ -158,7 +161,7 @@ export function NetworkNodeView({ data }: NodeProps<NetworkFlowNode>) {
       subtitle={subtitle}
       data={data}
       kind="network"
-      label={`Network ${n.name}`}
+      label={format(t.topology.nodes.network, { name: n.name })}
       color={networkColor(n.name)}
       side="source"
     />
@@ -173,21 +176,25 @@ export function volumeTitle(v: VolumeNode) {
 }
 
 export function VolumeNodeView({ data }: NodeProps<VolumeFlowNode>) {
+  const { t, format } = useI18n()
   const v = data.node
   return (
     <ResourceNode
       icon={<HardDriveIcon />}
       title={volumeTitle(v)}
-      subtitle={[v.driver, v.anonymous ? "anonymous" : null, v.missing ? "not found" : null, v.project].filter(Boolean).join(" · ")}
+      subtitle={[v.driver, v.anonymous ? t.topology.nodes.anonymous : null, v.missing ? t.topology.nodes.notFound : null, v.project]
+        .filter(Boolean)
+        .join(" · ")}
       data={data}
       kind="volume"
-      label={`Volume ${v.name}`}
+      label={format(t.topology.nodes.volume, { name: v.name })}
       side="target"
     />
   )
 }
 
 export function BindNodeView({ data }: NodeProps<BindFlowNode>) {
+  const { t, format } = useI18n()
   const b = data.node
   const base = b.source.split("/").filter(Boolean).pop() ?? "/"
   return (
@@ -197,13 +204,14 @@ export function BindNodeView({ data }: NodeProps<BindFlowNode>) {
       subtitle={b.source}
       data={data}
       kind="bind"
-      label={`Bind mount ${b.source}`}
+      label={format(t.topology.nodes.bind, { source: b.source })}
       side="target"
     />
   )
 }
 
 export function ProjectNodeView({ data }: NodeProps<ProjectFlowNode>) {
+  const { t, format } = useI18n()
   const p = data.node
   return (
     <div
@@ -214,13 +222,13 @@ export function ProjectNodeView({ data }: NodeProps<ProjectFlowNode>) {
         data.focus && "border-primary"
       )}
       data-testid="topology-project"
-      aria-label={`Compose project ${p.name}`}
+      aria-label={format(t.topology.nodes.project, { name: p.name })}
     >
       <div className="absolute -top-3 left-3 flex max-w-[calc(100%-1.5rem)] cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2 py-0.5 text-xs shadow-xs">
         <LayersIcon className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate font-semibold">{p.name}</span>
         <span className="shrink-0 text-muted-foreground">
-          {data.running}/{data.total} running
+          {format(t.topology.nodes.running, { running: data.running, total: data.total })}
         </span>
       </div>
     </div>

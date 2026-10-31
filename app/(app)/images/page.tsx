@@ -7,15 +7,19 @@ import { ImagesTable, type ImageRow } from "@/components/gantry/images-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
-import { formatBytes, shortId, timeAgo } from "@/lib/format"
+import { shortId } from "@/lib/format"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getDocker, getPermissions } from "@/lib/server/environments"
 import { tryDocker } from "@/lib/server/views"
 
-export const metadata: Metadata = { title: "Images" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.images }
+}
 
 export default async function ImagesPage() {
   await requireUser()
+  const { t, format, formatBytes, timeAgo } = await getI18n()
   const can = await getPermissions()
   const result = await tryDocker(async () => {
     const api = await getDocker()
@@ -26,7 +30,7 @@ export default async function ImagesPage() {
   if (result.error !== undefined) {
     return (
       <PageBody>
-        <PageHeader title="Images" />
+        <PageHeader title={t.nav.pages.images} />
         <DockerUnavailable message={result.error} />
       </PageBody>
     )
@@ -40,7 +44,7 @@ export default async function ImagesPage() {
     .map((i) => ({
       id: i.Id,
       shortId: shortId(i.Id),
-      tags: (i.RepoTags ?? []).filter((t) => t !== "<none>:<none>"),
+      tags: (i.RepoTags ?? []).filter((tag) => tag !== "<none>:<none>"),
       size: i.Size,
       sizeLabel: formatBytes(i.Size),
       created: i.Created,
@@ -54,14 +58,14 @@ export default async function ImagesPage() {
   return (
     <PageBody>
       <PageHeader
-        title="Images"
-        description={`${rows.length} image(s) using ${formatBytes(total)}`}
+        title={t.nav.pages.images}
+        description={format(t.images.count, { count: rows.length, size: formatBytes(total) })}
         actions={
           can.manage ? (
             <Button asChild size="sm" variant="outline">
               <Link href="/images/build">
                 <HammerIcon data-icon="inline-start" />
-                Build image
+                {t.images.buildImage}
               </Link>
             </Button>
           ) : null

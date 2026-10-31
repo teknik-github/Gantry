@@ -1,3 +1,62 @@
 import type { Dictionary } from "@/lib/i18n/dictionaries/types"
 
-export const autoUpdate: Dictionary["autoUpdate"] = {}
+export const autoUpdate: Dictionary["autoUpdate"] = {
+  description:
+    "Sekali sehari, container yang berjalan dengan auto-update aktif diperbarui jika tag image-nya punya image yang lebih baru (pull & recreate, di-rollback jika gagal). Container juga bisa ikut lewat label {label}=true.",
+  containersOn: "Container di {name}",
+  thisEnvironment: "environment ini",
+  containersDescription: "Aktifkan auto-update per container. Container yang berhenti dilewati.",
+  schedule: {
+    title: "Jadwal",
+    serverTime: "Waktu server {time} ({zone}). Atur {tz} di container Gantry untuk mengganti zona waktu.",
+    runDaily: "Jalankan setiap hari",
+    at: "Pukul",
+    save: "Simpan jadwal",
+    updating: "Memperbarui…",
+    runNow: "Jalankan sekarang",
+    help: "Berjalan di semua environment. Hasilnya dikirim ke channel notifikasi yang berlangganan hasil auto-update.",
+  },
+  results: {
+    lastRun: "Run terakhir ({trigger}) selesai {finished}.",
+    lastRunEmpty: "Run terakhir ({trigger}) selesai {finished}: tidak ada container berjalan dengan auto-update aktif.",
+    manual: "dijalankan manual",
+    scheduled: "terjadwal",
+    empty: "Tidak ada yang perlu diperbarui.",
+    status: {
+      updated: "diperbarui",
+      current: "sudah terbaru",
+      skipped: "dilewati",
+      failed: "gagal",
+    },
+  },
+  columns: {
+    container: "Container",
+    status: "Hasil",
+    image: "Image",
+    environment: "Environment",
+    message: "Detail",
+    "auto-update": "Auto-update",
+    name: "Nama",
+    state: "State",
+    stack: "Stack",
+  },
+  labelBadge: "label",
+  labelTitle: "Diaktifkan oleh label gantry.auto-update=true",
+  updateBadge: "update",
+  toggle: "Auto-update {name}",
+  searchPlaceholder: "Cari container…",
+  empty: "Tidak ada container.",
+  errors: {
+    time: "Gunakan format HH:MM (24 jam)",
+    invalidName: "Nama container tidak valid",
+    busy: "Auto-update sedang berjalan",
+    failed: "{summary}, {failed} gagal. Lihat hasilnya di bawah.",
+  },
+  runsDaily: "Auto-update berjalan setiap hari pukul {time}",
+  scheduleOff: "Auto-update terjadwal nonaktif",
+  enabled: "{name}: auto-update aktif",
+  disabled: "{name}: auto-update nonaktif",
+  noContainers: "Tidak ada container berjalan dengan auto-update aktif",
+  summary: "{updated} diperbarui, {current} sudah terbaru, {skipped} dilewati",
+  finished: "Auto-update selesai: {summary}",
+}

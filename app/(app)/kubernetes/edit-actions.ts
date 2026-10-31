@@ -4,6 +4,8 @@ import { z } from "zod"
 
 import { diffText, type DiffResult } from "@/lib/kubernetes/diff"
 import { editableObject, editableResource, parseEditedObject, toYaml, updateBody } from "@/lib/kubernetes/edit"
+import type { I18n } from "@/lib/i18n"
+import { getI18n } from "@/lib/i18n/server"
 import { namespaceSchema, objectNameSchema } from "@/lib/kubernetes/names"
 import { authorize, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import { getKube, KubeError } from "@/lib/server/kubernetes"
@@ -46,16 +48,13 @@ const inputSchema = z.object({
   yaml: z.string(),
 })
 
-const CONFLICT_MESSAGE =
-  "Someone changed this object since you opened it, so your edit was not applied. Load the latest version and make your change again."
-
 /** Validates the input; returns the resource and the request body, or an error to show. */
-function prepare(input: EditInput) {
+function prepare(input: EditInput, t: I18n["t"]) {
   const parsed = inputSchema.safeParse(input)
-  if (!parsed.success) return { error: "Invalid request" } as const
+  if (!parsed.success) return { error: t.kubernetes.edit.invalidRequest } as const
   const v = parsed.data
   const resource = editableResource(v.resource)
-  if (!resource) return { error: "This kind of object can't be edited here" } as const
+  if (!resource) return { error: t.kubernetes.edit.kindNotEditable } as const
   const edited = parseEditedObject(v.yaml, { apiVersion: resource.apiVersion, kind: resource.kind, namespace: v.namespace, name: v.name })
   if (!edited.ok) return { error: edited.error } as const
   return { v, resource, body: updateBody(edited.object, v.namespace, v.resourceVersion) } as const
@@ -67,12 +66,14 @@ function isConflict(err: unknown) {
 
 /** Dry-run of the update and the diff it would make. Changes nothing (not audited). */
 export async function reviewKubeEdit(input: EditInput): Promise<EditResult> {
-  const p = prepare(input)
+  const { t } = await getI18n()
+  const conflict = t.kubernetes.edit.conflict
+  const p = prepare(input, t)
   if ("error" in p) return { error: p.error }
   const { v, resource, body } = p
   const auth = await authorize(inEnvironment("manage", v.environmentId))
   if ("error" in auth) return { error: auth.error }
-  if (resource.adminOnly && auth.user.role !== "admin") return { error: "Only administrators can edit Secrets." }
+  if (resource.adminOnly && auth.user.role !== "admin") return { error: t.kubernetes.edit.secretsAdmins }
 
   try {
     const { api } = await getKube(v.environmentId)
@@ -81,20 +82,21 @@ export async function reviewKubeEdit(input: EditInput): Promise<EditResult> {
       api.replaceObject(resource.apiVersion, resource.resource, v.namespace, v.name, body, true),
     ])
     const currentVersion = (current.metadata as { resourceVersion?: string } | undefined)?.resourceVersion
-    if (currentVersion && currentVersion !== v.resourceVersion) return { error: CONFLICT_MESSAGE, conflict: true }
+    if (currentVersion && currentVersion !== v.resourceVersion) return { error: conflict, conflict: true }
     const diff = diffText(toYaml(editableObject(current)), toYaml(editableObject(result)))
     return { ok: true, diff, unchanged: diff.hunks.length === 0 }
   } catch (err) {
-    if (isConflict(err)) return { error: CONFLICT_MESSAGE, conflict: true }
+    if (isConflict(err)) return { error: conflict, conflict: true }
     if (err instanceof KubeError) return { error: err.message }
     console.error("[gantry] kubernetes edit review failed", err)
-    return { error: "Something went wrong. Check the server logs." }
+    return { error: t.common.errors.somethingWentWrong }
   }
 }
 
 /** Applies the edit (conditional update). */
 export async function applyKubeEdit(input: EditInput): Promise<EditResult> {
-  const p = prepare(input)
+  const { t, format } = await getI18n()
+  const p = prepare(input, t)
   if ("error" in p) return { error: p.error }
   const { v, resource, body } = p
   let conflict = false
@@ -104,7 +106,7 @@ export async function applyKubeEdit(input: EditInput): Promise<EditResult> {
     "kubernetes.edit",
     `${resource.kind} ${v.namespace}/${v.name}`,
     async ({ user }) => {
-      if (resource.adminOnly && user.role !== "admin") throw new UserError("Only administrators can edit Secrets.")
+      if (resource.adminOnly && user.role !== "admin") throw new UserError(t.kubernetes.edit.secretsAdmins)
       const { api } = await getKube(v.environmentId)
       try {
         const updated = await api.replaceObject(resource.apiVersion, resource.resource, v.namespace, v.name, body, false)
@@ -112,11 +114,11 @@ export async function applyKubeEdit(input: EditInput): Promise<EditResult> {
       } catch (err) {
         if (isConflict(err)) {
           conflict = true
-          throw new UserError(CONFLICT_MESSAGE)
+          throw new UserError(t.kubernetes.edit.conflict)
         }
         throw err
       }
-      return `${resource.kind} ${v.name} updated`
+      return format(t.kubernetes.edit.updated, { kind: resource.kind, name: v.name })
     }
   )
   return { ...res, conflict: conflict || undefined, resourceVersion }

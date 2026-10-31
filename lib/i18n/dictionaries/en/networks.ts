@@ -1,1 +1,34 @@
-export const networks = {} as const
+// Networks page: list, create dialog, remove actions.
+export const networks = {
+  count: "{count} network(s)",
+  builtin: "built-in",
+  internal: "internal",
+  columns: {
+    name: "Name",
+    driver: "Driver",
+    scope: "Scope",
+    subnet: "Subnet",
+    gateway: "Gateway",
+    containers: "Containers",
+  },
+  removeTitle: "Remove network {name}?",
+  removeDescription: "Containers must be disconnected from the network first.",
+  removeLabel: "Remove network",
+  bulkRemoveTitle: "Remove {count} network(s)?",
+  bulkRemoveDescription: "Containers must be disconnected from a network before it can be removed.",
+  bulkRemoveWarning: "{count} of them still have containers attached and will fail.",
+  searchPlaceholder: "Search networks…",
+  empty: "No networks.",
+  add: "Add network",
+  createTitle: "Create network",
+  // Server actions
+  nameRequired: "Name is required",
+  nameFormat: "Letters, numbers, dot, dash or underscore",
+  created: "Network {name} created",
+  removed: "Network removed",
+  invalidId: "Invalid network id",
+  invalidRequest: "Invalid request",
+  builtinCannotBeRemoved: "Built-in networks cannot be removed",
+  bulkVerb: "Removed",
+  bulkNoun: { one: "network", other: "networks" },
+} as const

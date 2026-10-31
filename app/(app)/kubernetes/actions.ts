@@ -4,6 +4,7 @@ import { cookies } from "next/headers"
 import { refresh } from "next/cache"
 import { z } from "zod"
 
+import { getI18n } from "@/lib/i18n/server"
 import { MAX_MANIFEST_BYTES, parseManifest } from "@/lib/kubernetes/manifest"
 import {
   MAX_REPLICAS,
@@ -38,10 +39,11 @@ type WorkloadRef = ObjectRef & { kind: WorkloadKind }
 
 /** Namespace for the list pages (null = all). Any user; only a preference cookie. */
 export async function selectNamespace(environmentId: number, namespace: string | null): Promise<ActionState> {
+  const { t } = await getI18n()
   const user = await getCurrentUser()
-  if (!user) return { error: "Your session has expired. Please sign in again." }
+  if (!user) return { error: t.common.errors.sessionExpired }
   const parsed = z.object({ environmentId: envIdSchema, namespace: namespaceSchema.nullable() }).safeParse({ environmentId, namespace })
-  if (!parsed.success) return { error: "Invalid namespace" }
+  if (!parsed.success) return { error: t.kubernetes.actions.invalidNamespace }
   try {
     await getKubeEnvironment(parsed.data.environmentId)
   } catch (err) {
@@ -67,46 +69,50 @@ const label = (ref: { namespace: string; name: string; kind?: string }) =>
   `${ref.kind ? `${ref.kind} ` : ""}${ref.namespace}/${ref.name}`
 
 export async function scaleWorkload(ref: WorkloadRef, replicas: number): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const w = parseRef(workloadSchema, ref)
-  if (!w) return { error: "Invalid workload" }
-  if (w.kind === "DaemonSet") return { error: "DaemonSets run one pod per node and can't be scaled" }
+  if (!w) return { error: t.kubernetes.actions.invalidWorkload }
+  if (w.kind === "DaemonSet") return { error: t.kubernetes.actions.daemonSetScale }
   const n = z.number().int().min(0).max(MAX_REPLICAS).safeParse(replicas)
-  if (!n.success) return { error: `Replicas must be a whole number from 0 to ${MAX_REPLICAS}` }
+  if (!n.success) return { error: format(t.kubernetes.actions.replicasRange, { max: MAX_REPLICAS }) }
 
   return runAction(inEnvironment("manage", w.environmentId), "kubernetes.scale", `${label(w)} → ${n.data}`, async () => {
     const { api } = await getKube(w.environmentId)
     await api.scaleWorkload(w.kind, w.namespace, w.name, n.data)
-    return `${w.name} scaled to ${n.data}`
+    return format(t.kubernetes.actions.scaled, { name: w.name, count: n.data })
   })
 }
 
 export async function restartWorkload(ref: WorkloadRef): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const w = parseRef(workloadSchema, ref)
-  if (!w) return { error: "Invalid workload" }
+  if (!w) return { error: t.kubernetes.actions.invalidWorkload }
   return runAction(inEnvironment("operate", w.environmentId), "kubernetes.restart", label(w), async () => {
     const { api } = await getKube(w.environmentId)
     await api.restartWorkload(w.kind, w.namespace, w.name)
-    return `Restarting ${w.name}`
+    return format(t.kubernetes.actions.restarting, { name: w.name })
   })
 }
 
 export async function deleteWorkload(ref: WorkloadRef): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const w = parseRef(workloadSchema, ref)
-  if (!w) return { error: "Invalid workload" }
+  if (!w) return { error: t.kubernetes.actions.invalidWorkload }
   return runAction(inEnvironment("manage", w.environmentId), "kubernetes.delete", label(w), async () => {
     const { api } = await getKube(w.environmentId)
     await api.deleteWorkload(w.kind, w.namespace, w.name)
-    return `${w.kind} ${w.name} deleted`
+    return format(t.kubernetes.actions.workloadDeleted, { kind: w.kind, name: w.name })
   })
 }
 
 export async function deletePod(ref: ObjectRef): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const p = parseRef(objectSchema, ref)
-  if (!p) return { error: "Invalid pod" }
+  if (!p) return { error: t.kubernetes.actions.invalidPod }
   return runAction(inEnvironment("manage", p.environmentId), "kubernetes.delete", label({ ...p, kind: "Pod" }), async () => {
     const { api } = await getKube(p.environmentId)
     await api.deletePod(p.namespace, p.name)
-    return `Pod ${p.name} deleted`
+    return format(t.kubernetes.actions.podDeleted, { name: p.name })
   })
 }
 
@@ -117,28 +123,32 @@ export async function createNamespace(_prev: ActionState, formData: FormData): P
     .safeParse({ environment: formData.get("environment"), name: formData.get("name") ?? "" })
   if (!parsed.success) return fieldErrors(parsed.error)
   const { environment, name } = parsed.data
+  const { t, format } = await getI18n()
 
   return runAction(inEnvironment("manage", environment), "kubernetes.namespace.create", name, async () => {
     const { api } = await getKube(environment)
     try {
       await api.createNamespace(name)
     } catch (err) {
-      if (err instanceof KubeError && err.reason === "AlreadyExists") throw new UserError(`Namespace "${name}" already exists`)
+      if (err instanceof KubeError && err.reason === "AlreadyExists") throw new UserError(format(t.kubernetes.actions.namespaceExists, { name }))
       throw err
     }
-    return `Namespace ${name} created`
+    return format(t.kubernetes.actions.namespaceCreated, { name })
   })
 }
 
 export async function deleteNamespace(environmentId: number, name: string): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const parsed = z.object({ environmentId: envIdSchema, name: namespaceSchema }).safeParse({ environmentId, name })
-  if (!parsed.success) return { error: "Invalid namespace" }
-  if (PROTECTED_NAMESPACES.has(parsed.data.name)) return { error: `The ${parsed.data.name} namespace can't be deleted` }
+  if (!parsed.success) return { error: t.kubernetes.actions.invalidNamespace }
+  if (PROTECTED_NAMESPACES.has(parsed.data.name)) {
+    return { error: format(t.kubernetes.actions.namespaceProtected, { name: parsed.data.name }) }
+  }
 
   return runAction(inEnvironment("manage", parsed.data.environmentId), "kubernetes.namespace.delete", parsed.data.name, async () => {
     const { api } = await getKube(parsed.data.environmentId)
     await api.deleteNamespace(parsed.data.name)
-    return `Deleting namespace ${parsed.data.name} and everything in it`
+    return format(t.kubernetes.actions.namespaceDeleting, { name: parsed.data.name })
   })
 }
 
@@ -150,11 +160,13 @@ export type ApplyState = ActionState & { results?: ApplyResult[] }
  * user who submitted it sees it); results carry no object content.
  */
 export async function applyManifest(_prev: ApplyState, formData: FormData): Promise<ApplyState> {
+  const { t, format } = await getI18n()
+  const k = t.kubernetes.apply
   const parsed = z
     .object({
       environment: z.coerce.number().int().positive(),
       namespace: namespaceSchema,
-      manifest: z.string().max(MAX_MANIFEST_BYTES * 2, "The manifest is too large"),
+      manifest: z.string().max(MAX_MANIFEST_BYTES * 2, k.tooLarge),
       force: z.enum(["on"]).optional(),
       dry_run: z.enum(["on"]).optional(),
     })
@@ -169,7 +181,7 @@ export async function applyManifest(_prev: ApplyState, formData: FormData): Prom
   const v = parsed.data
 
   const manifest = parseManifest(v.manifest)
-  if (!manifest.ok) return { error: "Please fix the manifest", fieldErrors: { manifest: [manifest.error] }, values }
+  if (!manifest.ok) return { error: k.fixManifest, fieldErrors: { manifest: [manifest.error] }, values }
 
   let results: ApplyResult[] = []
   const summary = manifest.objects.map((o) => `${o.kind}/${o.name}`).join(", ")
@@ -182,8 +194,10 @@ export async function applyManifest(_prev: ApplyState, formData: FormData): Prom
       results = await api.apply(manifest.objects, { namespace: v.namespace, force: Boolean(v.force), dryRun: Boolean(v.dry_run) })
       const failed = results.filter((r) => r.status === "error").length
       if (failed && !v.dry_run) await audit(user, "kubernetes.apply.failed", `${v.namespace}: ${failed} of ${results.length} object(s)`)
-      const verb = v.dry_run ? "checked (dry run)" : "applied"
-      return failed ? `${results.length - failed} of ${results.length} object(s) ${verb}; ${failed} failed` : `${results.length} object(s) ${verb}`
+      const verb = v.dry_run ? k.verbDryRun : k.verbApplied
+      return failed
+        ? format(k.summaryPartial, { done: results.length - failed, total: results.length, verb, failed })
+        : format(k.summary, { count: results.length, verb })
     }
   )
   // A partial failure is still reported with every object's outcome.

@@ -27,7 +27,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import {
   ALERT_KIND_KEYS,
-  ALERT_KINDS,
   CHANNEL_TYPE_KEYS,
   CHANNEL_TYPES,
   channelFields,
@@ -35,6 +34,8 @@ import {
   type ChannelType,
 } from "@/lib/notifications"
 import type { Thresholds } from "@/lib/thresholds"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 import type { ActionState } from "@/lib/validation"
 
 type Errors = Record<string, string[] | undefined>
@@ -50,70 +51,81 @@ export type ChannelRow = {
   publicConfig: Record<string, string>
 }
 
-const kindLabel = (k: string) => (ALERT_KINDS as Record<string, { label: string }>)[k]?.label ?? k
+/** An alert kind's label in the user's language; unknown kinds (e.g. "test") as they are. */
+const kindLabel = (t: I18n["t"], k: string) => (Object.hasOwn(t.notifications.kinds, k) ? t.notifications.kinds[k as AlertKind] : k)
+
+/** A channel setting's label or description in the user's language (lib/notifications.ts has the English). */
+function fieldText(texts: Partial<Record<string, string>>, name: string, fallback?: string) {
+  return Object.hasOwn(texts, name) ? texts[name] : fallback
+}
 
 const channelHelper = columnHelperFor<ChannelRow>()
 
-const channelColumns = channelHelper.columns([
-  channelHelper.accessor("name", {
-    header: ({ column }) => <SortHeader column={column} title="Name" />,
-    cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
-    enableHiding: false,
-  }),
-  channelHelper.accessor("typeLabel", {
-    header: "Type",
-    cell: ({ row }) => (
-      <div className="flex flex-col">
-        <span>{row.original.typeLabel}</span>
-        <span className="text-xs text-muted-foreground">{row.original.target}</span>
-      </div>
-    ),
-  }),
-  channelHelper.accessor("events", {
-    header: "Alerts",
-    enableSorting: false,
-    cell: ({ row }) => (
-      <div className="flex max-w-md flex-wrap gap-1">
-        {row.original.events.length === ALERT_KIND_KEYS.length ? (
-          <Badge variant="secondary">All alerts</Badge>
-        ) : (
-          row.original.events.map((e) => (
-            <Badge key={e} variant="outline">
-              {kindLabel(e)}
-            </Badge>
-          ))
-        )}
-      </div>
-    ),
-  }),
-  channelHelper.accessor("enabled", {
-    header: "On",
-    cell: ({ row }) => <EnabledSwitch row={row.original} />,
-  }),
-  channelHelper.display({
-    id: "actions",
-    cell: ({ row }) => <ChannelActions row={row.original} />,
-    enableHiding: false,
-  }),
-])
+function channelColumns(t: I18n["t"]) {
+  return channelHelper.columns([
+    channelHelper.accessor("name", {
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.name} />,
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+      enableHiding: false,
+    }),
+    channelHelper.accessor("typeLabel", {
+      header: t.notifications.channels.columns.typeLabel,
+      cell: ({ row }) => (
+        <div className="flex flex-col">
+          <span>{row.original.typeLabel}</span>
+          <span className="text-xs text-muted-foreground">{row.original.target}</span>
+        </div>
+      ),
+    }),
+    channelHelper.accessor("events", {
+      header: t.notifications.channels.columns.events,
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex max-w-md flex-wrap gap-1">
+          {row.original.events.length === ALERT_KIND_KEYS.length ? (
+            <Badge variant="secondary">{t.notifications.channels.allAlerts}</Badge>
+          ) : (
+            row.original.events.map((e) => (
+              <Badge key={e} variant="outline">
+                {kindLabel(t, e)}
+              </Badge>
+            ))
+          )}
+        </div>
+      ),
+    }),
+    channelHelper.accessor("enabled", {
+      header: t.notifications.channels.columns.enabled,
+      cell: ({ row }) => <EnabledSwitch row={row.original} />,
+    }),
+    channelHelper.display({
+      id: "actions",
+      cell: ({ row }) => <ChannelActions row={row.original} />,
+      enableHiding: false,
+    }),
+  ])
+}
 
 export function ChannelsTable({ data }: { data: ChannelRow[] }) {
+  const { t } = useI18n()
+  const columns = React.useMemo(() => channelColumns(t), [t])
   return (
     <DataTable
       data={data}
-      columns={channelColumns}
+      columns={columns}
       getRowId={(r) => String(r.id)}
-      emptyMessage="No channels yet. Alerts are still recorded below."
+      emptyMessage={t.notifications.channels.empty}
+      columnLabels={t.notifications.channels.columns}
       toolbar={
         <FormDialog
           trigger={
             <Button size="sm">
               <BellPlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">Add channel</span>
+              <span className="hidden lg:inline">{t.notifications.channels.add}</span>
             </Button>
           }
-          title="Add notification channel"
-          submitLabel="Save"
+          title={t.notifications.channels.addTitle}
+          submitLabel={t.common.actions.save}
           action={createChannel}
           className="max-h-[90vh] overflow-y-auto sm:max-w-lg"
         >
@@ -126,11 +138,12 @@ export function ChannelsTable({ data }: { data: ChannelRow[] }) {
 
 function EnabledSwitch({ row }: { row: ChannelRow }) {
   const [pending, run] = useRunAction()
+  const { t, format } = useI18n()
   return (
     <Switch
       checked={row.enabled}
       disabled={pending}
-      aria-label={`${row.name} enabled`}
+      aria-label={format(t.notifications.channels.enabledLabel, { name: row.name })}
       onCheckedChange={(on) => run(() => setChannelEnabled(row.id, on))}
     />
   )
@@ -138,13 +151,14 @@ function EnabledSwitch({ row }: { row: ChannelRow }) {
 
 function ChannelActions({ row }: { row: ChannelRow }) {
   const [pending, run] = useRunAction()
+  const { t, format } = useI18n()
   return (
     <div className="flex justify-end gap-1">
       <Button
         variant="ghost"
         size="icon"
         className="size-8 text-muted-foreground"
-        aria-label={`Send a test to ${row.name}`}
+        aria-label={format(t.notifications.channels.testLabel, { name: row.name })}
         disabled={pending}
         onClick={() => run(() => testChannel(row.id))}
       >
@@ -152,12 +166,12 @@ function ChannelActions({ row }: { row: ChannelRow }) {
       </Button>
       <FormDialog
         trigger={
-          <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Edit ${row.name}`}>
+          <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={format(t.notifications.channels.editLabel, { name: row.name })}>
             <PencilIcon />
           </Button>
         }
-        title={`Edit ${row.name}`}
-        submitLabel="Save"
+        title={format(t.notifications.channels.editLabel, { name: row.name })}
+        submitLabel={t.common.actions.save}
         action={updateChannel}
         className="max-h-[90vh] overflow-y-auto sm:max-w-lg"
       >
@@ -169,12 +183,12 @@ function ChannelActions({ row }: { row: ChannelRow }) {
         )}
       </FormDialog>
       <ConfirmAction
-        title={`Remove ${row.name}?`}
-        description="Alerts will no longer be sent to it."
-        confirmLabel="Remove"
+        title={format(t.notifications.channels.removeTitle, { name: row.name })}
+        description={t.notifications.channels.removeDescription}
+        confirmLabel={t.common.actions.remove}
         onConfirm={() => deleteChannel(row.id)}
       >
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Remove ${row.name}`}>
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={format(t.notifications.channels.removeLabel, { name: row.name })}>
           <Trash2Icon />
         </Button>
       </ConfirmAction>
@@ -186,24 +200,26 @@ function ChannelFields({ errors, initial }: { errors: Errors; initial?: ChannelR
   const [type, setType] = React.useState<ChannelType>(initial?.type ?? "telegram")
   const uid = React.useId()
   const events = new Set<AlertKind>(initial?.events ?? ALERT_KIND_KEYS)
+  const { t } = useI18n()
+  const typeLabels: Partial<Record<string, string>> = t.notifications.typeLabels
 
   return (
     <FieldGroup className="gap-4">
       <Field data-invalid={errors.name ? true : undefined}>
-        <FieldLabel htmlFor={`${uid}-name`}>Name</FieldLabel>
+        <FieldLabel htmlFor={`${uid}-name`}>{t.common.fields.name}</FieldLabel>
         <Input id={`${uid}-name`} name="name" defaultValue={initial?.name} placeholder="Ops Telegram" required />
         <FieldError>{errors.name?.[0]}</FieldError>
       </Field>
       <Field>
-        <FieldLabel htmlFor={`${uid}-type`}>Type</FieldLabel>
+        <FieldLabel htmlFor={`${uid}-type`}>{t.common.fields.type}</FieldLabel>
         <Select name="type" value={type} onValueChange={(v) => setType(v as ChannelType)} disabled={Boolean(initial)}>
           <SelectTrigger id={`${uid}-type`} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {CHANNEL_TYPE_KEYS.map((t) => (
-              <SelectItem key={t} value={t}>
-                {CHANNEL_TYPES[t].label}
+            {CHANNEL_TYPE_KEYS.map((k) => (
+              <SelectItem key={k} value={k}>
+                {typeLabels[k] ?? CHANNEL_TYPES[k].label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -217,7 +233,7 @@ function ChannelFields({ errors, initial }: { errors: Errors; initial?: ChannelR
         const error = errors[`cfg:${f.name}`]?.[0]
         return (
           <Field key={`${type}-${f.name}`} data-invalid={error ? true : undefined}>
-            <FieldLabel htmlFor={id}>{f.label}</FieldLabel>
+            <FieldLabel htmlFor={id}>{fieldText(t.notifications.fieldLabels, f.name, f.label)}</FieldLabel>
             {"options" in f && f.options ? (
               <OptionSelect id={id} name={`cfg:${f.name}`} options={f.options} initial={initial?.publicConfig[f.name]} />
             ) : (
@@ -228,23 +244,25 @@ function ChannelFields({ errors, initial }: { errors: Errors; initial?: ChannelR
                 autoComplete="off"
                 spellCheck={false}
                 defaultValue={secret ? "" : initial?.publicConfig[f.name]}
-                placeholder={secret && initial ? "Leave empty to keep the current one" : "placeholder" in f ? f.placeholder : undefined}
+                placeholder={secret && initial ? t.notifications.channels.keepSecret : "placeholder" in f ? f.placeholder : undefined}
               />
             )}
-            {"description" in f && f.description ? <FieldDescription>{f.description}</FieldDescription> : null}
+            {"description" in f && f.description ? (
+              <FieldDescription>{fieldText(t.notifications.fieldDescriptions, f.name, f.description)}</FieldDescription>
+            ) : null}
             <FieldError>{error}</FieldError>
           </Field>
         )
       })}
       <FieldSet data-invalid={errors.events ? true : undefined}>
-        <FieldLegend variant="label">Send these alerts</FieldLegend>
+        <FieldLegend variant="label">{t.notifications.channels.sendAlerts}</FieldLegend>
         <div className="grid gap-2">
           {ALERT_KIND_KEYS.map((k) => (
             <Label key={k} className="items-start font-normal">
               <Checkbox name="events" value={k} defaultChecked={events.has(k)} className="mt-0.5" />
               <span className="flex flex-col">
-                {ALERT_KINDS[k].label}
-                <span className="text-xs text-muted-foreground">{ALERT_KINDS[k].description}</span>
+                {t.notifications.kinds[k]}
+                <span className="text-xs text-muted-foreground">{t.notifications.kindDescriptions[k]}</span>
               </span>
             </Label>
           ))}
@@ -253,7 +271,7 @@ function ChannelFields({ errors, initial }: { errors: Errors; initial?: ChannelR
       </FieldSet>
       <Label className="font-normal">
         <Checkbox name="enabled" value="on" defaultChecked={initial?.enabled ?? true} />
-        Enabled
+        {t.common.status.enabled}
       </Label>
     </FieldGroup>
   )
@@ -261,6 +279,7 @@ function ChannelFields({ errors, initial }: { errors: Errors; initial?: ChannelR
 
 function OptionSelect({ id, name, options, initial }: { id: string; name: string; options: readonly string[]; initial?: string }) {
   const [value, setValue] = React.useState(initial && options.includes(initial) ? initial : options[0])
+  const { t } = useI18n()
   return (
     <Select name={name} value={value} onValueChange={setValue}>
       <SelectTrigger id={id} className="w-full">
@@ -269,7 +288,7 @@ function OptionSelect({ id, name, options, initial }: { id: string; name: string
       <SelectContent>
         {options.map((o) => (
           <SelectItem key={o} value={o}>
-            {o === "starttls" ? "STARTTLS" : o === "tls" ? "TLS" : o === "none" ? "None" : o}
+            {o === "starttls" ? "STARTTLS" : o === "tls" ? "TLS" : o === "none" ? t.common.status.none : o}
           </SelectItem>
         ))}
       </SelectContent>
@@ -279,10 +298,12 @@ function OptionSelect({ id, name, options, initial }: { id: string; name: string
 
 export function ResourceThresholds({ thresholds }: { thresholds: Thresholds }) {
   const [state, formAction, pending] = React.useActionState<ActionState, FormData>(saveResourceThresholds, {})
+  const { t } = useI18n()
+  const saved = t.common.status.saved
   React.useEffect(() => {
-    if (state.ok) toast.success(state.message ?? "Saved")
+    if (state.ok) toast.success(state.message ?? saved)
     else if (state.error && !state.fieldErrors) toast.error(state.error)
-  }, [state])
+  }, [state, saved])
   const errs = state.fieldErrors ?? {}
   const values = state.values ?? {}
   const uid = React.useId()
@@ -296,7 +317,7 @@ export function ResourceThresholds({ thresholds }: { thresholds: Thresholds }) {
           type="number"
           min={1}
           defaultValue={values[name] ?? (thresholds[name] === null ? "" : String(thresholds[name]))}
-          placeholder="off"
+          placeholder={t.notifications.thresholds.off}
           className="w-28"
         />
         <span className="text-sm text-muted-foreground">{unit}</span>
@@ -309,22 +330,24 @@ export function ResourceThresholds({ thresholds }: { thresholds: Thresholds }) {
     <div className="px-4 lg:px-6">
       <Card>
         <CardHeader>
-          <CardTitle>Resource thresholds</CardTitle>
-          <CardDescription>
-            Raise a &ldquo;High CPU or memory&rdquo; alert when a value stays at or above its threshold, checked on every
-            metrics sample. Leave a field empty to turn that check off. Repeats at most hourly.
-          </CardDescription>
+          <CardTitle>{t.notifications.thresholds.title}</CardTitle>
+          <CardDescription>{t.notifications.thresholds.description}</CardDescription>
         </CardHeader>
         <CardContent>
           <form action={formAction} className="flex flex-col gap-4">
             <div className="grid gap-4 @3xl/main:grid-cols-4">
-              {field("containerCpu", "Container CPU", "%", "100% = one full core")}
-              {field("containerMemory", "Container memory", "% of limit", "The host's memory if it has no limit")}
-              {field("hostMemory", "Host memory", "%", "All running containers together")}
-              {field("minutes", "For at least", "minutes")}
+              {field("containerCpu", t.notifications.thresholds.containerCpu, "%", t.notifications.thresholds.containerCpuHelp)}
+              {field(
+                "containerMemory",
+                t.notifications.thresholds.containerMemory,
+                t.notifications.thresholds.percentOfLimit,
+                t.notifications.thresholds.containerMemoryHelp
+              )}
+              {field("hostMemory", t.notifications.thresholds.hostMemory, "%", t.notifications.thresholds.hostMemoryHelp)}
+              {field("minutes", t.notifications.thresholds.minutes, t.notifications.thresholds.minutesUnit)}
             </div>
             <Button type="submit" variant="outline" className="w-fit" disabled={pending}>
-              {pending ? "Saving…" : "Save thresholds"}
+              {pending ? t.common.status.saving : t.notifications.thresholds.save}
             </Button>
           </form>
         </CardContent>
@@ -346,49 +369,60 @@ export type AlertRow = {
 
 const alertHelper = columnHelperFor<AlertRow>()
 
-const alertColumns = alertHelper.columns([
-  alertHelper.accessor("time", {
-    header: ({ column }) => <SortHeader column={column} title="When" />,
-    cell: ({ row }) => (
-      <span className="whitespace-nowrap text-muted-foreground" title={new Date(row.original.time).toLocaleString()}>
-        {row.original.timeLabel}
-      </span>
-    ),
-  }),
-  alertHelper.accessor("kind", {
-    header: "Alert",
-    cell: ({ row }) => <Badge variant="outline">{kindLabel(row.original.kind)}</Badge>,
-  }),
-  alertHelper.accessor("subject", {
-    header: "What happened",
-    enableHiding: false,
-    cell: ({ row }) => (
-      <div className="flex max-w-xl flex-col">
-        <span className="font-medium">{row.original.subject}</span>
-        {row.original.message ? (
-          <span className="line-clamp-2 text-xs whitespace-pre-line text-muted-foreground" title={row.original.message}>
-            {row.original.message}
-          </span>
-        ) : null}
-      </div>
-    ),
-  }),
-  alertHelper.accessor("environment", { header: "Environment" }),
-  alertHelper.accessor("delivery", {
-    header: "Delivery",
-    cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.original.delivery}</span>,
-  }),
-])
+function alertColumns(i18n: I18n) {
+  const { t } = i18n
+  return alertHelper.columns([
+    alertHelper.accessor("time", {
+      header: ({ column }) => <SortHeader column={column} title={t.notifications.alerts.columns.time} />,
+      cell: ({ row }) => (
+        <span
+          className="whitespace-nowrap text-muted-foreground"
+          // English keeps the browser's own date format.
+          title={i18n.locale === "en" ? new Date(row.original.time).toLocaleString() : i18n.formatDate(row.original.time)}
+        >
+          {row.original.timeLabel}
+        </span>
+      ),
+    }),
+    alertHelper.accessor("kind", {
+      header: t.notifications.alerts.columns.kind,
+      cell: ({ row }) => <Badge variant="outline">{kindLabel(t, row.original.kind)}</Badge>,
+    }),
+    alertHelper.accessor("subject", {
+      header: t.notifications.alerts.subject,
+      enableHiding: false,
+      cell: ({ row }) => (
+        <div className="flex max-w-xl flex-col">
+          <span className="font-medium">{row.original.subject}</span>
+          {row.original.message ? (
+            <span className="line-clamp-2 text-xs whitespace-pre-line text-muted-foreground" title={row.original.message}>
+              {row.original.message}
+            </span>
+          ) : null}
+        </div>
+      ),
+    }),
+    alertHelper.accessor("environment", { header: t.notifications.alerts.columns.environment }),
+    alertHelper.accessor("delivery", {
+      header: t.notifications.alerts.columns.delivery,
+      cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.original.delivery}</span>,
+    }),
+  ])
+}
 
 export function AlertsTable({ data }: { data: AlertRow[] }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const columns = React.useMemo(() => alertColumns(i18n), [i18n])
   return (
     <DataTable
       data={data}
-      columns={alertColumns}
+      columns={columns}
       getRowId={(r) => String(r.id)}
-      searchText={(r) => `${r.subject} ${r.message} ${r.environment} ${kindLabel(r.kind)}`}
-      searchPlaceholder="Search alerts…"
-      emptyMessage="No alerts yet."
+      searchText={(r) => `${r.subject} ${r.message} ${r.environment} ${kindLabel(t, r.kind)}`}
+      searchPlaceholder={t.notifications.alerts.searchPlaceholder}
+      emptyMessage={t.notifications.alerts.empty}
+      columnLabels={t.notifications.alerts.columns}
     />
   )
 }

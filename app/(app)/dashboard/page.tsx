@@ -7,17 +7,21 @@ import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
 import { ImagesCard, ImagesCardSkeleton, SectionCards } from "@/components/section-cards"
 import { SetupChecks } from "@/components/gantry/setup-checks"
-import { formatBytes } from "@/lib/format"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { updatesFor } from "@/lib/server/image-updates"
 import { setupChecks } from "@/lib/server/setup-checks"
 import { toContainerRows, tryDocker } from "@/lib/server/views"
 
-export const metadata: Metadata = { title: "Dashboard" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.dashboard }
+}
 
 export default async function DashboardPage() {
   const user = await requireUser()
+  const i18n = await getI18n()
+  const { t } = i18n
   const can = await getPermissions()
   // What an administrator still has to set up (HTTPS, backups, 2FA, alerts).
   const checks = user.role === "admin" ? await setupChecks(user) : []
@@ -38,10 +42,15 @@ export default async function DashboardPage() {
 
   const header = (
     <PageHeader
-      title={env ? `Environment: ${env.name}` : "Dashboard"}
+      title={env ? i18n.format(t.dashboard.environmentTitle, { name: env.name }) : t.nav.pages.dashboard}
       description={
         result.data
-          ? `Docker ${result.data.info.ServerVersion} · ${result.data.info.OperatingSystem} · ${result.data.info.NCPU} CPU · ${formatBytes(result.data.info.MemTotal)} RAM`
+          ? i18n.format(t.dashboard.serverInfo, {
+              version: result.data.info.ServerVersion,
+              os: result.data.info.OperatingSystem,
+              cpus: result.data.info.NCPU,
+              memory: i18n.formatBytes(result.data.info.MemTotal),
+            })
           : env?.url
       }
     />
@@ -93,6 +102,7 @@ export default async function DashboardPage() {
 
 /** The images card, streamed in after the rest of the dashboard. */
 async function DashboardImages() {
+  const i18n = await getI18n()
   const images = await getDocker()
     .then((api) => api.listImages())
     .catch(() => null)
@@ -101,7 +111,7 @@ async function DashboardImages() {
       images={
         images && {
           total: images.length,
-          size: formatBytes(images.reduce((a, i) => a + i.Size, 0)),
+          size: i18n.formatBytes(images.reduce((a, i) => a + i.Size, 0)),
           dangling: images.filter((i) => !i.RepoTags?.length || i.RepoTags[0] === "<none>:<none>").length,
         }
       }

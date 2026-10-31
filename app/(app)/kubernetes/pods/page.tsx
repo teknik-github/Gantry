@@ -4,14 +4,18 @@ import { KubeUnavailable, loadKubePage, NamespaceFilter } from "@/components/gan
 import { PodsTable } from "@/components/gantry/kubernetes/tables"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
+import { getI18n } from "@/lib/i18n/server"
 import { toPodRows } from "@/lib/kubernetes/rows"
 import { tryKube } from "@/lib/server/kubernetes"
 
-export const metadata: Metadata = { title: "Pods" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.pods }
+}
 
 export default async function PodsPage() {
+  const { t } = await getI18n()
   const { page, blocked } = await loadKubePage()
-  const header = <PageHeader title="Pods" actions={page ? <NamespaceFilter page={page} /> : null} />
+  const header = <PageHeader title={t.nav.pages.pods} actions={page ? <NamespaceFilter page={page} /> : null} />
   if (!page) {
     return (
       <PageBody>

@@ -28,7 +28,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { formatBytes } from "@/lib/format"
+import type { I18n, Locale } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
+import { INTL_LOCALES } from "@/lib/i18n/config"
 
 const POLL_MS = 5_000
 const MAX_SAMPLES = 720 // one hour at 5s
@@ -37,39 +39,43 @@ const MIN_HISTORY_REFRESH_MS = 30_000
 type Point = { ts: number; cpu: number | null; memory: number | null }
 type Metric = "cpu" | "memory"
 
-const chartConfig = {
-  cpu: { label: "CPU", color: "var(--chart-1)" },
-  memory: { label: "Memory", color: "var(--chart-2)" },
-} satisfies ChartConfig
+const chartConfig = (t: I18n["t"]) =>
+  ({
+    cpu: { label: t.dashboard.chart.cpu, color: "var(--chart-1)" },
+    memory: { label: t.dashboard.chart.memory, color: "var(--chart-2)" },
+  }) satisfies ChartConfig
 
-const RANGES = {
-  live: { label: "Live" },
-  "1h": { label: "1 hour" },
-  "24h": { label: "24 hours" },
-  "7d": { label: "7 days" },
-} as const
-type RangeKey = keyof typeof RANGES
+const RANGES = ["live", "1h", "24h", "7d"] as const
+type RangeKey = (typeof RANGES)[number]
 type HistoryRange = Exclude<RangeKey, "live">
 
-const timeFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-const minuteFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" })
-const dayFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" })
-const fullFmt = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-})
-
-const tickFormat: Record<RangeKey, (ts: number) => string> = {
-  live: (ts) => timeFmt.format(ts),
-  "1h": (ts) => minuteFmt.format(ts),
-  "24h": (ts) => minuteFmt.format(ts),
-  "7d": (ts) => dayFmt.format(ts),
+/** Time formats of the axis and tooltip, per language (English keeps en-GB). */
+function dateFormats(locale: Locale) {
+  const tag = INTL_LOCALES[locale].dates
+  const timeFmt = new Intl.DateTimeFormat(tag, { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+  const minuteFmt = new Intl.DateTimeFormat(tag, { hour: "2-digit", minute: "2-digit" })
+  const dayFmt = new Intl.DateTimeFormat(tag, { day: "numeric", month: "short" })
+  const fullFmt = new Intl.DateTimeFormat(tag, {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+  const tickFormat: Record<RangeKey, (ts: number) => string> = {
+    live: (ts) => timeFmt.format(ts),
+    "1h": (ts) => minuteFmt.format(ts),
+    "24h": (ts) => minuteFmt.format(ts),
+    "7d": (ts) => dayFmt.format(ts),
+  }
+  return { timeFmt, fullFmt, tickFormat }
 }
 
-const formatValue = (metric: Metric, v: number, digits = 1) =>
-  metric === "cpu" ? `${v.toFixed(digits)}%` : formatBytes(v)
+/** A fixed number of decimals (like toFixed) in the language's number format. */
+const fixed = (i18n: I18n, v: number, digits: number) =>
+  i18n.formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false })
+
+const formatValue = (i18n: I18n, metric: Metric, v: number, digits = 1) =>
+  metric === "cpu" ? `${fixed(i18n, v, digits)}%` : i18n.formatBytes(v)
 
 /**
  * CPU / memory usage of running containers in the current environment.
@@ -78,6 +84,10 @@ const formatValue = (metric: Metric, v: number, digits = 1) =>
  */
 export function ChartAreaInteractive() {
   const router = useRouter()
+  const i18n = useI18n()
+  const text = i18n.t.dashboard.chart
+  const config = React.useMemo(() => chartConfig(i18n.t), [i18n.t])
+  const { timeFmt, fullFmt, tickFormat } = React.useMemo(() => dateFormats(i18n.locale), [i18n.locale])
   const [metric, setMetric] = React.useState<Metric>("cpu")
   const [range, setRange] = React.useState<RangeKey>("live")
 
@@ -102,7 +112,7 @@ export function ChartAreaInteractive() {
         const body = await res.json()
         if (cancelled) return
         if (!res.ok) {
-          setLiveError(body.error ?? "Failed to load stats")
+          setLiveError(body.error ?? text.statsFailed)
         } else {
           const s = body as StatsResponse
           setLiveError(null)
@@ -110,7 +120,7 @@ export function ChartAreaInteractive() {
           setSamples((prev) => [...prev, { ts: s.ts, cpu: s.cpu, memory: s.memory }].slice(-MAX_SAMPLES))
         }
       } catch {
-        if (!cancelled) setLiveError("Failed to load stats")
+        if (!cancelled) setLiveError(text.statsFailed)
       }
       if (!cancelled) timer = setTimeout(poll, document.hidden ? POLL_MS * 3 : POLL_MS)
     }
@@ -120,7 +130,7 @@ export function ChartAreaInteractive() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [range, router])
+  }, [range, router, text.statsFailed])
 
   React.useEffect(() => {
     if (range === "live") return
@@ -135,7 +145,7 @@ export function ChartAreaInteractive() {
         const body = await res.json()
         if (cancelled) return
         if (!res.ok) {
-          setHistoryError({ range: range as HistoryRange, message: body.error ?? "Failed to load history" })
+          setHistoryError({ range: range as HistoryRange, message: body.error ?? text.historyFailed })
         } else {
           const h = body as MetricsResponse
           setHistoryError(null)
@@ -143,7 +153,7 @@ export function ChartAreaInteractive() {
           next = h.intervalMs
         }
       } catch {
-        if (!cancelled) setHistoryError({ range: range as HistoryRange, message: "Failed to load history" })
+        if (!cancelled) setHistoryError({ range: range as HistoryRange, message: text.historyFailed })
       }
       if (!cancelled) timer = setTimeout(load, Math.max(MIN_HISTORY_REFRESH_MS, next))
     }
@@ -153,7 +163,7 @@ export function ChartAreaInteractive() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [range, router])
+  }, [range, router, text.historyFailed])
 
   const isLive = range === "live"
   const currentHistory = !isLive && history?.range === range ? history : null
@@ -178,30 +188,33 @@ export function ChartAreaInteractive() {
       latest === null
         ? "—"
         : metric === "cpu"
-          ? `${latest.cpu.toFixed(1)}% of ${latest.ncpu} CPU`
-          : `${formatBytes(latest.memory)} of ${formatBytes(latest.memTotal)}`
+          ? i18n.format(text.cpuOf, { value: fixed(i18n, latest.cpu, 1), ncpu: latest.ncpu })
+          : i18n.format(text.memoryOf, { value: i18n.formatBytes(latest.memory), total: i18n.formatBytes(latest.memTotal) })
   } else if (historyLoading) {
-    summary = "Loading history…"
+    summary = text.loadingHistory
   } else if (values.length === 0) {
-    summary = "No samples recorded yet"
+    summary = text.noSamples
   } else {
     const avg = values.reduce((a, v) => a + v, 0) / values.length
     const peak = Math.max(...values)
     const memTotal = currentHistory?.points.findLast((p) => p.memTotal !== null)?.memTotal
-    summary = `avg ${formatValue(metric, avg)} · peak ${formatValue(metric, peak)}`
-    if (metric === "memory" && memTotal) summary += ` of ${formatBytes(memTotal)}`
+    const stats = { avg: formatValue(i18n, metric, avg), peak: formatValue(i18n, metric, peak) }
+    summary =
+      metric === "memory" && memTotal
+        ? i18n.format(text.avgPeakOf, { ...stats, total: i18n.formatBytes(memTotal) })
+        : i18n.format(text.avgPeak, stats)
   }
 
   const prefix = isLive
     ? latest
-      ? `${latest.running ?? latest.containers.length} running container(s) · `
+      ? `${i18n.format(text.runningContainers, { count: latest.running ?? latest.containers.length })} · `
       : ""
-    : `Last ${RANGES[range].label} · `
+    : `${i18n.format(text.last, { range: text.ranges[range] })} · `
 
   return (
     <Card className="@container/card">
       <CardHeader>
-        <CardTitle>Resource usage</CardTitle>
+        <CardTitle>{text.title}</CardTitle>
         <CardDescription>
           {error ? (
             <span className="text-destructive">{error}</span>
@@ -220,21 +233,21 @@ export function ChartAreaInteractive() {
             variant="outline"
             className="*:data-[slot=toggle-group-item]:px-3!"
           >
-            <ToggleGroupItem value="cpu">CPU</ToggleGroupItem>
-            <ToggleGroupItem value="memory">Memory</ToggleGroupItem>
+            <ToggleGroupItem value="cpu">{text.cpu}</ToggleGroupItem>
+            <ToggleGroupItem value="memory">{text.memory}</ToggleGroupItem>
           </ToggleGroup>
           <Select value={range} onValueChange={(v) => setRange(v as RangeKey)}>
             <SelectTrigger
               className="w-28 **:data-[slot=select-value]:block **:data-[slot=select-value]:truncate @[540px]/card:w-32"
               size="sm"
-              aria-label="Time range"
+              aria-label={text.timeRange}
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="rounded-xl">
-              {Object.entries(RANGES).map(([key, r]) => (
+              {RANGES.map((key) => (
                 <SelectItem key={key} value={key} className="rounded-lg">
-                  {r.label}
+                  {text.ranges[key]}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -242,7 +255,7 @@ export function ChartAreaInteractive() {
         </CardAction>
       </CardHeader>
       <CardContent className="relative px-2 pt-4 sm:px-6 sm:pt-6">
-        <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
+        <ChartContainer config={config} className="aspect-auto h-[250px] w-full">
           <AreaChart data={data}>
             <defs>
               <linearGradient id="fillMetric" x1="0" y1="0" x2="0" y2="1">
@@ -266,7 +279,7 @@ export function ChartAreaInteractive() {
               tickLine={false}
               axisLine={false}
               width={64}
-              tickFormatter={(v: number) => (metric === "cpu" ? `${v.toFixed(0)}%` : formatBytes(v, 0))}
+              tickFormatter={(v: number) => (metric === "cpu" ? `${fixed(i18n, v, 0)}%` : i18n.formatBytes(v, 0))}
             />
             <ChartTooltip
               cursor={false}
@@ -278,8 +291,8 @@ export function ChartAreaInteractive() {
                   }}
                   formatter={(value) => (
                     <span className="font-mono font-medium tabular-nums">
-                      {formatValue(metric, Number(value), 2)}
-                      {isLive || range === "1h" ? "" : " avg"}
+                      {formatValue(i18n, metric, Number(value), 2)}
+                      {isLive || range === "1h" ? "" : ` ${text.avg}`}
                     </span>
                   )}
                   indicator="dot"
@@ -301,10 +314,9 @@ export function ChartAreaInteractive() {
             data-testid="metrics-empty"
             className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center text-sm"
           >
-            <span className="font-medium">Collecting history…</span>
+            <span className="font-medium">{text.collecting}</span>
             <span className="max-w-xs text-muted-foreground">
-              Usage is recorded every {Math.round((currentHistory?.intervalMs ?? 60_000) / 1000)}s. Check back in a
-              few minutes, or switch to Live.
+              {i18n.format(text.collectingHelp, { seconds: Math.round((currentHistory?.intervalMs ?? 60_000) / 1000) })}
             </span>
           </div>
         ) : null}

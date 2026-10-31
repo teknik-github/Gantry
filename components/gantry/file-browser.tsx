@@ -49,7 +49,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { formatMode, targetQuery, type FileEntry, type FileTarget, type Listing } from "@/lib/files/entries"
 import { joinPath, normalizePath, parentPath, pathSegments, resolveLinkTarget } from "@/lib/files/paths"
-import { formatBytes } from "@/lib/format"
+import { useI18n } from "@/lib/i18n/client"
 import { cn } from "@/lib/utils"
 import type { ActionState } from "@/lib/validation"
 
@@ -74,9 +74,9 @@ async function errorOf(res: Response, fallback: string) {
   return { message: body.error ?? fallback, code: body.code }
 }
 
-function formatTime(seconds: number) {
+function formatTime(seconds: number, formatDate: (date: number) => string) {
   if (!seconds) return "—"
-  return new Date(seconds * 1000).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })
+  return formatDate(seconds * 1000)
 }
 
 function owner(e: FileEntry) {
@@ -84,7 +84,12 @@ function owner(e: FileEntry) {
 }
 
 /** Upload one file with progress (XHR: fetch has no upload progress). */
-function putFile(url: string, file: Blob, onProgress: (fraction: number) => void): Promise<{ ok: boolean; status: number; body: ApiError }> {
+function putFile(
+  url: string,
+  file: Blob,
+  onProgress: (fraction: number) => void,
+  connectionError: string
+): Promise<{ ok: boolean; status: number; body: ApiError }> {
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest()
     xhr.open("PUT", url)
@@ -99,7 +104,7 @@ function putFile(url: string, file: Blob, onProgress: (fraction: number) => void
       } catch {}
       resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, body })
     }
-    xhr.onerror = () => resolve({ ok: false, status: 0, body: { error: "Upload failed. Check your connection." } })
+    xhr.onerror = () => resolve({ ok: false, status: 0, body: { error: connectionError } })
     xhr.send(file)
   })
 }
@@ -113,6 +118,10 @@ export function FileBrowser({
   limits,
   initialPath = "/",
 }: FileBrowserProps) {
+  const i18n = useI18n()
+  const { t, format } = i18n
+  const text = t.files
+  const listFailed = text.errors.listFailed
   const router = useRouter()
   const environmentId = useEnvironmentId()
   const inputId = React.useId()
@@ -145,20 +154,20 @@ export function FileBrowser({
     fetch(`/api/files/list?${query}&path=${encodeURIComponent(next)}`, { cache: "no-store", signal: controller.signal })
       .then(async (res) => {
         if (res.status === 401) return router.replace("/login")
-        if (!res.ok) return fail((await errorOf(res, "Failed to list files")).message)
+        if (!res.ok) return fail((await errorOf(res, listFailed)).message)
         const data = (await res.json()) as Listing
         setListing(data)
         if (!typingRef.current) setPathInput(data.path)
         setError(null)
       })
       .catch((err: Error) => {
-        if (err.name !== "AbortError") fail("Failed to list files")
+        if (err.name !== "AbortError") fail(listFailed)
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [request, query, router])
+  }, [request, query, router, listFailed])
 
   const navigate = (next: string) => {
     typingRef.current = false
@@ -186,7 +195,7 @@ export function FileBrowser({
     let done = 0
     for (const file of files) {
       if (file.size > limits.uploadMaxBytes) {
-        toast.error(`${file.name} is larger than the upload limit (${formatBytes(limits.uploadMaxBytes)})`)
+        toast.error(format(text.uploadTooLarge, { name: file.name, limit: i18n.formatBytes(limits.uploadMaxBytes) }))
         continue
       }
       const params = new URLSearchParams(query)
@@ -195,12 +204,21 @@ export function FileBrowser({
       if (overwrite.has(file.name)) params.set("overwrite", "1")
       if (environmentId !== undefined) params.set("env", String(environmentId))
       setUploading(`${file.name} (0%)`)
-      const res = await putFile(`/api/uploads/files?${params}`, file, (f) => setUploading(`${file.name} (${Math.round(f * 100)}%)`))
+      const res = await putFile(
+        `/api/uploads/files?${params}`,
+        file,
+        (f) => setUploading(`${file.name} (${Math.round(f * 100)}%)`),
+        text.errors.uploadConnection
+      )
       if (res.ok) done++
-      else toast.error(`${file.name}: ${res.body.error ?? `upload failed (${res.status})`}`)
+      else toast.error(`${file.name}: ${res.body.error ?? format(text.uploadFailedStatus, { status: res.status })}`)
     }
     setUploading(null)
-    if (done) toast.success(done === 1 ? `Uploaded ${files.length === 1 ? files[0].name : "1 file"}` : `Uploaded ${done} files`)
+    if (done) {
+      toast.success(
+        done === 1 && files.length === 1 ? format(text.uploadedName, { name: files[0].name }) : i18n.plural(text.uploadedCount, done)
+      )
+    }
     reload()
   }
 
@@ -239,36 +257,34 @@ export function FileBrowser({
       }}
     >
       <CardHeader>
-        <CardTitle>Files</CardTitle>
-        <CardDescription>
-          {canWrite ? "Browse, download, upload (or drop files here), edit and delete." : "Browse and download."}
-        </CardDescription>
+        <CardTitle>{text.title}</CardTitle>
+        <CardDescription>{canWrite ? text.descriptionWrite : text.descriptionRead}</CardDescription>
         <CardAction className="flex flex-wrap items-center gap-2">
-          <Button size="icon-sm" variant="outline" onClick={reload} disabled={loading} aria-label="Refresh files">
+          <Button size="icon-sm" variant="outline" onClick={reload} disabled={loading} aria-label={text.refresh}>
             <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
           </Button>
           <Button size="sm" variant="outline" asChild>
-            <a href={downloadUrl(path)} download aria-label="Download folder as tar">
+            <a href={downloadUrl(path)} download aria-label={text.downloadFolderLabel}>
               <DownloadIcon data-icon="inline-start" />
-              Download folder
+              {text.downloadFolder}
             </a>
           </Button>
           {canWrite ? (
             <>
               <Button size="sm" variant="outline" onClick={() => guardWrite(() => setNewFolderOpen(true))} disabled={busy}>
                 <FolderPlusIcon data-icon="inline-start" />
-                New folder
+                {text.newFolder}
               </Button>
               <Button size="sm" onClick={() => fileInput.current?.click()} disabled={busy}>
                 <UploadIcon data-icon="inline-start" />
-                Upload
+                {t.common.actions.upload}
               </Button>
               <input
                 ref={fileInput}
                 type="file"
                 multiple
                 className="hidden"
-                aria-label="Files to upload"
+                aria-label={text.filesToUpload}
                 onChange={(e) => {
                   startUpload(e.currentTarget.files)
                   e.currentTarget.value = ""
@@ -280,8 +296,8 @@ export function FileBrowser({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <nav aria-label="Path" className="flex min-w-0 flex-wrap items-center gap-1 text-sm">
-            <Button variant="ghost" size="xs" onClick={() => navigate("/")} aria-label={`${rootLabel} (root)`}>
+          <nav aria-label={text.path} className="flex min-w-0 flex-wrap items-center gap-1 text-sm">
+            <Button variant="ghost" size="xs" onClick={() => navigate("/")} aria-label={format(text.root, { name: rootLabel })}>
               <HardDriveIcon data-icon="inline-start" />
               {rootLabel}
             </Button>
@@ -312,7 +328,7 @@ export function FileBrowser({
             }}
           >
             <label htmlFor={`${inputId}-path`} className="sr-only">
-              Go to path
+              {text.goToPath}
             </label>
             <Input
               id={`${inputId}-path`}
@@ -324,15 +340,14 @@ export function FileBrowser({
               className="h-7 w-56 font-mono text-xs"
             />
             <Button size="sm" variant="outline" type="submit">
-              Go
+              {text.go}
             </Button>
           </form>
         </div>
 
         {listing?.source === "archive" ? (
           <p className="text-xs text-muted-foreground" data-testid="files-archive-note">
-            Listed from Docker&apos;s archive of this folder (the container isn&apos;t running or has no shell). Large folders take
-            longer.
+            {text.archiveNote}
           </p>
         ) : null}
         {listing?.truncated ? (
@@ -343,12 +358,12 @@ export function FileBrowser({
         ) : null}
         {canWrite && deleteBlocker ? (
           <p className="text-xs text-muted-foreground" data-testid="files-delete-blocker">
-            Delete unavailable: {deleteBlocker}
+            {format(text.deleteUnavailable, { reason: deleteBlocker })}
           </p>
         ) : null}
         {uploading ? (
           <p className="text-sm" role="status">
-            Uploading {uploading}…
+            {format(text.uploading, { name: uploading })}
           </p>
         ) : null}
 
@@ -357,20 +372,20 @@ export function FileBrowser({
             {error}
           </p>
         ) : !listing ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t.common.status.loading}</p>
         ) : (
           <div className="rounded-lg border">
-            <Table aria-label="Files">
+            <Table aria-label={text.title}>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead className="text-right">Size</TableHead>
-                  <TableHead>Mode</TableHead>
-                  <TableHead>Owner</TableHead>
-                  <TableHead>Modified</TableHead>
+                  <TableHead>{text.columns.name}</TableHead>
+                  <TableHead>{text.columns.type}</TableHead>
+                  <TableHead className="text-right">{text.columns.size}</TableHead>
+                  <TableHead>{text.columns.mode}</TableHead>
+                  <TableHead>{text.columns.owner}</TableHead>
+                  <TableHead>{text.columns.modified}</TableHead>
                   <TableHead className="w-0">
-                    <span className="sr-only">Actions</span>
+                    <span className="sr-only">{text.columns.actions}</span>
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -378,7 +393,7 @@ export function FileBrowser({
                 {path !== "/" ? (
                   <TableRow>
                     <TableCell colSpan={7}>
-                      <Button variant="ghost" size="xs" onClick={() => navigate(parentPath(path))} aria-label="Parent folder">
+                      <Button variant="ghost" size="xs" onClick={() => navigate(parentPath(path))} aria-label={text.parentFolder}>
                         <ArrowUpIcon data-icon="inline-start" />
                         ..
                       </Button>
@@ -388,7 +403,7 @@ export function FileBrowser({
                 {listing.entries.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-muted-foreground">
-                      Empty folder.
+                      {text.emptyFolder}
                     </TableCell>
                   </TableRow>
                 ) : null}
@@ -449,15 +464,15 @@ export function FileBrowser({
       <AlertDialog open={conflicts !== null} onOpenChange={(o) => !o && setConflicts(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Replace existing files?</AlertDialogTitle>
+            <AlertDialogTitle>{text.replaceTitle}</AlertDialogTitle>
             <AlertDialogDescription>
               {conflicts?.existing.length === 1
-                ? `${conflicts.existing[0]} already exists in this folder.`
-                : `${conflicts?.existing.length} files already exist in this folder: ${conflicts?.existing.join(", ")}.`}
+                ? format(text.existsOne, { name: conflicts.existing[0] })
+                : format(text.existsMany, { count: String(conflicts?.existing.length), names: String(conflicts?.existing.join(", ")) })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t.common.actions.cancel}</AlertDialogCancel>
             <Button
               variant="outline"
               onClick={() => {
@@ -468,7 +483,7 @@ export function FileBrowser({
                 if (rest.length) void uploadFiles(rest, new Set())
               }}
             >
-              Skip existing
+              {text.skipExisting}
             </Button>
             <AlertDialogAction
               onClick={() => {
@@ -477,7 +492,7 @@ export function FileBrowser({
                 void uploadFiles(c.files, new Set(c.existing))
               }}
             >
-              Replace
+              {text.replace}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -486,11 +501,11 @@ export function FileBrowser({
       <AlertDialog open={pendingWrite !== null} onOpenChange={(o) => !o && setPendingWrite(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Change files in use?</AlertDialogTitle>
+            <AlertDialogTitle>{text.inUseTitle}</AlertDialogTitle>
             <AlertDialogDescription>{writeWarning}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t.common.actions.cancel}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 const fn = pendingWrite
@@ -499,7 +514,7 @@ export function FileBrowser({
                 fn?.()
               }}
             >
-              Continue
+              {t.common.actions.continue}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -531,12 +546,22 @@ function EntryRow({
   onDelete: () => Promise<ActionState>
   guardWrite: (fn: () => void) => void
 }) {
+  const i18n = useI18n()
+  const { t, format } = i18n
+  const text = t.files
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const Icon = e.type === "dir" ? FolderIcon : e.type === "symlink" ? FileSymlinkIcon : FileIcon
   const openable = e.type === "dir" || (e.type === "symlink" && linkPath !== null)
   const fileLike = e.type === "file" || (e.type === "symlink" && linkPath !== null)
   const readPath = e.type === "symlink" ? linkPath : path
-  const typeLabel = e.type === "other" ? (e.kind ?? "other") : e.kind === "hardlink" ? "hard link" : e.type === "dir" ? "folder" : e.type
+  const typeLabel =
+    e.type === "other"
+      ? (e.kind ?? text.types.other)
+      : e.kind === "hardlink"
+        ? text.types.hardlink
+        : e.type === "dir"
+          ? text.types.folder
+          : text.types[e.type]
 
   return (
     <TableRow data-testid={`file-row-${e.name}`}>
@@ -548,7 +573,7 @@ function EntryRow({
               type="button"
               className="truncate text-left font-medium underline-offset-4 hover:underline"
               onClick={() => onOpen(e.type === "dir" ? path : linkPath!)}
-              aria-label={`Open ${e.name}`}
+              aria-label={format(text.open, { name: e.name })}
             >
               {e.name}
             </button>
@@ -563,24 +588,24 @@ function EntryRow({
         </div>
       </TableCell>
       <TableCell className="text-muted-foreground">{typeLabel}</TableCell>
-      <TableCell className="text-right tabular-nums">{e.type === "file" ? formatBytes(e.size) : "—"}</TableCell>
+      <TableCell className="text-right tabular-nums">{e.type === "file" ? i18n.formatBytes(e.size) : "—"}</TableCell>
       <TableCell>
         <Mono>{formatMode(e)}</Mono>
       </TableCell>
       <TableCell>
         <Mono>{owner(e)}</Mono>
       </TableCell>
-      <TableCell className="whitespace-nowrap text-muted-foreground">{formatTime(e.mtime)}</TableCell>
+      <TableCell className="whitespace-nowrap text-muted-foreground">{formatTime(e.mtime, i18n.formatDate)}</TableCell>
       <TableCell>
         <div className="flex items-center justify-end gap-1">
           {fileLike ? (
-            <Button variant="ghost" size="icon-sm" onClick={onEdit} aria-label={`${canWrite ? "Edit" : "View"} ${e.name}`}>
+            <Button variant="ghost" size="icon-sm" onClick={onEdit} aria-label={format(canWrite ? text.edit : text.view, { name: e.name })}>
               <FileTextIcon />
             </Button>
           ) : null}
           {readPath && e.type !== "other" ? (
             <Button variant="ghost" size="icon-sm" asChild>
-              <a href={downloadUrl(readPath)} download aria-label={`Download ${e.name}`}>
+              <a href={downloadUrl(readPath)} download aria-label={format(text.download, { name: e.name })}>
                 <DownloadIcon />
               </a>
             </Button>
@@ -593,7 +618,7 @@ function EntryRow({
                 className="text-muted-foreground"
                 disabled={deleteBlocker !== null}
                 title={deleteBlocker ?? undefined}
-                aria-label={`Delete ${e.name}`}
+                aria-label={format(text.delete, { name: e.name })}
                 onClick={() => guardWrite(() => setConfirmOpen(true))}
               >
                 <Trash2Icon />
@@ -601,11 +626,9 @@ function EntryRow({
               <ConfirmAction
                 open={confirmOpen}
                 onOpenChange={setConfirmOpen}
-                title={`Delete ${e.name}?`}
-                description={
-                  e.type === "dir" ? `The folder ${path} and everything in it will be deleted.` : `${path} will be deleted.`
-                }
-                confirmLabel="Delete"
+                title={format(text.deleteTitle, { name: e.name })}
+                description={format(e.type === "dir" ? text.deleteFolder : text.deleteFile, { path })}
+                confirmLabel={t.common.actions.delete}
                 onConfirm={onDelete}
               />
             </>
@@ -625,6 +648,7 @@ function NewFolderDialog({
   onOpenChange: (open: boolean) => void
   onCreate: (name: string) => Promise<ActionState>
 }) {
+  const { t } = useI18n()
   const id = React.useId()
   const [name, setName] = React.useState("")
   const [pending, run] = useRunAction()
@@ -649,19 +673,19 @@ function NewFolderDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>New folder</DialogTitle>
-            <DialogDescription>Created in the current folder, owned by root (mode 755).</DialogDescription>
+            <DialogTitle>{t.files.newFolder}</DialogTitle>
+            <DialogDescription>{t.files.newFolderDescription}</DialogDescription>
           </DialogHeader>
           <Field>
-            <FieldLabel htmlFor={`${id}-name`}>Folder name</FieldLabel>
+            <FieldLabel htmlFor={`${id}-name`}>{t.files.folderName}</FieldLabel>
             <Input id={`${id}-name`} value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
           </Field>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-              Cancel
+              {t.common.actions.cancel}
             </Button>
             <Button type="submit" disabled={pending || !name.trim()}>
-              {pending ? "Creating…" : "Create"}
+              {pending ? t.files.creating : t.common.actions.create}
             </Button>
           </DialogFooter>
         </form>
@@ -693,6 +717,10 @@ function EditFileDialog({
   guardWrite: (fn: () => void) => void
   onClose: (saved: boolean) => void
 }) {
+  const i18n = useI18n()
+  const { t, format } = i18n
+  const text = t.files
+  const openFailed = text.errors.openFailed
   const id = React.useId()
   const router = useRouter()
   const environmentId = useEnvironmentId()
@@ -708,17 +736,17 @@ function EditFileDialog({
       .then(async (res) => {
         if (cancelled) return
         if (res.status === 401) return router.replace("/login")
-        if (!res.ok) return setError((await errorOf(res, "Failed to open the file")).message)
+        if (!res.ok) return setError((await errorOf(res, openFailed)).message)
         const data = (await res.json()) as ReadResult
         if (cancelled) return
         setFile(data)
         if (data.ok) setContent(data.content)
       })
-      .catch(() => !cancelled && setError("Failed to open the file"))
+      .catch(() => !cancelled && setError(openFailed))
     return () => {
       cancelled = true
     }
-  }, [query, filePath, router])
+  }, [query, filePath, router, openFailed])
 
   const bytes = React.useMemo(() => new TextEncoder().encode(content).length, [content])
   const dirty = file?.ok === true && content !== file.content
@@ -742,13 +770,13 @@ function EditFileDialog({
         body: new Blob([content]),
       })
       if (!res.ok) {
-        toast.error((await errorOf(res, "Save failed")).message)
+        toast.error((await errorOf(res, text.errors.saveFailed)).message)
         return
       }
-      toast.success(`Saved ${name}`)
+      toast.success(format(text.saved, { name }))
       onClose(true)
     } catch {
-      toast.error("Save failed. Check your connection.")
+      toast.error(text.errors.saveConnection)
     } finally {
       setSaving(false)
     }
@@ -757,10 +785,10 @@ function EditFileDialog({
   const reason =
     file && !file.ok
       ? file.reason === "binary"
-        ? "This looks like a binary file; download it instead."
+        ? text.binary
         : file.reason === "too-large"
-          ? `This file (${formatBytes(file.size)}) is larger than the editor limit of ${formatBytes(file.limit)}; download it instead.`
-          : "Only regular files can be opened."
+          ? format(text.tooLarge, { size: i18n.formatBytes(file.size), limit: i18n.formatBytes(file.limit) })
+          : text.notAFile
       : null
 
   return (
@@ -769,7 +797,7 @@ function EditFileDialog({
         <DialogHeader>
           <DialogTitle className="truncate">{filePath}</DialogTitle>
           <DialogDescription>
-            {canWrite ? `Text files up to ${formatBytes(limit)}; saving keeps the owner and mode.` : "Read-only: editing needs the manager role."}
+            {canWrite ? format(text.editHelp, { limit: i18n.formatBytes(limit) }) : text.readOnly}
           </DialogDescription>
         </DialogHeader>
         {error ? (
@@ -777,14 +805,14 @@ function EditFileDialog({
             {error}
           </p>
         ) : !file ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t.common.status.loading}</p>
         ) : reason ? (
           <p className="text-sm text-muted-foreground" role="status">
             {reason}
           </p>
         ) : (
           <Field>
-            <FieldLabel htmlFor={`${id}-content`}>File content</FieldLabel>
+            <FieldLabel htmlFor={`${id}-content`}>{text.fileContent}</FieldLabel>
             <Textarea
               id={`${id}-content`}
               value={content}
@@ -794,18 +822,18 @@ function EditFileDialog({
               className="h-[24rem] resize-y font-mono text-xs"
             />
             <FieldDescription className={tooBig ? "text-destructive" : undefined}>
-              {formatBytes(bytes)}
-              {tooBig ? ` — larger than the limit of ${formatBytes(limit)}` : ""}
+              {i18n.formatBytes(bytes)}
+              {tooBig ? format(text.overLimit, { limit: i18n.formatBytes(limit) }) : ""}
             </FieldDescription>
           </Field>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onClose(false)} disabled={saving}>
-            Close
+            {t.common.actions.close}
           </Button>
           {canWrite && file?.ok ? (
             <Button onClick={() => guardWrite(() => void save())} disabled={saving || !dirty || tooBig}>
-              {saving ? "Saving…" : "Save"}
+              {saving ? t.common.status.saving : t.common.actions.save}
             </Button>
           ) : null}
         </DialogFooter>

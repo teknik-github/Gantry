@@ -5,6 +5,7 @@ import { toast } from "sonner"
 
 import { selectNamespace } from "@/app/(app)/kubernetes/actions"
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useI18n } from "@/lib/i18n/client"
 
 const ALL = "__all__"
 
@@ -21,6 +22,7 @@ export function NamespaceSelect({
   namespaces: string[]
   selected: string | null
 }) {
+  const { t } = useI18n()
   const [pending, startTransition] = useTransition()
   // The selected namespace may not be listable (namespaced service accounts).
   const options = selected && !namespaces.includes(selected) ? [selected, ...namespaces] : namespaces
@@ -36,11 +38,11 @@ export function NamespaceSelect({
         })
       }
     >
-      <SelectTrigger size="sm" className="w-56" aria-label="Namespace">
+      <SelectTrigger size="sm" className="w-56" aria-label={t.kubernetes.common.namespace}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={ALL}>All namespaces</SelectItem>
+        <SelectItem value={ALL}>{t.kubernetes.common.allNamespaces}</SelectItem>
         {options.length ? <SelectSeparator /> : null}
         {options.map((ns) => (
           <SelectItem key={ns} value={ns}>

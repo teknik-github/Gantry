@@ -3,13 +3,16 @@ import type { Metadata } from "next"
 import { TopologyView } from "@/components/gantry/topology-view"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import type { ContainerSummary, DockerApi } from "@/lib/server/docker/api"
 import { getDocker } from "@/lib/server/environments"
 import { tryDocker } from "@/lib/server/views"
 import { buildTopology, withNetworkAliases } from "@/lib/topology"
 
-export const metadata: Metadata = { title: "Topology" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.topology }
+}
 
 /** Above this, skip per-container inspects (aliases only) to keep the page fast. */
 const ALIAS_LOOKUP_LIMIT = 150
@@ -50,12 +53,8 @@ export default async function TopologyPage({ searchParams }: PageProps<"/topolog
     return buildTopology({ containers: withNetworkAliases(containers, aliases), networks, volumes })
   })
 
-  const header = (
-    <PageHeader
-      title="Topology"
-      description="How containers, compose projects, networks and volumes are connected. Click anything for details."
-    />
-  )
+  const { t } = await getI18n()
+  const header = <PageHeader title={t.nav.pages.topology} description={t.topology.description} />
 
   if (result.error !== undefined) {
     return (
