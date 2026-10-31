@@ -248,6 +248,37 @@ export interface ProxyHostsTable {
   updated_at: string
 }
 
+/** Latest vulnerability scan (Trivy) of an image in an environment (lib/server/image-scans.ts). */
+export interface ImageScansTable {
+  id: Generated<number>
+  environment_id: number
+  /** "sha256:<hex>" as the environment's daemon reports it. */
+  image_id: string
+  /** Tag or short id shown for the image. */
+  reference: string
+  repo_digest: string | null
+  /** Last successful scan; null until one succeeds. */
+  scanned_at: string | null
+  /** Last attempt, successful or not. */
+  attempted_at: string
+  duration_ms: number | null
+  trivy_version: string | null
+  /** UpdatedAt of the vulnerability database used. */
+  db_version: string | null
+  os: string | null
+  critical: Generated<number>
+  high: Generated<number>
+  medium: Generated<number>
+  low: Generated<number>
+  unknown: Generated<number>
+  /** JSON Finding[] (lib/image-scan.ts). */
+  findings: string
+  /** 1 when findings beyond MAX_FINDINGS were dropped. */
+  truncated: Generated<number>
+  /** Error of the last attempt; the results are those of the scan before it. */
+  error: string | null
+}
+
 export interface Database {
   users: UsersTable
   environments: EnvironmentsTable
@@ -266,9 +297,11 @@ export interface Database {
   proxy_hosts: ProxyHostsTable
   recovery_codes: RecoveryCodesTable
   api_tokens: ApiTokensTable
+  image_scans: ImageScansTable
 }
 
 export type User = Selectable<UsersTable>
+export type ImageScan = Selectable<ImageScansTable>
 export type NewUser = Insertable<UsersTable>
 export type Environment = Selectable<EnvironmentsTable>
 export type AuditLog = Selectable<AuditLogsTable>

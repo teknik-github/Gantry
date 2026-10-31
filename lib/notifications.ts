@@ -13,6 +13,7 @@ export const ALERT_KINDS = {
   backup: { label: "Backup failed", description: "A scheduled backup couldn't be written" },
   resource_high: { label: "High CPU or memory", description: "A container or host stays above the thresholds set below" },
   stack_deploy: { label: "Git stack deployed", description: "A Git stack was deployed (manually, by webhook or polling) or failed to" },
+  vulnerability: { label: "Vulnerabilities found", description: "An image scan found new vulnerabilities at or above the alert severity" },
 } as const
 
 export type AlertKind = keyof typeof ALERT_KINDS

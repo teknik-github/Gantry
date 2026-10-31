@@ -21,6 +21,9 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
   or your own registry; used for pulls, recreate, update checks and stacks
 - **Image updates**: containers whose tag has a newer image in the registry
   get an "update" badge; update them one by one or in bulk
+- **Vulnerability scanning**: scan images with [Trivy](https://trivy.dev) on
+  the host that holds them; severity badges on the Images page, a findings
+  view, a daily scan of images in use and alerts for new findings
 - **Templates**: 35 ready-made stacks (databases, WordPress, Nextcloud,
   monitoring, Gitea, n8n, Keycloak, Ollama + Open WebUI, ...) plus your own
   templates from any compose file
@@ -138,6 +141,12 @@ Unit/integration extras:
 - The TLS tests need `openssl` and the Docker socket (they run a local mTLS
   proxy in front of it).
 - `GANTRY_DOCKER_IT=1` also runs the recreate tests against real Docker.
+- `GANTRY_TEST_TRIVY=1` runs a real Trivy scan of `alpine:3.10` through the
+  mTLS proxy (`tests/integration/trivy.test.ts`); it pulls what is missing and
+  downloads the database into the `gantry-test-s-trivy-cache` volume, removed
+  afterwards unless `GANTRY_TEST_KEEP_TRIVY_CACHE=1`. The E2E suite
+  (`tests/e2e/image-scan.spec.ts`) scans the same image through the UI; its
+  server uses that volume too and removes it unless `E2E_KEEP_TRIVY_CACHE=1`.
 - `GANTRY_TEST_MYSQL_URL=mysql://root:…@127.0.0.1:3307/x` runs the database
   tests on MySQL (`tests/integration/mysql.test.ts`: fresh install, upgrades
   from 005 and 013, column sizes and collations; and the user, 2FA, OIDC, API
@@ -191,6 +200,10 @@ against the same throwaway cluster.
 | `METRICS_RETENTION_DAYS` | `7` | How long history is kept |
 | `UPDATE_CHECK_INTERVAL_HOURS` | `6` | How often registries are asked about newer images (`0` = only on demand) |
 | `BACKUP_DIR` | `$DATA_DIR/backups` | Where scheduled backups are written (mount another disk here) |
+| `TRIVY_IMAGE` | `aquasec/trivy:0.76.1` | Scanner image for vulnerability scans (pulled on each environment when missing) |
+| `TRIVY_CACHE_VOLUME` | `gantry-trivy-cache` | Named volume, on each environment, holding Trivy's vulnerability database |
+| `TRIVY_TIMEOUT_MINUTES` | `20` | Longest a single scan (pull, export, scan) may take |
+| `TRIVY_DB_REPOSITORY`, `TRIVY_JAVA_DB_REPOSITORY`, `TRIVY_SKIP_DB_UPDATE`, `TRIVY_SKIP_JAVA_DB_UPDATE`, `TRIVY_OFFLINE_SCAN`, `TRIVY_INSECURE` | | Passed on to the scanner container as is (database mirrors, offline use) |
 | `GANTRY_URL` | | Public URL of Gantry (e.g. `https://gantry.example.com`); the OIDC callback is `$GANTRY_URL/auth/oidc/callback` |
 | `OIDC_ISSUER` | | OpenID provider (issuer URL); single sign-on is off unless this and `OIDC_CLIENT_ID` are set |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | Client registered at the provider (confidential client; the secret is optional for public clients, PKCE is always used) |
@@ -372,6 +385,67 @@ pinned to a digest or an image id, and images built locally, are not checked.
 Containers from a compose project are recreated with the same settings, but the
 project's next `docker compose up` uses its compose file again.
 
+### Vulnerability scanning
+
+The Images page has a **Vulnerabilities** column with counts per severity
+(Critical / High / Medium / Low) for scanned images. **Scan** (row button, or
+select several images) queues a scan; scans run in the background, one at a
+time per environment, and the badges update by themselves. The badges link to
+the findings: vulnerability id, package, installed and fixed version,
+severity and title, with a severity filter, a "fixable only" switch and a
+search, plus when the image was scanned, with which Trivy version and
+vulnerability database. A container's page shows the scan of its image.
+Viewers see results; scanning needs the operator role.
+
+How a scan works: Gantry runs [Trivy](https://trivy.dev) (`TRIVY_IMAGE`,
+pinned to a release) as a short-lived container **on the environment that
+holds the image**, using only the Docker API, so remote TCP/TLS environments
+work like the local socket and the scanner never gets the Docker socket:
+
+1. the scanner image is pulled on that environment if missing (progress is
+   shown in the column), and the `TRIVY_CACHE_VOLUME` volume keeps Trivy's
+   vulnerability database between scans;
+2. the image is exported (`GET /images/{id}/get`, i.e. `docker save`) and
+   streamed straight into the created scanner container (`PUT /archive`),
+   where it unpacks as an OCI image layout that `trivy image --input` reads.
+   Nothing is buffered in Gantry, but the image does travel from the daemon
+   to Gantry and back, so on a remote environment a scan costs about twice
+   the image size in network traffic;
+3. Trivy runs with `--scanners vuln`; the JSON report is read back, parsed,
+   and the container is always removed (scanner containers are labelled
+   `gantry.scanner=true`; leftovers from a restart are swept at startup and
+   hourly).
+
+Measured on a busy 4-CPU host (Docker 29, containerd image store) with the
+database already cached: `alpine:3.10` (3 MB) took 25 s (5 s export and copy,
+18 s Trivy) and up to 90 s when the host was saturated; `postgres:17-alpine`
+(118 MB) took 90 s (40 s export and copy, where a plain `docker save` takes
+20 s, and 40 s Trivy). The first scan on an environment also downloads the
+database from `mirror.gcr.io/aquasec/trivy-db` (then `ghcr.io`): 2 to 3
+minutes here, so that first scan took 4.5 minutes; Trivy refreshes it at
+most once a day.
+
+Only the latest scan of each image is kept, with up to 3,000 findings (the
+most severe; the counts include all of them). A failed scan keeps the
+previous results and shows its error.
+
+**Daily scan and alerts** (administrators, card on the Images page): scan the
+images that containers use on every environment once a day at a set time, and
+pick the lowest severity that raises a **Vulnerabilities found** alert
+(default Critical). An alert only names findings the previous scan of that
+image didn't have, so a daily scan doesn't repeat yesterday's alert; the
+first scan of an image reports everything at or above the threshold.
+
+**Offline and air-gapped hosts**: when the database can't be downloaded the
+scan fails with an explanation. Either point `TRIVY_DB_REPOSITORY` (and
+`TRIVY_JAVA_DB_REPOSITORY`) at a reachable mirror of the OCI artifacts, or
+fill the cache volume yourself (`trivy image --download-db-only
+--cache-dir /cache`, then copy that directory into the volume, mounted at
+`/root/.cache/trivy`) and set `TRIVY_SKIP_DB_UPDATE=true` and
+`TRIVY_SKIP_JAVA_DB_UPDATE=true`. Push the scanner image to a registry the
+environment can reach and set `TRIVY_IMAGE` to it (stored registry logins are
+used for the pull).
+
 ### Templates
 
 **Templates** lists 35 built-in stacks and your own. Deploying one asks for a
@@ -512,13 +586,13 @@ in environments they were given, with one of these roles each:
 | --- | :-: | :-: | :-: |
 | Lists, details, dashboard, resource usage, live updates | ✓ | ✓ | ✓ |
 | Start / stop / restart / pause / kill containers, rollout restart (Kubernetes) | | ✓ | ✓ |
-| Container and pod logs, image update checks | | ✓ | ✓ |
+| Container and pod logs, image update checks, vulnerability scans | | ✓ | ✓ |
 | Create / remove / prune containers, images, volumes, networks | | | ✓ |
 | Container environment variable values, edit & recreate, pull & recreate, console | | | ✓ |
 | Stacks (create, edit, deploy, start/stop, delete), deploy templates | | | ✓ |
 | Proxy, per-container auto-update | | | ✓ |
 | Kubernetes: scale, delete, namespaces, apply manifests | | | ✓ |
-| Import external compose projects, save a stack as template, users, environments, registries, notifications, auto-update schedule | | | admins |
+| Import external compose projects, save a stack as template, users, environments, registries, notifications, auto-update and vulnerability scan schedules | | | admins |
 
 Every Server Action and route handler checks the role for the **current**
 environment on the server (`lib/server/action.ts` `authorize()`,

@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 
+import { ImageScanProvider, ImageScanSettings } from "@/components/gantry/image-scan-server"
 import { ImagesTable, type ImageRow } from "@/components/gantry/images-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
@@ -50,7 +51,10 @@ export default async function ImagesPage() {
   return (
     <PageBody>
       <PageHeader title="Images" description={`${rows.length} image(s) using ${formatBytes(total)}`} />
-      <ImagesTable data={rows} canManage={can.manage} />
+      {can.admin ? <ImageScanSettings /> : null}
+      <ImageScanProvider>
+        <ImagesTable data={rows} canManage={can.manage} canOperate={can.operate} />
+      </ImageScanProvider>
     </PageBody>
   )
 }

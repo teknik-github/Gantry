@@ -9,6 +9,7 @@ import { BulkConfirm } from "@/components/gantry/bulk"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { useEnvironmentId } from "@/components/gantry/environment-scope"
 import { FormDialog } from "@/components/gantry/form-dialog"
+import { BulkScanImages, ScanImageButton, VulnerabilityCell } from "@/components/gantry/image-scan-ui"
 import { Mono } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -30,7 +31,7 @@ export type ImageRow = {
 
 const helper = columnHelperFor<ImageRow>()
 
-function buildColumns(canManage: boolean) {
+function buildColumns(canManage: boolean, canOperate: boolean) {
   return helper.columns([
     helper.accessor((r) => r.tags[0] ?? "<none>", {
       id: "tags",
@@ -64,6 +65,11 @@ function buildColumns(canManage: boolean) {
           <span className="text-muted-foreground">Unused</span>
         ),
     }),
+    helper.display({
+      id: "vulnerabilities",
+      header: "Vulnerabilities",
+      cell: ({ row }) => <VulnerabilityCell imageId={row.original.id} name={imageName(row.original)} />,
+    }),
     helper.accessor("size", {
       header: ({ column }) => <SortHeader column={column} title="Size" />,
       cell: ({ row }) => <span className="tabular-nums">{row.original.sizeLabel}</span>,
@@ -74,21 +80,27 @@ function buildColumns(canManage: boolean) {
     }),
     helper.display({
       id: "actions",
-      cell: ({ row }) => (canManage ? <RemoveImage row={row.original} /> : null),
+      cell: ({ row }) => (
+        <div className="flex justify-end">
+          {canOperate ? <ScanImageButton imageId={row.original.id} name={imageName(row.original)} /> : null}
+          {canManage ? <RemoveImage row={row.original} /> : null}
+        </div>
+      ),
       enableHiding: false,
     }),
   ])
 }
 
-export function ImagesTable({ data, canManage }: { data: ImageRow[]; canManage: boolean }) {
+export function ImagesTable({ data, canManage, canOperate = false }: { data: ImageRow[]; canManage: boolean; canOperate?: boolean }) {
   const environmentId = useEnvironmentId()
-  const columns = React.useMemo(() => buildColumns(canManage), [canManage])
+  const columns = React.useMemo(() => buildColumns(canManage, canOperate), [canManage, canOperate])
+  const selection = React.useMemo(() => imageSelection(canManage), [canManage])
   return (
     <DataTable
       data={data}
       columns={columns}
       getRowId={(r) => r.id}
-      selection={canManage ? imageSelection : undefined}
+      selection={canOperate ? selection : undefined}
       searchText={(r) => `${r.tags.join(" ")} ${r.shortId}`}
       searchPlaceholder="Search images…"
       emptyMessage="No images."
@@ -117,10 +129,15 @@ export function ImagesTable({ data, canManage }: { data: ImageRow[]; canManage: 
 
 const imageName = (r: ImageRow) => r.tags[0] ?? r.shortId
 
-const imageSelection: TableSelection<ImageRow> = {
+const imageSelection = (canManage: boolean): TableSelection<ImageRow> => ({
   rowLabel: imageName,
-  actions: (selected, clear) => <BulkRemoveImages selected={selected} clear={clear} />,
-}
+  actions: (selected, clear) => (
+    <>
+      <BulkScanImages selected={selected.map((r) => ({ id: r.id, name: imageName(r) }))} clear={clear} />
+      {canManage ? <BulkRemoveImages selected={selected} clear={clear} /> : null}
+    </>
+  ),
+})
 
 function BulkRemoveImages({ selected, clear }: { selected: ImageRow[]; clear: () => void }) {
   const environmentId = useEnvironmentId()

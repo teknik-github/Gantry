@@ -88,6 +88,7 @@ describe.skipIf(!testMysqlUrl)("MySQL", { timeout: 600_000 }, () => {
         "environments.kube_credentials",
         "settings.value",
         "proxy_settings.last_error",
+        "image_scans.findings",
       ]) {
         expect(cols.get(c)?.column_type, c).toBe("mediumtext")
       }
@@ -113,6 +114,7 @@ describe.skipIf(!testMysqlUrl)("MySQL", { timeout: 600_000 }, () => {
           "auto_update_rules_environment_fk",
           "environment_access_environment_fk",
           "environment_access_user_fk",
+          "image_scans_environment_fk",
           "proxy_hosts_environment_fk",
           "proxy_settings_environment_fk",
           "recovery_codes_user_fk",
@@ -133,6 +135,7 @@ describe.skipIf(!testMysqlUrl)("MySQL", { timeout: 600_000 }, () => {
       expect(unique.get("stack_git.stack_git_webhook_idx")).toBe("webhook_id")
       expect(unique.get("auto_update_rules.PRIMARY")).toBe("environment_id,container_name")
       expect(unique.get("stacks.stacks_environment_name_unique")).toBe("environment_id,name")
+      expect(unique.get("image_scans.image_scans_image_idx")).toBe("environment_id,image_id")
       expect(unique.get("settings.PRIMARY")).toBe("key")
     })
 
@@ -301,10 +304,14 @@ describe.skipIf(!testMysqlUrl)("MySQL", { timeout: 600_000 }, () => {
         .values({ environment_id: envId, domains: "a.example.com", target: "c", port: 80, tls: "off", enabled: 1, created_at: now(), updated_at: now() })
         .execute()
       await t.db.insertInto("api_tokens").values({ user_id: userId, name: "t", token_hash: "f".repeat(64), prefix: "gt_", created_at: now() }).execute()
+      await t.db
+        .insertInto("image_scans")
+        .values({ environment_id: envId, image_id: `sha256:${"a".repeat(64)}`, reference: "a:1", attempted_at: now(), findings: "[]", repo_digest: null, scanned_at: null, duration_ms: null, trivy_version: null, db_version: null, os: null, error: null })
+        .execute()
       await t.db.insertInto("recovery_codes").values({ user_id: userId, code_hash: "e".repeat(64), created_at: now() }).execute()
 
       await t.db.deleteFrom("environments").where("id", "=", envId).execute()
-      for (const table of ["stacks", "auto_update_rules", "proxy_settings", "proxy_hosts"] as const) {
+      for (const table of ["stacks", "auto_update_rules", "proxy_settings", "proxy_hosts", "image_scans"] as const) {
         const left = await t.db.selectFrom(table).select("environment_id").where("environment_id", "=", envId).execute()
         expect(left, table).toEqual([])
       }
@@ -402,7 +409,10 @@ describe.skipIf(!testMysqlUrl)("MySQL", { timeout: 600_000 }, () => {
           .execute()
 
         const results = await migrate(t.db)
-        expect(results.map((r) => r.migrationName)).toEqual(["014_mysql_columns"])
+        // 014, then whatever came later (only additive migrations); nothing up to 013 runs again.
+        const names = results.map((r) => r.migrationName)
+        expect(names[0]).toBe("014_mysql_columns")
+        expect(names.every((n) => n > "014")).toBe(true)
 
         const e = await t.db.selectFrom("environments").selectAll().where("id", "=", 1).executeTakeFirstOrThrow()
         expect(e).toMatchObject({ tls_ca: pem, tls_cert: pem, tls_key: pem, kube_credentials: pem })

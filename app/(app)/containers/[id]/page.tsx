@@ -6,6 +6,7 @@ import { ContainerActions, LogViewer } from "@/components/gantry/container-detai
 import { ExposeContainerDialog } from "@/components/gantry/proxy-ui"
 import type { RecreateInfo } from "@/components/gantry/container-edit-dialog"
 import { ExecConsole } from "@/components/gantry/exec-console"
+import { ContainerImageScan } from "@/components/gantry/image-scan-server"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, Mono, StateBadge } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
@@ -109,6 +110,9 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
                     </Badge>
                   ) : null}
                 </span>
+              </Row>
+              <Row label="Vulnerabilities">
+                <ContainerImageScan imageId={c.Image} name={c.Config.Image} />
               </Row>
               {domains.length ? (
                 <Row label="Domains">
