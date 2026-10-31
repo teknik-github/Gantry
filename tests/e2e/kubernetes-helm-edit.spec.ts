@@ -165,8 +165,10 @@ async function startChartRepo() {
     execFileSync("helm", ["package", src, "--destination", out], { env: helmEnv, stdio: "pipe" })
   }
   repoServer = http.createServer((req, res) => {
-    const file = path.join(out, path.basename(decodeURIComponent((req.url ?? "/").split("?")[0])))
-    if (!file.startsWith(out) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    // Files at the top level only: /nothing-here/index.yaml must be a 404.
+    const urlPath = decodeURIComponent((req.url ?? "/").split("?")[0])
+    const file = path.join(out, path.basename(urlPath))
+    if (urlPath !== `/${path.basename(urlPath)}` || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       res.writeHead(404).end()
       return
     }
@@ -392,7 +394,9 @@ test("install a chart with edited values, upgrade, roll back and uninstall", asy
   await expect(upgradeValues).toHaveValue(/greeting: from-install/)
   await upgradeValues.fill("greeting: from-upgrade\n")
   await upgrade.getByRole("button", { name: "Upgrade" }).click()
-  const upgradeOp = page.getByTestId("helm-operation").first()
+  // Next keeps the install page hidden in the DOM: only look at visible operations.
+  const operations = page.getByTestId("helm-operation").filter({ visible: true })
+  const upgradeOp = operations.first()
   await expect(upgradeOp).toHaveAttribute("data-state", "succeeded", { timeout: 240_000 })
   await expect(upgradeOp.getByTestId("helm-output")).toContainText(`$ helm upgrade ${RELEASE} ${REPO}/${CHART}`)
   expect(await configMapData(cluster, HELM_NS, `${RELEASE}-config`)).toEqual({ greeting: "from-upgrade", chartVersion: "0.2.0" })
@@ -403,7 +407,8 @@ test("install a chart with edited values, upgrade, roll back and uninstall", asy
   const rollback = page.getByRole("form", { name: "Roll back release" })
   await pick(page, rollback, "Revision", `1: ${CHART}-0.1.0 (superseded)`)
   await rollback.getByRole("button", { name: "Roll back" }).click()
-  const rollbackOp = page.getByTestId("helm-operation").last()
+  await expect(operations).toHaveCount(2)
+  const rollbackOp = operations.last()
   await expect(rollbackOp).toHaveAttribute("data-state", "succeeded", { timeout: 240_000 })
   await expect(rollbackOp).toContainText(`Release ${RELEASE} rolled back to revision 1`)
   expect(await configMapData(cluster, HELM_NS, `${RELEASE}-config`)).toEqual({ greeting: "from-install", chartVersion: "0.1.0" })
