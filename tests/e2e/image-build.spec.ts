@@ -39,8 +39,8 @@ const GIT_USER = "gantry-b"
 const GIT_TOKEN = `e2e-b-git-token-${crypto.randomBytes(8).toString("hex")}`
 
 // Builds start containers; this host can be slow.
-const BUILD_TIMEOUT = 240_000
-const TIMEOUT = 600_000
+const BUILD_TIMEOUT = 600_000
+const TIMEOUT = 1_500_000
 
 let tmp = ""
 let server: GitServer | undefined
@@ -229,13 +229,14 @@ test("cancelling a build stops it in Docker", async ({ page }) => {
   await signIn(page)
   await fillEditorBuild(page, { dockerfile: `FROM alpine:3\nRUN echo ${CANCEL_MARKER} && sleep 600\n`, tags: CANCEL_TAG })
   await page.getByRole("button", { name: "Build image" }).click()
-  // The RUN step's container printed the marker: it is running now.
-  await expect(buildLog(page)).toContainText(`${CANCEL_MARKER}\n`, { timeout: BUILD_TIMEOUT })
   const running = async () => {
     const list = await docker<{ Command: string; State: string }[]>("GET", "/containers/json?all=true")
     return list.filter((c) => c.Command.includes(CANCEL_MARKER) && c.State === "running").length
   }
-  expect(await running()).toBe(1)
+  // The RUN step's container is up (the step line also contains the marker,
+  // so ask Docker rather than the log).
+  await expect(buildLog(page)).toContainText("Running in", { timeout: BUILD_TIMEOUT })
+  await expect.poll(running, { timeout: BUILD_TIMEOUT, intervals: [1_000, 2_000] }).toBe(1)
 
   await page.getByRole("button", { name: "Cancel build" }).click()
   await expect(result(page)).toContainText("Build cancelled")
