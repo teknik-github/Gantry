@@ -11,17 +11,22 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { useI18n } from "@/lib/i18n/client"
+import type { Messages } from "@/lib/i18n"
 
 export type NavItem = {
-  title: string
+  /** Page title, from the nav.pages messages. */
+  page: keyof Messages["nav"]["pages"]
   url: string
   icon?: React.ReactNode
   /** Only active on this exact path, not on sub-pages. */
   exact?: boolean
 }
 
-export function NavMain({ items, label }: { items: NavItem[]; label?: string }) {
+export function NavMain({ items, group }: { items: NavItem[]; group?: keyof Messages["nav"]["groups"] }) {
   const pathname = usePathname()
+  const { t } = useI18n()
+  const label = group ? t.nav.groups[group] : null
 
   return (
     <SidebarGroup>
@@ -30,18 +35,19 @@ export function NavMain({ items, label }: { items: NavItem[]; label?: string }) 
         <SidebarMenu>
           {items.map((item) => {
             const active = pathname === item.url || (!item.exact && pathname.startsWith(`${item.url}/`))
+            const title = t.nav.pages[item.page]
             return (
-              <SidebarMenuItem key={item.title}>
+              <SidebarMenuItem key={item.url}>
                 <SidebarMenuButton
                   asChild
-                  tooltip={item.title}
+                  tooltip={title}
                   isActive={active}
                   // Crane-yellow marker on the current page.
                   className="data-[active=true]:shadow-[inset_3px_0_0_var(--crane)] data-[active=true]:[&>svg]:text-crane"
                 >
                   <Link href={item.url}>
                     {item.icon}
-                    <span>{item.title}</span>
+                    <span>{title}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

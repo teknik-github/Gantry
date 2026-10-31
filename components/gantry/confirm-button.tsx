@@ -14,6 +14,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { useI18n } from "@/lib/i18n/client"
 import type { ActionState } from "@/lib/validation"
 
 /**
@@ -27,7 +28,7 @@ export function ConfirmAction({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
+  confirmLabel,
   destructive = true,
   onConfirm,
   extra,
@@ -47,6 +48,7 @@ export function ConfirmAction({
   const open = openProp ?? openState
   const setOpen = onOpenChange ?? setOpenState
   const [pending, run] = useRunAction()
+  const { t } = useI18n()
 
   return (
     <AlertDialog open={open} onOpenChange={(o) => !pending && setOpen(o)}>
@@ -58,7 +60,7 @@ export function ConfirmAction({
         </AlertDialogHeader>
         {extra}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>{t.common.actions.cancel}</AlertDialogCancel>
           <AlertDialogAction
             variant={destructive ? "destructive" : "default"}
             disabled={pending}
@@ -67,7 +69,7 @@ export function ConfirmAction({
               if (await run(onConfirm)) setOpen(false)
             }}
           >
-            {pending ? "Working…" : confirmLabel}
+            {pending ? t.common.status.working : (confirmLabel ?? t.common.actions.confirm)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

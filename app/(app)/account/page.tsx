@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { ChangePasswordForm } from "@/components/gantry/account-form"
 import { ApiTokensCard, LinkSsoButton, TwoFactorCard } from "@/components/gantry/account-security"
 import { PageBody } from "@/components/gantry/page-body"
+import { LanguageSelect } from "@/components/i18n/language-switcher"
 import { Mono, PageHeader } from "@/components/gantry/ui"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatDate, timeAgo } from "@/lib/format"
@@ -11,6 +12,7 @@ import { requireUser } from "@/lib/server/auth/dal"
 import { getOidcConfig, NO_PASSWORD } from "@/lib/server/auth/oidc"
 import { twoFactorStatus } from "@/lib/server/auth/two-factor"
 import { getDb } from "@/lib/server/db"
+import { getI18n } from "@/lib/i18n/server"
 
 export const metadata: Metadata = { title: "Account" }
 
@@ -35,6 +37,7 @@ export default async function AccountPage({ searchParams }: PageProps<"/account"
   // SSO-only accounts have no password to change or to protect with a second factor.
   const hasPassword = row.password_hash !== NO_PASSWORD
   const now = new Date().getTime()
+  const { t } = await getI18n()
 
   return (
     <PageBody>
@@ -48,6 +51,15 @@ export default async function AccountPage({ searchParams }: PageProps<"/account"
             {SSO_MESSAGES[sso]}
           </p>
         ) : null}
+        <Card>
+          <CardHeader>
+            <CardTitle>{t.common.language.label}</CardTitle>
+            <CardDescription>{t.common.language.description}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <LanguageSelect className="w-full sm:w-64" />
+          </CardContent>
+        </Card>
         {hasPassword ? (
           <Card>
             <CardHeader>

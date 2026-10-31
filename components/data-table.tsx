@@ -61,6 +61,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useI18n } from "@/lib/i18n/client"
 
 // Features shared by every Gantry table (v9 tree-shakes the rest).
 export const features = tableFeatures({
@@ -122,11 +123,12 @@ export function DataTable<T extends RowData>({
   columns,
   getRowId,
   searchText,
-  searchPlaceholder = "Search…",
+  searchPlaceholder,
   toolbar,
-  emptyMessage = "No results.",
+  emptyMessage,
   pageSize: initialPageSize = 10,
   selection,
+  columnLabels,
 }: {
   data: T[]
   columns: Columns<T>
@@ -138,7 +140,11 @@ export function DataTable<T extends RowData>({
   emptyMessage?: string
   pageSize?: number
   selection?: TableSelection<T>
+  /** Names shown in the Columns menu, by column id (default: the id). */
+  columnLabels?: Record<string, string>
 }) {
+  const i18n = useI18n()
+  const text = i18n.t.common.table
   const [query, setQuery] = React.useState("")
   const [columnVisibility, setColumnVisibility] = React.useState<ColumnVisibilityState>({})
   const [sorting, setSorting] = React.useState<SortingState>([])
@@ -176,7 +182,7 @@ export function DataTable<T extends RowData>({
           id: "select",
           header: () => (
             <Checkbox
-              aria-label="Select all"
+              aria-label={text.selectAll}
               className="align-middle"
               disabled={!selectable.length}
               checked={allChecked ? true : selected.length ? "indeterminate" : false}
@@ -186,7 +192,7 @@ export function DataTable<T extends RowData>({
           cell: ({ row }) =>
             canSelect(row.original) ? (
               <Checkbox
-                aria-label={`Select ${selection.rowLabel(row.original)}`}
+                aria-label={i18n.format(text.selectRow, { name: selection.rowLabel(row.original) })}
                 className="align-middle"
                 checked={checked.has(row.id)}
                 onCheckedChange={(v) => toggle([row.id], v === true)}
@@ -223,9 +229,9 @@ export function DataTable<T extends RowData>({
                 setQuery(e.target.value)
                 table.setPageIndex(0)
               }}
-              placeholder={searchPlaceholder}
+              placeholder={searchPlaceholder ?? text.searchPlaceholder}
               className="h-8 pl-8"
-              aria-label="Search"
+              aria-label={text.search}
             />
           </div>
         ) : (
@@ -236,7 +242,7 @@ export function DataTable<T extends RowData>({
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
                 <Columns3Icon data-icon="inline-start" />
-                <span className="hidden lg:inline">Columns</span>
+                <span className="hidden lg:inline">{text.columns}</span>
                 <ChevronDownIcon data-icon="inline-end" />
               </Button>
             </DropdownMenuTrigger>
@@ -251,7 +257,7 @@ export function DataTable<T extends RowData>({
                     checked={column.getIsVisible()}
                     onCheckedChange={(value) => column.toggleVisibility(!!value)}
                   >
-                    {column.id}
+                    {columnLabels?.[column.id] ?? column.id}
                   </DropdownMenuCheckboxItem>
                 ))}
             </DropdownMenuContent>
@@ -264,11 +270,13 @@ export function DataTable<T extends RowData>({
           data-testid="bulk-bar"
           className="mx-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 lg:mx-6"
         >
-          <span className="mr-1 text-sm font-medium tabular-nums">{selected.length} selected</span>
+          <span className="mr-1 text-sm font-medium tabular-nums">
+            {i18n.format(text.selected, { count: selected.length })}
+          </span>
           {selection.actions(selected, clear)}
           <Button size="sm" variant="ghost" className="ml-auto" onClick={clear}>
             <XIcon data-icon="inline-start" />
-            Clear
+            {i18n.t.common.actions.clear}
           </Button>
         </div>
       ) : null}
@@ -303,7 +311,7 @@ export function DataTable<T extends RowData>({
                     colSpan={table.getVisibleLeafColumns().length}
                     className="h-24 text-center text-muted-foreground"
                   >
-                    {emptyMessage}
+                    {emptyMessage ?? text.noResults}
                   </TableCell>
                 </TableRow>
               )}
@@ -312,12 +320,14 @@ export function DataTable<T extends RowData>({
         </div>
         <div className="flex items-center justify-between px-4">
           <div className="hidden flex-1 text-sm text-muted-foreground lg:flex">
-            {rows.length} item(s){rows.length !== data.length ? ` of ${data.length}` : ""}
+            {rows.length !== data.length
+              ? i18n.format(text.itemsOf, { count: rows.length, total: data.length })
+              : i18n.format(text.items, { count: rows.length })}
           </div>
           <div className="flex w-full items-center gap-8 lg:w-fit">
             <div className="hidden items-center gap-2 lg:flex">
               <Label htmlFor="rows-per-page" className="text-sm font-medium">
-                Rows per page
+                {text.rowsPerPage}
               </Label>
               <Select
                 value={`${table.state.pagination.pageSize}`}
@@ -338,7 +348,10 @@ export function DataTable<T extends RowData>({
               </Select>
             </div>
             <div className="flex w-fit items-center justify-center text-sm font-medium">
-              Page {table.state.pagination.pageIndex + 1} of {Math.max(1, table.getPageCount())}
+              {i18n.format(text.page, {
+                page: table.state.pagination.pageIndex + 1,
+                pages: Math.max(1, table.getPageCount()),
+              })}
             </div>
             <div className="ml-auto flex items-center gap-2 lg:ml-0">
               <Button
@@ -347,7 +360,7 @@ export function DataTable<T extends RowData>({
                 onClick={() => table.setPageIndex(0)}
                 disabled={!table.getCanPreviousPage()}
               >
-                <span className="sr-only">Go to first page</span>
+                <span className="sr-only">{text.firstPage}</span>
                 <ChevronsLeftIcon />
               </Button>
               <Button
@@ -357,7 +370,7 @@ export function DataTable<T extends RowData>({
                 onClick={() => table.previousPage()}
                 disabled={!table.getCanPreviousPage()}
               >
-                <span className="sr-only">Go to previous page</span>
+                <span className="sr-only">{text.previousPage}</span>
                 <ChevronLeftIcon />
               </Button>
               <Button
@@ -367,7 +380,7 @@ export function DataTable<T extends RowData>({
                 onClick={() => table.nextPage()}
                 disabled={!table.getCanNextPage()}
               >
-                <span className="sr-only">Go to next page</span>
+                <span className="sr-only">{text.nextPage}</span>
                 <ChevronRightIcon />
               </Button>
               <Button
@@ -377,7 +390,7 @@ export function DataTable<T extends RowData>({
                 onClick={() => table.setPageIndex(table.getPageCount() - 1)}
                 disabled={!table.getCanNextPage()}
               >
-                <span className="sr-only">Go to last page</span>
+                <span className="sr-only">{text.lastPage}</span>
                 <ChevronsRightIcon />
               </Button>
             </div>

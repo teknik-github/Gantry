@@ -5,6 +5,7 @@ import * as React from "react"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { useRunAction } from "@/components/gantry/use-action"
 import { Button } from "@/components/ui/button"
+import { useI18n } from "@/lib/i18n/client"
 import type { ActionState } from "@/lib/validation"
 
 /** A bulk action that runs straight away (start, stop, ...). Clears the selection on success. */
@@ -66,6 +67,7 @@ export function BulkConfirm({
   onConfirm: () => Promise<ActionState>
   onDone: () => void
 }) {
+  const i18n = useI18n()
   return (
     <ConfirmAction
       title={title}
@@ -81,7 +83,9 @@ export function BulkConfirm({
               </span>
             ))}
             {names.length > MAX_NAMES ? (
-              <span className="block text-muted-foreground">and {names.length - MAX_NAMES} more</span>
+              <span className="block text-muted-foreground">
+                {i18n.format(i18n.t.common.table.andMore, { count: names.length - MAX_NAMES })}
+              </span>
             ) : null}
           </span>
           {warning ? <span className="text-amber-600 dark:text-amber-400">{warning}</span> : null}
