@@ -26,6 +26,8 @@ let stoppedId = ""
 const LOG_SCRIPT = [
   "for i in $(seq 1 30); do echo \"line $i alpha\"; done",
   "echo 'Needle-ONE here'",
+  // stdout and stderr are separate pipes: keep their order in the log deterministic.
+  "sleep 1",
   "echo 'needle-two there' >&2",
   "exec sleep 900",
 ].join("; ")
@@ -61,7 +63,16 @@ async function cleanup() {
   const filters = encodeURIComponent(JSON.stringify({ label: ["gantry.helper=files", `gantry.helper.volume=${VOLUME}`] }))
   const helpers = await docker<{ Id: string }[]>("GET", `/containers/json?all=1&filters=${filters}`).catch(() => [])
   for (const h of helpers) await removeContainer(h.Id)
-  await docker("DELETE", `/volumes/${VOLUME}?force=true`).catch(() => {})
+  // A busy daemon may still be finishing a removal ("Dead"): retry while the volume is in use.
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      await docker("DELETE", `/volumes/${VOLUME}?force=true`)
+      return
+    } catch (err) {
+      if (!/in use/i.test(String(err))) return
+      await new Promise((r) => setTimeout(r, 5000))
+    }
+  }
 }
 
 async function signIn(page: Page, creds: { username: string; password: string } = ADMIN) {
@@ -156,7 +167,8 @@ test("upload, edit, save and re-read a file", async ({ page }) => {
   // Read back through the UI and the API.
   await row(page, "gantry-e2e.txt").getByRole("button", { name: "Edit gantry-e2e.txt" }).click()
   await expect(page.getByRole("dialog").getByLabel("File content")).toHaveValue("edited by e2e\nsecond line\n", { timeout })
-  await page.getByRole("dialog").getByRole("button", { name: "Close" }).click()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toBeHidden()
   const read = await page.request.get(`/api/files/read?container=${containerId}&path=/tmp/gantry-e2e.txt`)
   expect(await read.json()).toMatchObject({ ok: true, content: "edited by e2e\nsecond line\n" })
 
@@ -196,7 +208,8 @@ test("browse a stopped container", async ({ page }) => {
 
   await row(page, "marker.txt").getByRole("button", { name: "Edit marker.txt" }).click()
   await expect(page.getByRole("dialog").getByLabel("File content")).toHaveValue("stopped-content\n", { timeout })
-  await page.getByRole("dialog").getByRole("button", { name: "Close" }).click()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toBeHidden()
 
   // Writing works without a running container (Docker's archive API).
   await page.getByLabel("Files to upload").setInputFiles({ name: "added.txt", mimeType: "text/plain", buffer: Buffer.from("added\n") })
