@@ -433,12 +433,22 @@ export function ImageBuildForm({ initial, rebuildOf }: { initial: BuildFormValue
               {Object.keys(errors).length ? <FieldError>Please fix the highlighted fields</FieldError> : null}
               <Field orientation="horizontal">
                 {busy ? (
-                  <Button type="button" variant="destructive" onClick={cancel}>
+                  // Distinct keys: reusing one <button> would let the click that
+                  // cancels turn it into "submit" and start the build again.
+                  <Button
+                    key="cancel"
+                    type="button"
+                    variant="destructive"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      cancel()
+                    }}
+                  >
                     <SquareIcon data-icon="inline-start" />
                     Cancel build
                   </Button>
                 ) : (
-                  <Button type="submit" disabled={!hydrated}>
+                  <Button key="build" type="submit" disabled={!hydrated}>
                     <HammerIcon data-icon="inline-start" />
                     Build image
                   </Button>

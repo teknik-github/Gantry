@@ -14,8 +14,13 @@ export const BUILDS_KEPT = 100
 /** Characters of build output kept (the end; earlier output is cut). */
 export const MAX_STORED_LOG = 512 * 1024
 
-/** Builds running in this process: a "running" row that isn't here was interrupted (restart). */
-const active = new Set<number>()
+/**
+ * Builds running in this process: a "running" row that isn't here was
+ * interrupted (restart). On globalThis: route handlers and pages are bundled
+ * separately and would otherwise each see their own (empty) set.
+ */
+const globalForBuilds = globalThis as unknown as { __gantryActiveBuilds?: Set<number> }
+const active = (globalForBuilds.__gantryActiveBuilds ??= new Set<number>())
 
 export function markActive(id: number) {
   active.add(id)

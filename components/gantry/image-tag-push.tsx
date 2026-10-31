@@ -153,12 +153,12 @@ function PushBody({ row }: { row: Row }) {
       {state.running || state.segments.length ? <StreamLog state={state} label="Push log" /> : null}
       <DialogFooter>
         {state.running ? (
-          <Button type="button" variant="destructive" onClick={cancel}>
+          <Button key="cancel" type="button" variant="destructive" onClick={cancel}>
             <SquareIcon data-icon="inline-start" />
             Cancel push
           </Button>
         ) : (
-          <Button type="button" onClick={push} disabled={!reference}>
+          <Button key="push" type="button" onClick={push} disabled={!reference}>
             <UploadIcon data-icon="inline-start" />
             Push
           </Button>
