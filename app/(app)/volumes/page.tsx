@@ -31,6 +31,8 @@ export default async function VolumesPage() {
   // Volume usage isn't in /volumes; derive it from container mounts.
   const usedBy = new Map<string, string[]>()
   for (const c of result.data.containers) {
+    // The file browser's short-lived helpers (lib/server/files/helper.ts) don't count.
+    if (c.Labels?.["gantry.helper"]) continue
     const name = c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12)
     for (const m of c.Mounts ?? []) {
       if (m.Type === "volume" && m.Name) usedBy.set(m.Name, [...(usedBy.get(m.Name) ?? []), name])
@@ -51,7 +53,7 @@ export default async function VolumesPage() {
   return (
     <PageBody>
       <PageHeader title="Volumes" description={`${rows.length} volume(s)`} />
-      <VolumesTable data={rows} canManage={can.manage} />
+      <VolumesTable data={rows} canManage={can.manage} canBrowse={can.operate} />
     </PageBody>
   )
 }

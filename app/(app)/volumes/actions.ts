@@ -5,6 +5,7 @@ import { z } from "zod"
 import { BULK_LIMIT } from "@/lib/bulk"
 import { ENVIRONMENT_FIELD } from "@/lib/permissions"
 import { expectedEnvironment, inEnvironment, runAction, runBulkAction } from "@/lib/server/action"
+import { releaseVolumeHelpers } from "@/lib/server/files/helper"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const nameSchema = z
@@ -31,7 +32,10 @@ export async function removeVolume(name: string, environmentId?: number): Promis
   if (!parsed.success) return { error: "Invalid volume name" }
 
   return runAction(inEnvironment("manage", expectedEnvironment(environmentId)), "volume.remove", name, async ({ docker }) => {
-    await (await docker()).removeVolume(parsed.data)
+    const api = await docker()
+    // Idle file browser helpers would keep the volume "in use".
+    await releaseVolumeHelpers(api.target, parsed.data)
+    await api.removeVolume(parsed.data)
     return "Volume removed"
   })
 }
@@ -45,6 +49,9 @@ export async function removeVolumes(names: string[], environmentId?: number): Pr
     "volume.remove",
     [...new Set(parsed.data)],
     { verb: "Removed", noun: "volume", label: (n) => n },
-    (name, docker) => docker.removeVolume(name).then(() => {})
+    async (name, docker) => {
+      await releaseVolumeHelpers(docker.target, name)
+      await docker.removeVolume(name)
+    }
   )
 }

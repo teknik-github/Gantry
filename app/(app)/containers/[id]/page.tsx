@@ -1,8 +1,9 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ArrowLeftIcon, ScrollTextIcon, TerminalSquareIcon } from "lucide-react"
+import { ArrowLeftIcon, FolderIcon, ScrollTextIcon, TerminalSquareIcon } from "lucide-react"
 
 import { ContainerActions, LogViewer } from "@/components/gantry/container-detail-client"
+import { ContainerFiles } from "@/components/gantry/container-files"
 import { ExposeContainerDialog } from "@/components/gantry/proxy-ui"
 import type { RecreateInfo } from "@/components/gantry/container-edit-dialog"
 import { ExecConsole } from "@/components/gantry/exec-console"
@@ -208,31 +209,40 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
       </div>
 
       <div className="px-4 lg:px-6">
-        {can.manage ? (
-          <Tabs defaultValue={tab === "console" ? "console" : "logs"} className="gap-4">
+        {can.operate ? (
+          <Tabs defaultValue={tab === "console" && can.manage ? "console" : tab === "files" ? "files" : "logs"} className="gap-4">
             <TabsList>
               <TabsTrigger value="logs">
                 <ScrollTextIcon />
                 Logs
               </TabsTrigger>
-              <TabsTrigger value="console">
-                <TerminalSquareIcon />
-                Console
+              <TabsTrigger value="files">
+                <FolderIcon />
+                Files
               </TabsTrigger>
+              {can.manage ? (
+                <TabsTrigger value="console">
+                  <TerminalSquareIcon />
+                  Console
+                </TabsTrigger>
+              ) : null}
             </TabsList>
             <TabsContent value="logs">
               <LogViewer id={c.Id} />
             </TabsContent>
-            {/* Stay mounted so switching tabs doesn't end the shell session. */}
-            <TabsContent value="console" forceMount className="data-[state=inactive]:hidden">
-              <ExecConsole containerId={c.Id} running={c.State.Running && !c.State.Paused} />
+            <TabsContent value="files">
+              <ContainerFiles container={c} can={can} />
             </TabsContent>
+            {/* Stay mounted so switching tabs doesn't end the shell session. */}
+            {can.manage ? (
+              <TabsContent value="console" forceMount className="data-[state=inactive]:hidden">
+                <ExecConsole containerId={c.Id} running={c.State.Running && !c.State.Paused} />
+              </TabsContent>
+            ) : null}
           </Tabs>
-        ) : can.operate ? (
-          <LogViewer id={c.Id} />
         ) : (
           <p className="text-sm text-muted-foreground" data-testid="logs-hidden">
-            Logs need the operator role in this environment.
+            Logs and files need the operator role in this environment.
           </p>
         )}
       </div>
