@@ -28,6 +28,15 @@ const SOCKET = process.env.DOCKER_SOCKET ?? "/var/run/docker.sock"
 // release to check compatibility (or to measure the tunnel as it was).
 const AGENT_DIR = path.resolve(process.env.E2E_AGENT_DIR ?? "agent")
 const SLOW = 180_000
+// Parity checks through the agent: a Trivy scan and a push to a throwaway registry.
+const SCANNER = "aquasec/trivy:0.76.1"
+/** The server's TRIVY_CACHE_VOLUME (playwright.config.ts). */
+const TRIVY_CACHE = process.env.E2E_TRIVY_CACHE_VOLUME || "gantry-test-s-trivy-cache"
+const SCAN_TIMEOUT = 900_000
+const REGISTRY = `gantry-test-c-registry-${RUN_ID}`
+const REGISTRY_PORT = 17000 + Math.floor(Math.random() * 1000)
+const PUSHED_REPO = `localhost:${REGISTRY_PORT}/gantry-test-c/agent`
+const PUSHED = `${PUSHED_REPO}:1`
 
 const COMPOSE = `services:
   app:
@@ -46,6 +55,8 @@ networks:
 let environmentId = 0
 let key = ""
 let runId = ""
+let createdTrivyCache = false
+let pulledRegistry = false
 
 type Inspect = { Id: string; State: { Running: boolean } }
 
@@ -109,9 +120,17 @@ async function cleanup() {
   for (const c of containers) await docker("DELETE", `/containers/${c.Id}?force=true&v=true`).catch(() => {})
   const networks = await docker<{ Id: string }[]>("GET", `/networks?filters=${filters}`).catch(() => [])
   for (const n of networks) await docker("DELETE", `/networks/${n.Id}`).catch(() => {})
+  await removeByName(REGISTRY)
   // By tag only (never by id: alpine:3 shares its layers).
+  await docker("DELETE", `/images/${encodeURIComponent(PUSHED)}`).catch(() => {})
   await docker("DELETE", `/images/${encodeURIComponent(BUILD_TAG)}`).catch(() => {})
 }
+
+const imageExists = (ref: string) =>
+  docker("GET", `/images/${encodeURIComponent(ref)}/json`).then(
+    () => true,
+    () => false
+  )
 
 test.beforeAll(async () => {
   test.setTimeout(SLOW)
@@ -119,6 +138,11 @@ test.beforeAll(async () => {
   await cleanup()
   await ensureImage(AGENT_IMAGE)
   await ensureImage("alpine:3")
+  createdTrivyCache = !(await docker("GET", `/volumes/${TRIVY_CACHE}`).then(
+    () => true,
+    () => false
+  ))
+  pulledRegistry = !(await imageExists("registry:2"))
 })
 
 test.afterAll(async () => {
@@ -128,6 +152,9 @@ test.afterAll(async () => {
   const logs = await agentLogs().catch(() => "")
   if (logs) console.log(`[agent log]\n${logs.trim().split("\n").slice(-40).join("\n")}`)
   await cleanup()
+  // Only what this run brought in: never a cache volume that was there before.
+  if (createdTrivyCache && !process.env.E2E_KEEP_TRIVY_CACHE) await docker("DELETE", `/volumes/${TRIVY_CACHE}`).catch(() => {})
+  if (pulledRegistry) await docker("DELETE", "/images/registry:2").catch(() => {})
 })
 
 async function signIn(page: Page) {
@@ -186,6 +213,15 @@ test("admin adds an agent environment; the agent connects with the shown key", a
   const logs = await agentLogs()
   expect(logs).toContain(`connected to ${baseURL} as environment "${ENV}"`)
   expect(logs).not.toContain(key.slice(8))
+
+  // The environment switcher names the host and its Docker, not agent://<id>.
+  const { Name: host } = await docker<{ Name: string }>("GET", "/info")
+  const { Version: dockerVersion } = await docker<{ Version: string }>("GET", "/version")
+  await page.locator('[data-sidebar="header"]').getByRole("button").first().click()
+  const item = page.getByRole("menuitem", { name: new RegExp(`^${ENV}`) })
+  await expect(item.getByTestId("switcher-agent")).toHaveText(`${host} · Docker ${dockerVersion} · connected`)
+  await expect(item).not.toContainText("agent://")
+  await page.keyboard.press("Escape")
 })
 
 test("containers are listed, created, logged and exec'd into through the agent", async ({ page }) => {
@@ -358,6 +394,87 @@ test("an image builds through the agent, streaming the context up and the log ba
   expect(inspect.RepoTags).toContain(BUILD_TAG)
 })
 
+/**
+ * The Images table filtered to one tag's row (the search box only filters
+ * once hydrated). Listing images is slow with the containerd store, more so
+ * through the tunnel on a busy host.
+ */
+async function imageRow(page: Page, ref: string) {
+  await page.goto("/images")
+  const search = page.getByRole("textbox", { name: "Search" })
+  const row = page.getByRole("row").filter({ hasText: ref })
+  await expect(async () => {
+    await search.fill("")
+    await search.fill(ref)
+    await expect(row).toHaveCount(1, { timeout: 5_000 })
+  }).toPass({ timeout: 180_000 })
+  return row
+}
+
+test("an image is scanned with Trivy through the agent, like on the local socket", async ({ page, context, baseURL }) => {
+  test.setTimeout(2 * SCAN_TIMEOUT)
+  test.skip(!(await imageExists(SCANNER)), `${SCANNER} is not on this host (pulling it is image-scan.spec.ts's job)`)
+  await signIn(page)
+  const { Id: imageId, Size: imageSize } = await docker<{ Id: string; Size: number }>("GET", `/images/${encodeURIComponent(BUILD_TAG)}/json`)
+  const scan = async (envId: number) => {
+    await context.addCookies([{ name: "gantry_env", value: String(envId), url: baseURL! }])
+    const row = await imageRow(page, BUILD_TAG)
+    const t0 = performance.now()
+    await row.getByRole("button", { name: `Scan ${BUILD_TAG}` }).click()
+    // Counts, or "no vulnerabilities" for a clean image; a failure fails here.
+    await expect(row.getByTestId(/^vuln-(badges|none|failed)$/)).toBeVisible({ timeout: SCAN_TIMEOUT })
+    await expect(row.getByTestId("vuln-failed")).toHaveCount(0)
+    const seconds = (performance.now() - t0) / 1000
+    const res = await page.request.get("/api/image-scans")
+    const scans = ((await res.json()) as { scans: { imageId: string; scannedAt: string | null; counts: Record<string, number> }[] }).scans
+    const summary = scans.find((x) => x.imageId === imageId)
+    expect(summary?.scannedAt).toBeTruthy()
+    return { seconds, counts: summary!.counts }
+  }
+  // Locally first: it also brings Trivy's database up to date in the shared cache volume.
+  const local = await scan(1)
+  const agent = await scan(environmentId)
+  // Same image, same database: the same findings.
+  expect(agent.counts).toEqual(local.counts)
+  const line = `image ${(imageSize / 1048576).toFixed(1)} MB; from the click to the result: local socket ${local.seconds.toFixed(1)} s, agent tunnel ${agent.seconds.toFixed(1)} s`
+  console.log(`[agent scan] ${line}`)
+  test.info().annotations.push({ type: "scan", description: line })
+  await context.addCookies([{ name: "gantry_env", value: String(environmentId), url: baseURL! }])
+})
+
+test("an image is pushed to a registry through the agent", async ({ page }) => {
+  test.setTimeout(600_000)
+  await ensureImage("registry:2")
+  await removeByName(REGISTRY)
+  const { Id } = await docker<{ Id: string }>("POST", `/containers/create?name=${REGISTRY}`, {
+    Image: "registry:2",
+    Labels: { "gantry.e2e": "true" },
+    HostConfig: { PortBindings: { "5000/tcp": [{ HostIp: "127.0.0.1", HostPort: String(REGISTRY_PORT) }] } },
+  })
+  await docker("POST", `/containers/${Id}/start`)
+  await expect.poll(() => fetch(`http://localhost:${REGISTRY_PORT}/v2/`).then((r) => r.status, () => 0), { timeout: 30_000 }).toBe(200)
+  // Tagged through the host socket: the push is what goes through the agent.
+  await docker("POST", `/images/${encodeURIComponent(BUILD_TAG)}/tag?repo=${encodeURIComponent(PUSHED_REPO)}&tag=1`)
+
+  await signIn(page)
+  await switchEnvironment(page, ENV)
+  const row = await imageRow(page, BUILD_TAG)
+  await expect(row).toContainText(PUSHED, { timeout: 120_000 })
+  await row.getByRole("button", { name: /^Push / }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("combobox", { name: "Tag to push" }).click()
+  await page.getByRole("option", { name: PUSHED }).click()
+  const t0 = performance.now()
+  await dialog.getByRole("button", { name: "Push", exact: true }).click()
+  await expect(dialog.getByRole("status").filter({ hasText: "Push succeeded" })).toBeVisible({ timeout: 300_000 })
+  console.log(`[agent push] ${PUSHED} in ${((performance.now() - t0) / 1000).toFixed(1)} s`)
+  await expect(dialog.getByRole("log", { name: "Push log" })).toContainText(`Pushing ${PUSHED} to localhost:${REGISTRY_PORT}`)
+  await page.keyboard.press("Escape")
+
+  const tags = await fetch(`http://localhost:${REGISTRY_PORT}/v2/gantry-test-c/agent/tags/list`).then((r) => r.json())
+  expect(tags).toEqual({ name: "gantry-test-c/agent", tags: ["1"] })
+})
+
 test("rotating the key disconnects the old agent; the new key works", async ({ page, baseURL }) => {
   test.setTimeout(SLOW)
   await signIn(page)
@@ -392,8 +509,13 @@ test("deleting the environment drops the agent and refuses its key", async ({ pa
   test.setTimeout(SLOW)
   await signIn(page)
   await page.goto("/environments")
-  await envRow(page).getByRole("button", { name: "Remove environment" }).click()
-  await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click()
+  // A click before the table hydrated opens nothing (seen on a busy host): retry until the dialog shows.
+  const confirm = page.getByRole("alertdialog")
+  await expect(async () => {
+    if (!(await confirm.isVisible())) await envRow(page).getByRole("button", { name: "Remove environment" }).click()
+    await expect(confirm).toBeVisible({ timeout: 5_000 })
+  }).toPass({ timeout: 90_000 })
+  await confirm.getByRole("button", { name: "Remove" }).click()
   await expect(envRow(page)).toHaveCount(0)
   await expect.poll(agentLogs, { timeout: 30_000 }).toContain("the environment was deleted")
   const res = await page.request.get("/api/agent/connect", {
