@@ -4,6 +4,7 @@ import type { ContainerSummary, Network, Volume } from "@/lib/server/docker/api"
 import {
   buildTopology,
   DEFAULT_FILTERS,
+  edgesAt,
   nodeMatches,
   parseDependsOn,
   portMappings,
@@ -563,5 +564,24 @@ describe("portBadges", () => {
     expect(shown.length + hidden).toBe(5)
     expect(hidden).toBeGreaterThan(0)
     expect(portBadges([{ label: "9113/tcp", ip: null, published: false }])).toEqual({ shown: [], hidden: 0 })
+  })
+})
+
+describe("edgesAt", () => {
+  const edges: TopologyEdge[] = [
+    { kind: "network", id: "n1", source: "c:a", target: "net:x", ip: null, aliases: [] },
+    { kind: "volume", id: "v1", source: "c:a", target: "vol:x", destination: "/data", readOnly: false },
+    { kind: "bind", id: "b1", source: "c:a", target: "bind:/etc", destination: "/etc", readOnly: true },
+    { kind: "network", id: "n2", source: "c:b", target: "net:x", ip: "10.0.0.2", aliases: ["b"] },
+    { kind: "depends", id: "d1", source: "c:b", target: "c:a", condition: "service_started", restart: null },
+  ]
+
+  it("picks edges by kind and direction, in graph order", () => {
+    expect(edgesAt({ edges }, "c:a", "from", "network").map((e) => e.id)).toEqual(["n1"])
+    expect(edgesAt({ edges }, "c:a", "from", "volume", "bind").map((e) => e.id)).toEqual(["v1", "b1"])
+    expect(edgesAt({ edges }, "net:x", "to", "network").map((e) => e.id)).toEqual(["n1", "n2"])
+    expect(edgesAt({ edges }, "c:a", "to", "depends").map((e) => e.source)).toEqual(["c:b"])
+    expect(edgesAt({ edges }, "c:a", "to", "network")).toEqual([])
+    expect(edgesAt({ edges }, "vol:x", "to", "bind")).toEqual([])
   })
 })

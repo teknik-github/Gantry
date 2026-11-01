@@ -122,7 +122,8 @@ export function AgentAddressCell({ agent }: { agent: AgentRow }) {
       {agent.remoteAddress ? (
         <Mono className="text-muted-foreground">{format(text.from, { address: agent.remoteAddress })}</Mono>
       ) : null}
-      <span className="text-muted-foreground">
+      {/* A relative time: the server and the browser render it a moment apart (like Age in kubernetes/tables.tsx). */}
+      <span className="text-muted-foreground" suppressHydrationWarning>
         {agent.connected
           ? format(text.connectedAgo, { ago: agent.since ? timeAgo(agent.since) : "" })
           : agent.lastSeen
