@@ -30,22 +30,12 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { TLS_MODE_KEYS, TLS_MODES, type ProxyMode, type ProxySettings, type TlsMode } from "@/lib/proxy"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
+import { PROXY_MODES, TLS_MODE_KEYS, type ProxyMode, type ProxySettings, type TlsMode } from "@/lib/proxy"
 import type { ActionState } from "@/lib/validation"
 
 type Errors = Record<string, string[] | undefined>
-
-const MODE_LABELS: Record<ProxyMode, { label: string; description: string }> = {
-  off: { label: "Off", description: "Gantry doesn't route any domains." },
-  internal: {
-    label: "Built-in (Caddy)",
-    description: "Gantry runs Caddy in a gantry-proxy container on this environment, with automatic HTTPS.",
-  },
-  external: {
-    label: "External proxy",
-    description: "You run Traefik, Nginx Proxy Manager or Caddy yourself; Gantry attaches targets to its network and gives you the config.",
-  },
-}
 
 export function ProxySettingsCard({
   settings,
@@ -58,11 +48,16 @@ export function ProxySettingsCard({
   lastError: string | null
   appliedLabel: string | null
 }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const modes = t.proxy.modes
+  const text = t.proxy.settings
   const [state, formAction, pending] = useActionState<ActionState, FormData>(saveSettings, {})
+  const savedMessage = t.common.status.saved
   React.useEffect(() => {
-    if (state.ok) toast.success(state.message ?? "Saved")
+    if (state.ok) toast.success(state.message ?? savedMessage)
     else if (state.error && !state.fieldErrors) toast.error(state.error)
-  }, [state])
+  }, [state, savedMessage])
   const values = state.values ?? {}
   const errs = state.fieldErrors ?? {}
   const [mode, setMode] = React.useState<ProxyMode>((values.mode as ProxyMode) || settings.mode)
@@ -75,7 +70,7 @@ export function ProxySettingsCard({
       <Card>
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2">
-            Proxy
+            {text.title}
             {settings.mode === "internal" && status ? (
               <Badge
                 variant="outline"
@@ -83,16 +78,16 @@ export function ProxySettingsCard({
                 data-testid="proxy-status"
               >
                 {status.state === "running"
-                  ? `running on :${status.httpPort} / :${status.httpsPort}`
+                  ? i18n.format(text.runningOn, { http: String(status.httpPort), https: String(status.httpsPort) })
                   : status.state === "stopped"
-                    ? "stopped"
-                    : "not created"}
+                    ? text.stopped
+                    : text.notCreated}
               </Badge>
             ) : null}
           </CardTitle>
           <CardDescription>
-            {MODE_LABELS[settings.mode].description}
-            {appliedLabel ? ` Last applied ${appliedLabel}.` : ""}
+            {modes[settings.mode].description}
+            {appliedLabel ? i18n.format(text.lastApplied, { when: appliedLabel }) : ""}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -110,42 +105,39 @@ export function ProxySettingsCard({
             <EnvironmentField />
             <FieldGroup className="gap-4">
               <Field className="max-w-sm">
-                <FieldLabel htmlFor={`${uid}-mode`}>Mode</FieldLabel>
+                <FieldLabel htmlFor={`${uid}-mode`}>{text.mode}</FieldLabel>
                 <Select name="mode" value={mode} onValueChange={(v) => setMode(v as ProxyMode)}>
                   <SelectTrigger id={`${uid}-mode`} className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(MODE_LABELS) as ProxyMode[]).map((m) => (
+                    {PROXY_MODES.map((m) => (
                       <SelectItem key={m} value={m}>
-                        {MODE_LABELS[m].label}
+                        {modes[m].label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <FieldDescription>{MODE_LABELS[mode].description}</FieldDescription>
+                <FieldDescription>{modes[mode].description}</FieldDescription>
               </Field>
               {mode === "internal" ? (
                 <div className="grid gap-4 @3xl/main:grid-cols-3">
                   <Field data-invalid={errs.httpPort ? true : undefined}>
-                    <FieldLabel htmlFor={`${uid}-http`}>HTTP port on the host</FieldLabel>
+                    <FieldLabel htmlFor={`${uid}-http`}>{text.httpPort}</FieldLabel>
                     <Input id={`${uid}-http`} name="httpPort" type="number" min={1} max={65535} defaultValue={values.httpPort || settings.httpPort} />
                     <FieldError>{errs.httpPort?.[0]}</FieldError>
                   </Field>
                   <Field data-invalid={errs.httpsPort ? true : undefined}>
-                    <FieldLabel htmlFor={`${uid}-https`}>HTTPS port on the host</FieldLabel>
+                    <FieldLabel htmlFor={`${uid}-https`}>{text.httpsPort}</FieldLabel>
                     <Input id={`${uid}-https`} name="httpsPort" type="number" min={1} max={65535} defaultValue={values.httpsPort || settings.httpsPort} />
                     <FieldError>{errs.httpsPort?.[0]}</FieldError>
                   </Field>
                   <Field data-invalid={errs.email ? true : undefined}>
-                    <FieldLabel htmlFor={`${uid}-email`}>Let&apos;s Encrypt email</FieldLabel>
-                    <Input id={`${uid}-email`} name="email" type="email" defaultValue={values.email ?? settings.email} placeholder="optional" />
+                    <FieldLabel htmlFor={`${uid}-email`}>{text.email}</FieldLabel>
+                    <Input id={`${uid}-email`} name="email" type="email" defaultValue={values.email ?? settings.email} placeholder={text.emailPlaceholder} />
                     <FieldError>{errs.email?.[0]}</FieldError>
                   </Field>
-                  <FieldDescription className="@3xl/main:col-span-3">
-                    Let&apos;s Encrypt only works with ports 80 and 443 reachable from the internet and DNS pointing at this
-                    host. Other ports are fine for self-signed or HTTP-only hosts.
-                  </FieldDescription>
+                  <FieldDescription className="@3xl/main:col-span-3">{text.portsHelp}</FieldDescription>
                 </div>
               ) : (
                 <>
@@ -156,7 +148,7 @@ export function ProxySettingsCard({
               )}
               {mode === "external" ? (
                 <Field data-invalid={errs.externalNetwork ? true : undefined} className="max-w-sm">
-                  <FieldLabel htmlFor={`${uid}-net`}>Proxy network</FieldLabel>
+                  <FieldLabel htmlFor={`${uid}-net`}>{text.network}</FieldLabel>
                   <Input
                     id={`${uid}-net`}
                     name="externalNetwork"
@@ -164,7 +156,7 @@ export function ProxySettingsCard({
                     placeholder="traefik_default"
                     autoComplete="off"
                   />
-                  <FieldDescription>The Docker network your proxy container is attached to.</FieldDescription>
+                  <FieldDescription>{text.networkHelp}</FieldDescription>
                   <FieldError>{errs.externalNetwork?.[0]}</FieldError>
                 </Field>
               ) : (
@@ -174,12 +166,12 @@ export function ProxySettingsCard({
             <div className="flex flex-wrap gap-2">
               <Button type="submit" disabled={pending}>
                 <SaveIcon data-icon="inline-start" />
-                {pending ? "Applying…" : "Save & apply"}
+                {pending ? text.applying : text.saveApply}
               </Button>
               {settings.mode !== "off" ? (
                 <Button type="button" variant="outline" disabled={reapplying} onClick={() => run(() => reapplyProxy(environmentId))}>
                   <RefreshCwIcon data-icon="inline-start" />
-                  Re-apply
+                  {text.reapply}
                 </Button>
               ) : null}
             </div>
@@ -205,11 +197,11 @@ export type ProxyHostRow = {
 
 const helper = columnHelperFor<ProxyHostRow>()
 
-function buildColumns(mode: ProxyMode, containers: ContainerOption[], environmentId: number | undefined) {
+function buildColumns(mode: ProxyMode, containers: ContainerOption[], environmentId: number | undefined, { t, format }: I18n) {
   return helper.columns([
     helper.accessor((r) => r.domains.join(" "), {
       id: "domains",
-      header: "Domains",
+      header: t.proxy.columns.domains,
       enableHiding: false,
       cell: ({ row }) => (
         <div className="flex flex-col gap-0.5">
@@ -228,7 +220,7 @@ function buildColumns(mode: ProxyMode, containers: ContainerOption[], environmen
       ),
     }),
     helper.accessor("target", {
-      header: "Target",
+      header: t.proxy.columns.target,
       cell: ({ row }) => (
         <div className="flex items-center gap-2">
           <Mono>
@@ -236,7 +228,7 @@ function buildColumns(mode: ProxyMode, containers: ContainerOption[], environmen
           </Mono>
           {row.original.targetState === "missing" ? (
             <Badge variant="outline" className="text-destructive">
-              missing
+              {t.proxy.missing}
             </Badge>
           ) : (
             <StateBadge state={row.original.targetState} />
@@ -245,11 +237,11 @@ function buildColumns(mode: ProxyMode, containers: ContainerOption[], environmen
       ),
     }),
     helper.accessor("tls", {
-      header: "TLS",
-      cell: ({ row }) => <Badge variant="outline">{TLS_MODES[row.original.tls].label}</Badge>,
+      header: t.proxy.columns.tls,
+      cell: ({ row }) => <Badge variant="outline">{t.proxy.tls[row.original.tls].label}</Badge>,
     }),
     helper.accessor("enabled", {
-      header: "On",
+      header: t.proxy.columns.enabled,
       cell: ({ row }) => <HostSwitch row={row.original} />,
     }),
     helper.display({
@@ -260,12 +252,12 @@ function buildColumns(mode: ProxyMode, containers: ContainerOption[], environmen
           {mode === "external" ? <SnippetsDialog row={row.original} /> : null}
           <FormDialog
             trigger={
-              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Edit ${row.original.domains[0]}`}>
+              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={format(t.proxy.editName, { domain: row.original.domains[0] })}>
                 <PencilIcon />
               </Button>
             }
-            title={`Edit ${row.original.domains[0]}`}
-            submitLabel="Save"
+            title={format(t.proxy.editName, { domain: row.original.domains[0] })}
+            submitLabel={t.common.actions.save}
             action={saveHost}
             className="sm:max-w-lg"
           >
@@ -277,12 +269,12 @@ function buildColumns(mode: ProxyMode, containers: ContainerOption[], environmen
             )}
           </FormDialog>
           <ConfirmAction
-            title={`Remove ${row.original.domains[0]}?`}
-            description="The proxy stops serving these domains. The container isn't touched."
-            confirmLabel="Remove"
+            title={format(t.proxy.removeTitle, { domain: row.original.domains[0] })}
+            description={t.proxy.removeDescription}
+            confirmLabel={t.common.actions.remove}
             onConfirm={() => deleteHost(row.original.id, environmentId)}
           >
-            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Remove ${row.original.domains[0]}`}>
+            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={format(t.proxy.removeName, { domain: row.original.domains[0] })}>
               <Trash2Icon />
             </Button>
           </ConfirmAction>
@@ -301,27 +293,30 @@ export function ProxyHostsTable({
   mode: ProxyMode
   containers: ContainerOption[]
 }) {
+  const i18n = useI18n()
+  const { t } = i18n
   const environmentId = useEnvironmentId()
-  const columns = React.useMemo(() => buildColumns(mode, containers, environmentId), [mode, containers, environmentId])
+  const columns = React.useMemo(() => buildColumns(mode, containers, environmentId, i18n), [mode, containers, environmentId, i18n])
   return (
     <DataTable
       data={data}
       columns={columns}
       getRowId={(r) => String(r.id)}
       searchText={(r) => `${r.domains.join(" ")} ${r.target}`}
-      searchPlaceholder="Search hosts…"
-      emptyMessage="No proxy hosts yet."
+      searchPlaceholder={t.proxy.searchPlaceholder}
+      emptyMessage={t.proxy.empty}
+      columnLabels={t.proxy.columns}
       toolbar={
         <FormDialog
           trigger={
             <Button size="sm">
               <PlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">Add host</span>
+              <span className="max-lg:sr-only">{t.proxy.addHost}</span>
             </Button>
           }
-          title="Add proxy host"
-          description="Point DNS for these domains at this Docker host first."
-          submitLabel="Save"
+          title={t.proxy.addTitle}
+          description={t.proxy.addDescription}
+          submitLabel={t.common.actions.save}
           action={saveHost}
           className="sm:max-w-lg"
         >
@@ -333,19 +328,22 @@ export function ProxyHostsTable({
 }
 
 function HostSwitch({ row }: { row: ProxyHostRow }) {
+  const { t, format } = useI18n()
   const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   return (
     <Switch
       checked={row.enabled}
       disabled={pending}
-      aria-label={`${row.domains[0]} enabled`}
+      aria-label={format(t.proxy.hostEnabled, { domain: row.domains[0] })}
       onCheckedChange={(on) => run(() => setHostEnabled(row.id, on, environmentId))}
     />
   )
 }
 
 function HostFields({ errors, containers, initial }: { errors: Errors; containers: ContainerOption[]; initial?: ProxyHostRow }) {
+  const { t } = useI18n()
+  const f = t.proxy.fields
   const uid = React.useId()
   const [target, setTarget] = React.useState(initial?.target ?? "")
   const ports = containers.find((c) => c.name === target)?.ports ?? []
@@ -354,7 +352,7 @@ function HostFields({ errors, containers, initial }: { errors: Errors; container
   return (
     <FieldGroup className="gap-4">
       <Field data-invalid={errors.domains ? true : undefined}>
-        <FieldLabel htmlFor={`${uid}-domains`}>Domains</FieldLabel>
+        <FieldLabel htmlFor={`${uid}-domains`}>{f.domains}</FieldLabel>
         <Textarea
           id={`${uid}-domains`}
           name="domains"
@@ -365,15 +363,15 @@ function HostFields({ errors, containers, initial }: { errors: Errors; container
           spellCheck={false}
           autoCapitalize="off"
         />
-        <FieldDescription>One per line (or comma-separated).</FieldDescription>
+        <FieldDescription>{f.domainsHelp}</FieldDescription>
         <FieldError>{errors.domains?.[0]}</FieldError>
       </Field>
       <div className="grid grid-cols-[1fr_8rem] gap-3">
         <Field data-invalid={errors.target ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-target`}>Container</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-target`}>{f.container}</FieldLabel>
           <Select name="target" value={target} onValueChange={setTarget}>
             <SelectTrigger id={`${uid}-target`} className="w-full">
-              <SelectValue placeholder="Pick a container" />
+              <SelectValue placeholder={f.pickContainer} />
             </SelectTrigger>
             <SelectContent>
               {containers.map((c) => (
@@ -387,7 +385,7 @@ function HostFields({ errors, containers, initial }: { errors: Errors; container
           <FieldError>{errors.target?.[0]}</FieldError>
         </Field>
         <Field data-invalid={errors.port ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-port`}>Port</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-port`}>{f.port}</FieldLabel>
           <Input
             id={`${uid}-port`}
             name="port"
@@ -407,47 +405,49 @@ function HostFields({ errors, containers, initial }: { errors: Errors; container
         </Field>
       </div>
       <Field data-invalid={errors.tls ? true : undefined}>
-        <FieldLabel htmlFor={`${uid}-tls`}>TLS</FieldLabel>
+        <FieldLabel htmlFor={`${uid}-tls`}>{f.tls}</FieldLabel>
         <Select name="tls" value={tls} onValueChange={(v) => setTls(v as TlsMode)}>
           <SelectTrigger id={`${uid}-tls`} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {TLS_MODE_KEYS.map((t) => (
-              <SelectItem key={t} value={t}>
-                {TLS_MODES[t].label}
+            {TLS_MODE_KEYS.map((m) => (
+              <SelectItem key={m} value={m}>
+                {t.proxy.tls[m].label}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <FieldDescription>{TLS_MODES[tls].description}</FieldDescription>
+        <FieldDescription>{t.proxy.tls[tls].description}</FieldDescription>
         <FieldError>{errors.tls?.[0]}</FieldError>
       </Field>
       <Label className="font-normal">
         <Checkbox name="enabled" value="on" defaultChecked={initial?.enabled ?? true} />
-        Enabled
+        {f.enabled}
       </Label>
     </FieldGroup>
   )
 }
 
 function SnippetsDialog({ row }: { row: ProxyHostRow }) {
+  const { t, format } = useI18n()
+  const text = t.proxy.snippets
   const blocks = [
-    { title: "Traefik labels", text: row.snippets.traefik, hint: "Add to the target container (compose labels or recreate)." },
-    { title: "Caddyfile", text: row.snippets.caddy },
-    { title: "Nginx / Nginx Proxy Manager", text: row.snippets.nginx },
+    { title: text.traefik, text: row.snippets.traefik, hint: text.traefikHint },
+    { title: text.caddy, text: row.snippets.caddy },
+    { title: text.nginx, text: row.snippets.nginx },
   ]
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Config for ${row.domains[0]}`}>
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={format(text.configFor, { domain: row.domains[0] })}>
           <CodeIcon />
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Config for {row.domains[0]}</DialogTitle>
-          <DialogDescription>Use the block for the proxy you run. The target is reachable by name on the proxy network.</DialogDescription>
+          <DialogTitle>{format(text.configFor, { domain: row.domains[0] })}</DialogTitle>
+          <DialogDescription>{text.description}</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4">
           {blocks.map((b) => (
@@ -459,13 +459,13 @@ function SnippetsDialog({ row }: { row: ProxyHostRow }) {
                   variant="ghost"
                   onClick={() =>
                     navigator.clipboard.writeText(b.text).then(
-                      () => toast.success(`${b.title} copied`),
-                      () => toast.error("Couldn't copy")
+                      () => toast.success(format(text.copied, { title: b.title })),
+                      () => toast.error(text.copyFailed)
                     )
                   }
                 >
                   <CopyIcon data-icon="inline-start" />
-                  Copy
+                  {t.common.actions.copy}
                 </Button>
               </div>
               <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">{b.text}</pre>
@@ -480,21 +480,19 @@ function SnippetsDialog({ row }: { row: ProxyHostRow }) {
 
 /** "Expose via proxy" for one container (container page). */
 export function ExposeContainerDialog({ target, ports, proxyOff }: { target: string; ports: number[]; proxyOff: boolean }) {
+  const { t, format } = useI18n()
+  const text = t.proxy.expose
   return (
     <FormDialog
       trigger={
         <Button size="sm" variant="outline">
           <GlobeIcon data-icon="inline-start" />
-          Expose via proxy
+          {text.button}
         </Button>
       }
-      title={`Expose ${target}`}
-      description={
-        proxyOff
-          ? "The proxy is off on this environment: the host is saved and served once you turn it on (Proxy page)."
-          : "Serve this container under a domain through the proxy. Point the domain's DNS at this Docker host."
-      }
-      submitLabel="Save"
+      title={format(text.title, { target })}
+      description={proxyOff ? text.proxyOff : text.description}
+      submitLabel={t.common.actions.save}
       action={saveHost}
       className="sm:max-w-lg"
     >

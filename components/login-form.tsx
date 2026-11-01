@@ -15,6 +15,7 @@ import {
   FieldSeparator,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { useI18n } from "@/lib/i18n/client"
 import type { ActionState } from "@/lib/validation"
 
 export function LoginForm({
@@ -34,16 +35,15 @@ export function LoginForm({
   passwordForAdminsOnly?: boolean
 }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(login, {})
+  const { t } = useI18n()
 
   return (
     <form action={action} className={cn("flex flex-col gap-6", className)} {...props}>
       <FieldGroup>
         <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-2xl font-bold">Login to Gantry</h1>
+          <h1 className="text-2xl font-bold">{t.auth.login.title}</h1>
           <p className="text-sm text-balance text-muted-foreground">
-            {passwordForAdminsOnly
-              ? "Sign in with SSO. The password form is for administrators only."
-              : "Enter your username and password to continue"}
+            {passwordForAdminsOnly ? t.auth.login.adminsOnly : t.auth.login.description}
           </p>
         </div>
         {ssoMessage ? (
@@ -53,7 +53,7 @@ export function LoginForm({
         ) : null}
         {next ? <input type="hidden" name="next" value={next} /> : null}
         <Field>
-          <FieldLabel htmlFor="username">Username</FieldLabel>
+          <FieldLabel htmlFor="username">{t.common.fields.username}</FieldLabel>
           <Input
             id="username"
             name="username"
@@ -66,7 +66,7 @@ export function LoginForm({
           />
         </Field>
         <Field data-invalid={state.error ? true : undefined}>
-          <FieldLabel htmlFor="password">Password</FieldLabel>
+          <FieldLabel htmlFor="password">{t.common.fields.password}</FieldLabel>
           <Input
             id="password"
             name="password"
@@ -80,21 +80,21 @@ export function LoginForm({
         </Field>
         <Field>
           <Button type="submit" disabled={pending}>
-            {pending ? "Signing in…" : "Login"}
+            {pending ? t.auth.login.signingIn : t.auth.login.submit}
           </Button>
           <FieldDescription className="text-center">
-            Forgot your password? Ask a Gantry administrator to reset it.
+            {t.auth.login.forgot}
           </FieldDescription>
         </Field>
         {sso ? (
           <>
-            <FieldSeparator>Or</FieldSeparator>
+            <FieldSeparator>{t.auth.login.or}</FieldSeparator>
             <Field>
               {/* A plain link: the route redirects to the identity provider. */}
               <Button variant="outline" asChild>
                 <a href={`/auth/oidc/login${next ? `?next=${encodeURIComponent(next)}` : ""}`}>
                   <KeyRoundIcon data-icon="inline-start" />
-                  Sign in with SSO
+                  {t.auth.login.sso}
                 </a>
               </Button>
             </Field>

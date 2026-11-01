@@ -6,6 +6,7 @@ import { runAction, UserError } from "@/lib/server/action"
 import { hashPassword } from "@/lib/server/auth/password"
 import { disableTwoFactor } from "@/lib/server/auth/two-factor"
 import { getDb } from "@/lib/server/db"
+import { getI18n } from "@/lib/i18n/server"
 import { closeUserExecSessions } from "@/lib/server/docker/exec"
 import { parseGrants, setUserEnvironments } from "@/lib/server/environment-access"
 import { changeRole, deleteUserChecked, invalidateSessions } from "@/lib/server/users"
@@ -25,29 +26,31 @@ export async function createUser(_prev: ActionState, formData: FormData): Promis
     .safeParse(Object.fromEntries(formData))
   if (!parsed.success) return fieldErrors(parsed.error)
   const { username, password, role } = parsed.data
+  const { t, format } = await getI18n()
 
   return runAction("admin", "user.create", username, async () => {
     const db = await getDb()
     const exists = await db.selectFrom("users").select("id").where("username", "=", username).executeTakeFirst()
-    if (exists) throw new UserError(`User "${username}" already exists`)
+    if (exists) throw new UserError(format(t.users.exists, { username }))
     await db
       .insertInto("users")
       .values({ username, password_hash: await hashPassword(password), role, created_at: new Date().toISOString() })
       .execute()
-    return `User ${username} created`
+    return format(t.users.created, { username })
   })
 }
 
 export async function deleteUser(id: number): Promise<ActionState> {
+  const { t } = await getI18n()
   const parsed = idSchema.safeParse(id)
-  if (!parsed.success) return { error: "Invalid user" }
+  if (!parsed.success) return { error: t.users.invalidUser }
 
   return runAction("admin", "user.delete", String(id), async ({ user }) => {
-    if (user.id === parsed.data) throw new UserError("You cannot delete your own account")
+    if (user.id === parsed.data) throw new UserError(t.users.cannotDeleteSelf)
     const result = await deleteUserChecked(await getDb(), parsed.data)
-    if (result === "last_admin") throw new UserError("At least one administrator is required")
-    if (result === "not_found") throw new UserError("User not found")
-    return "User deleted"
+    if (result === "last_admin") throw new UserError(t.users.lastAdmin)
+    if (result === "not_found") throw new UserError(t.users.notFound)
+    return t.users.deleted
   })
 }
 
@@ -57,14 +60,15 @@ export async function deleteUser(id: number): Promise<ActionState> {
  * grants, so demoting them later starts from no access (grant it again).
  */
 export async function setUserRole(id: number, role: "admin" | "user"): Promise<ActionState> {
+  const { t } = await getI18n()
   const parsed = z.object({ id: idSchema, role: roleSchema }).safeParse({ id, role })
-  if (!parsed.success) return { error: "Invalid request" }
+  if (!parsed.success) return { error: t.users.invalidRequest }
 
   return runAction("admin", "user.role", `${id}:${role}`, async () => {
     const result = await changeRole(await getDb(), parsed.data.id, parsed.data.role)
-    if (result === "last_admin") throw new UserError("At least one administrator is required")
-    if (result === "not_found") throw new UserError("User not found")
-    return "Role updated"
+    if (result === "last_admin") throw new UserError(t.users.lastAdmin)
+    if (result === "not_found") throw new UserError(t.users.notFound)
+    return t.users.roleUpdated
   })
 }
 
@@ -73,6 +77,7 @@ export async function resetPassword(_prev: ActionState, formData: FormData): Pro
     .object({ id: z.coerce.number().int().positive(), password: passwordSchema })
     .safeParse(Object.fromEntries(formData))
   if (!parsed.success) return fieldErrors(parsed.error)
+  const { t } = await getI18n()
 
   return runAction("admin", "user.reset_password", String(parsed.data.id), async () => {
     const db = await getDb()
@@ -83,7 +88,7 @@ export async function resetPassword(_prev: ActionState, formData: FormData): Pro
       .execute()
     // Whoever had the old password (or a session) is out.
     await invalidateSessions(db, parsed.data.id)
-    return "Password updated. The user was signed out everywhere."
+    return t.users.passwordUpdated
   })
 }
 
@@ -92,34 +97,36 @@ export async function resetPassword(_prev: ActionState, formData: FormData): Pro
  * codes) and signs them out everywhere. Audited as user.reset_2fa.
  */
 export async function resetTwoFactor(id: number): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const parsed = idSchema.safeParse(id)
-  if (!parsed.success) return { error: "Invalid user" }
+  if (!parsed.success) return { error: t.users.invalidUser }
 
   return runAction("admin", "user.reset_2fa", String(id), async () => {
     const db = await getDb()
     const target = await db.selectFrom("users").select("username").where("id", "=", parsed.data).executeTakeFirst()
-    if (!target) throw new UserError("User not found")
+    if (!target) throw new UserError(t.users.notFound)
     await disableTwoFactor(db, parsed.data)
     await invalidateSessions(db, parsed.data)
-    return `Two-factor authentication of ${target.username} turned off`
+    return format(t.users.twoFactorReset, { username: target.username })
   })
 }
 
 /** Sets which environments a standard user may use, and their role in each ("env" values "<id>:<role>"). */
 export async function setUserAccess(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const id = z.coerce.number().int().positive().safeParse(formData.get("id"))
   const grants = parseGrants(formData.getAll("env"))
-  if (!id.success || !grants || grants.length > 10_000) return { error: "Invalid request" }
+  if (!id.success || !grants || grants.length > 10_000) return { error: t.users.invalidRequest }
   const summary = grants.map((g) => `${g.id}=${g.role}`).join(",") || "none"
 
   return runAction("admin", "user.environments", `${id.data}: ${summary}`, async () => {
     const db = await getDb()
     const target = await db.selectFrom("users").select(["username", "role"]).where("id", "=", id.data).executeTakeFirst()
-    if (!target) throw new UserError("User not found")
-    if (target.role === "admin") throw new UserError("Administrators can use every environment")
+    if (!target) throw new UserError(t.users.notFound)
+    if (target.role === "admin") throw new UserError(t.users.adminsUseAll)
     await setUserEnvironments(db, id.data, grants)
     // Consoles need the manager role; let them be reopened under the new grants.
     closeUserExecSessions(id.data)
-    return `Environment access for ${target.username} updated`
+    return format(t.users.accessUpdated, { username: target.username })
   })
 }

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { useI18n } from "@/lib/i18n/client"
 import { mergeVariables } from "@/lib/templates"
 import type { ActionState } from "@/lib/validation"
 
@@ -29,6 +30,9 @@ export type TemplateEditorValues = {
  * before hydration; submitted values come back in the state.
  */
 export function TemplateEditor({ templateKey, initial }: { templateKey?: string; initial?: TemplateEditorValues }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const text = t.templates.editor
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
     templateKey ? updateTemplate : createTemplate,
     {}
@@ -52,22 +56,22 @@ export function TemplateEditor({ templateKey, initial }: { templateKey?: string;
       <FieldGroup>
         <div className="grid gap-4 @3xl/main:grid-cols-2">
           <Field data-invalid={errs.title ? true : undefined}>
-            <FieldLabel htmlFor={`${uid}-t-title`}>Title</FieldLabel>
-            <Input id={`${uid}-t-title`} name="title" defaultValue={values.title} placeholder="Internal API" required />
+            <FieldLabel htmlFor={`${uid}-t-title`}>{text.title}</FieldLabel>
+            <Input id={`${uid}-t-title`} name="title" defaultValue={values.title} placeholder={text.titlePlaceholder} required />
             <FieldError>{errs.title?.[0]}</FieldError>
           </Field>
           <Field data-invalid={errs.category ? true : undefined}>
-            <FieldLabel htmlFor={`${uid}-t-category`}>Category</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-t-category`}>{text.category}</FieldLabel>
             <Input id={`${uid}-t-category`} name="category" defaultValue={values.category ?? "Custom"} placeholder="Custom" />
             <FieldError>{errs.category?.[0]}</FieldError>
           </Field>
           <Field data-invalid={errs.description ? true : undefined} className="@3xl/main:col-span-2">
-            <FieldLabel htmlFor={`${uid}-t-description`}>Description</FieldLabel>
-            <Input id={`${uid}-t-description`} name="description" defaultValue={values.description} placeholder="What it runs" />
+            <FieldLabel htmlFor={`${uid}-t-description`}>{t.common.fields.description}</FieldLabel>
+            <Input id={`${uid}-t-description`} name="description" defaultValue={values.description} placeholder={text.descriptionPlaceholder} />
             <FieldError>{errs.description?.[0]}</FieldError>
           </Field>
           <Field data-invalid={errs.stack_name ? true : undefined}>
-            <FieldLabel htmlFor={`${uid}-t-stack`}>Default stack name</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-t-stack`}>{text.stackName}</FieldLabel>
             <Input
               id={`${uid}-t-stack`}
               name="stack_name"
@@ -77,13 +81,13 @@ export function TemplateEditor({ templateKey, initial }: { templateKey?: string;
               spellCheck={false}
               required
             />
-            <FieldDescription>Suggested when deploying; can be changed each time.</FieldDescription>
+            <FieldDescription>{text.stackNameDescription}</FieldDescription>
             <FieldError>{errs.stack_name?.[0]}</FieldError>
           </Field>
         </div>
 
         <Field data-invalid={errs.compose ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-t-compose`}>Compose file</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-t-compose`}>{text.composeFile}</FieldLabel>
           <Textarea
             id={`${uid}-t-compose`}
             name="compose"
@@ -97,35 +101,35 @@ export function TemplateEditor({ templateKey, initial }: { templateKey?: string;
             required
           />
           <FieldDescription>
-            Use <code>{"${NAME}"}</code> for values to ask when deploying, <code>{"${NAME:-default}"}</code> for a
-            default and <code>{"${NAME:?}"}</code> for a required one.
+            {i18n.rich(text.composeDescription, {
+              ask: <code>{"${NAME}"}</code>,
+              withDefault: <code>{"${NAME:-default}"}</code>,
+              required: <code>{"${NAME:?}"}</code>,
+            })}
           </FieldDescription>
           <FieldError>{errs.compose?.[0]}</FieldError>
         </Field>
 
         <Field data-invalid={errs.env ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-t-env`}>Default values</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-t-env`}>{text.defaultValues}</FieldLabel>
           <Textarea
             id={`${uid}-t-env`}
             name="env"
             value={env}
             onChange={(e) => setEnv(e.target.value)}
-            placeholder={"# .env defaults, e.g.\nHTTP_PORT=8080"}
+            placeholder={text.envPlaceholder}
             className="max-h-[40vh] min-h-24 font-mono text-xs leading-relaxed md:text-xs"
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
             wrap="off"
           />
-          <FieldDescription>
-            KEY=value per line. Names containing PASSWORD, SECRET, TOKEN or ending in KEY become password fields
-            (generated when left empty).
-          </FieldDescription>
+          <FieldDescription>{text.envDescription}</FieldDescription>
           <FieldError>{errs.env?.[0]}</FieldError>
         </Field>
 
         <div className="flex flex-wrap items-center gap-1.5 text-sm" data-testid="template-variables">
-          <span className="text-muted-foreground">Deploy form asks for:</span>
+          <span className="text-muted-foreground">{text.asksFor}</span>
           {variables.length ? (
             variables.map((v) => (
               <Badge key={v.name} variant={v.type === "password" ? "secondary" : "outline"} className="font-mono">
@@ -134,7 +138,7 @@ export function TemplateEditor({ templateKey, initial }: { templateKey?: string;
               </Badge>
             ))
           ) : (
-            <span className="text-muted-foreground">nothing (no variables)</span>
+            <span className="text-muted-foreground">{text.noVariables}</span>
           )}
         </div>
 
@@ -143,7 +147,7 @@ export function TemplateEditor({ templateKey, initial }: { templateKey?: string;
         <Field orientation="horizontal">
           <Button type="submit" disabled={pending}>
             <SaveIcon data-icon="inline-start" />
-            {pending ? "Saving…" : "Save template"}
+            {pending ? t.common.status.saving : text.save}
           </Button>
         </Field>
       </FieldGroup>

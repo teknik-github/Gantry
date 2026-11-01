@@ -4,8 +4,10 @@ import { refresh } from "next/cache"
 import { redirect } from "next/navigation"
 
 import { BULK_LIMIT, bulkSummary, runBulk } from "@/lib/bulk"
-import { ENVIRONMENT_SWITCHED, NO_ENVIRONMENT_ASSIGNED } from "@/lib/messages"
-import { allows, ROLE_LABELS, roleFor, type EnvironmentPermission } from "@/lib/permissions"
+import type { Plural } from "@/lib/i18n"
+import { translateKnown } from "@/lib/i18n/known-messages"
+import { getI18n } from "@/lib/i18n/server"
+import { allows, roleFor, type EnvironmentPermission } from "@/lib/permissions"
 import { audit } from "@/lib/server/audit"
 import { getCurrentUser, requireUser, type CurrentUser } from "@/lib/server/auth/dal"
 import type { Environment } from "@/lib/server/db/schema"
@@ -51,23 +53,25 @@ type Authorized = { user: CurrentUser; environment: Environment | null; expected
  */
 export async function authorize(permission: Permission): Promise<Authorized | { error: string }> {
   const user = await getCurrentUser()
+  const { t, format } = await getI18n()
   // Server Actions and pages are cookie sessions only; tokens are for /api/*.
-  if (!user || user.via !== "session") return { error: "Your session has expired. Please sign in again." }
+  if (!user || user.via !== "session") return { error: t.common.errors.sessionExpired }
   if (permission === "user") return { user, environment: null }
   if (permission === "admin") {
-    return user.role === "admin" ? { user, environment: null } : { error: "Only administrators can do this." }
+    return user.role === "admin" ? { user, environment: null } : { error: t.common.errors.adminsOnly }
   }
 
   const scope = typeof permission === "string" ? { need: permission } : permission
   const environment = await getCurrentEnvironment()
   if (scope.environmentId !== undefined && environment?.id !== scope.environmentId) {
-    return { error: environment || user.role === "admin" ? ENVIRONMENT_SWITCHED : NO_ENVIRONMENT_ASSIGNED }
+    return { error: environment || user.role === "admin" ? t.common.environment.switched : t.common.environment.noneAssigned }
   }
   if (user.role === "admin") return { user, environment, expectedId: scope.environmentId }
-  if (!environment) return { error: NO_ENVIRONMENT_ASSIGNED }
+  if (!environment) return { error: t.common.environment.noneAssigned }
   const role = await getEnvironmentRole()
   if (!allows(user.role, role === "admin" ? null : role, scope.need)) {
-    return { error: `This needs the ${ROLE_LABELS[roleFor(scope.need)].toLowerCase()} role in ${environment.name}.` }
+    const roleName = t.common.roles[roleFor(scope.need)].toLowerCase()
+    return { error: format(t.common.errors.needsRole, { role: roleName, environment: environment.name }) }
   }
   return { user, environment, expectedId: scope.environmentId }
 }
@@ -107,10 +111,11 @@ export async function runAction(
     refresh()
     return { ok: true, message: message || undefined }
   } catch (err) {
-    if (err instanceof DockerError || err instanceof KubeError) return { error: err.message }
-    if (err instanceof UserError) return { error: err.message }
+    const i18n = await getI18n()
+    if (err instanceof DockerError || err instanceof KubeError) return { error: translateKnown(i18n, err.message) }
+    if (err instanceof UserError) return { error: translateKnown(i18n, err.message) }
     console.error(`[gantry] action ${auditAction} failed`, err)
-    return { error: "Something went wrong. Check the server logs." }
+    return { error: i18n.t.common.errors.somethingWentWrong }
   }
 }
 
@@ -127,8 +132,11 @@ export async function runBulkAction<T>(
   auditAction: string,
   items: T[],
   opts: {
+    /** English wording of the summary ("Stopped", "container"). */
     verb: string
     noun: string
+    /** The same in the user's language; English (verb/noun above) when absent. */
+    localized?: { verb: string; noun: Plural }
     label: (item: T) => string
     auditTarget?: (item: T) => string
     /** Objects handled at once (default 4). */
@@ -139,27 +147,41 @@ export async function runBulkAction<T>(
   const auth = await authorize(permission)
   if ("error" in auth) return auth
   const { user, expectedId } = auth
-  if (!items.length) return { error: "Nothing selected" }
-  if (items.length > BULK_LIMIT) return { error: `Select at most ${BULK_LIMIT} items at a time` }
+  const i18n = await getI18n()
+  const { t } = i18n
+  if (!items.length) return { error: t.common.errors.nothingSelected }
+  if (items.length > BULK_LIMIT) return { error: i18n.format(t.common.errors.bulkLimit, { limit: BULK_LIMIT }) }
 
   let docker: DockerApi
   try {
     docker = await getDocker(expectedId)
   } catch (err) {
-    if (err instanceof DockerError || err instanceof UserError) return { error: err.message }
+    if (err instanceof DockerError || err instanceof UserError) return { error: translateKnown(i18n, err.message) }
     console.error(`[gantry] action ${auditAction} failed`, err)
-    return { error: "Something went wrong. Check the server logs." }
+    return { error: t.common.errors.somethingWentWrong }
   }
 
   const result = await runBulk(items, (item) => fn(item, docker), {
     concurrency: opts.concurrency,
     errorMessage: (err) => {
-      if (err instanceof DockerError || err instanceof UserError) return err.message
+      if (err instanceof DockerError || err instanceof UserError) return translateKnown(i18n, err.message)
       console.error(`[gantry] action ${auditAction} failed`, err)
-      return "unexpected error"
+      return t.common.errors.unexpected
     },
   })
   for (const item of result.done) await audit(user, auditAction, (opts.auditTarget ?? opts.label)(item))
   if (result.done.length) refresh()
-  return bulkSummary(result, opts)
+  const { localized } = opts
+  return bulkSummary(result, {
+    ...opts,
+    ...(localized && {
+      verb: localized.verb,
+      wording: {
+        success: t.common.bulk.success,
+        partial: t.common.bulk.partial,
+        more: t.common.bulk.more,
+        noun: (count) => i18n.plural(localized.noun, count),
+      },
+    }),
+  })
 }

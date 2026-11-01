@@ -18,6 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { FieldError } from "@/components/ui/field"
+import { useI18n } from "@/lib/i18n/client"
 import type { ActionState } from "@/lib/validation"
 
 /**
@@ -28,7 +29,7 @@ export function FormDialog({
   trigger,
   title,
   description,
-  submitLabel = "Save",
+  submitLabel,
   action,
   children,
   className,
@@ -79,14 +80,15 @@ function DialogForm({
   children,
 }: {
   action: (prev: ActionState, formData: FormData) => Promise<ActionState>
-  submitLabel: string
+  submitLabel?: string
   onSuccess: () => void
   children: (errors: Record<string, string[] | undefined>) => React.ReactNode
 }) {
+  const { t } = useI18n()
   const [state, formAction, pending] = useActionState(async (prev: ActionState, fd: FormData) => {
     const res = await action(prev, fd)
     if (res.ok) {
-      toast.success(res.message ?? "Done")
+      toast.success(res.message ?? t.common.status.done)
       onSuccess()
     }
     return res
@@ -100,11 +102,11 @@ function DialogForm({
       <DialogFooter>
         <DialogClose asChild>
           <Button type="button" variant="outline" disabled={pending}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
         </DialogClose>
         <Button type="submit" disabled={pending}>
-          {pending ? "Working…" : submitLabel}
+          {pending ? t.common.status.working : (submitLabel ?? t.common.actions.save)}
         </Button>
       </DialogFooter>
     </form>

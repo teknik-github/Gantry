@@ -11,6 +11,8 @@ import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { Age, KubeStatus } from "@/components/gantry/kubernetes/tables"
 import { Mono } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 import type { HelmReleaseRow } from "@/lib/server/kubernetes/helm"
 
 function UninstallButton({
@@ -24,11 +26,13 @@ function UninstallButton({
   variant?: "icon" | "button"
   onDone?: () => void
 }) {
+  const { t, format } = useI18n()
+  const k = t.kubernetes.helm
   return (
     <ConfirmAction
-      title={`Uninstall ${release.name}?`}
-      description={`Runs helm uninstall: deletes every object of release ${release.namespace}/${release.name} and its history (uninstall hooks run; objects marked "helm.sh/resource-policy: keep" stay).`}
-      confirmLabel="Uninstall"
+      title={format(k.uninstallTitle, { name: release.name })}
+      description={format(k.uninstallDescription, { namespace: release.namespace, name: release.name })}
+      confirmLabel={k.uninstall}
       onConfirm={async () => {
         const res = await uninstallHelmRelease({ environmentId, namespace: release.namespace, name: release.name })
         if (res.ok) onDone?.()
@@ -36,13 +40,13 @@ function UninstallButton({
       }}
     >
       {variant === "icon" ? (
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Uninstall" title="Uninstall">
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={k.uninstall} title={k.uninstall}>
           <Trash2Icon />
         </Button>
       ) : (
         <Button variant="outline" size="sm">
           <Trash2Icon data-icon="inline-start" />
-          Uninstall
+          {k.uninstall}
         </Button>
       )}
     </ConfirmAction>
@@ -51,10 +55,11 @@ function UninstallButton({
 
 const helper = columnHelperFor<HelmReleaseRow>()
 
-function columns(environmentId: number, canManage: boolean, showNamespace: boolean) {
+function columns({ t }: I18n, environmentId: number, canManage: boolean, showNamespace: boolean) {
+  const k = t.kubernetes.helm
   return helper.columns([
     helper.accessor("name", {
-      header: ({ column }) => <SortHeader column={column} title="Release" />,
+      header: ({ column }) => <SortHeader column={column} title={k.release} />,
       cell: ({ row }) => (
         <Link
           href={`/kubernetes/helm/${encodeURIComponent(row.original.namespace)}/${encodeURIComponent(row.original.name)}`}
@@ -66,10 +71,10 @@ function columns(environmentId: number, canManage: boolean, showNamespace: boole
       enableHiding: false,
     }),
     ...(showNamespace
-      ? [helper.accessor("namespace", { header: ({ column }) => <SortHeader column={column} title="Namespace" /> })]
+      ? [helper.accessor("namespace", { header: ({ column }) => <SortHeader column={column} title={t.kubernetes.common.namespace} /> })]
       : []),
     helper.accessor("chart", {
-      header: ({ column }) => <SortHeader column={column} title="Chart" />,
+      header: ({ column }) => <SortHeader column={column} title={k.chart} />,
       cell: ({ row }) => (
         <Mono>
           {row.original.chart}
@@ -77,9 +82,9 @@ function columns(environmentId: number, canManage: boolean, showNamespace: boole
         </Mono>
       ),
     }),
-    helper.accessor("appVersion", { header: "App version", cell: ({ row }) => <Mono>{row.original.appVersion || "—"}</Mono> }),
+    helper.accessor("appVersion", { header: k.appVersion, cell: ({ row }) => <Mono>{row.original.appVersion || "—"}</Mono> }),
     helper.accessor("status", {
-      header: "Status",
+      header: t.common.fields.status,
       cell: ({ row }) => (
         <span data-testid={`helm-status-${row.original.name}`}>
           <KubeStatus status={row.original.status} />
@@ -87,11 +92,11 @@ function columns(environmentId: number, canManage: boolean, showNamespace: boole
       ),
     }),
     helper.accessor("revision", {
-      header: "Revision",
+      header: k.revision,
       cell: ({ row }) => <span className="tabular-nums">{row.original.revision}</span>,
     }),
     helper.accessor("updated", {
-      header: ({ column }) => <SortHeader column={column} title="Updated" />,
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.updated} />,
       cell: ({ row }) => <Age at={row.original.updated} />,
     }),
     helper.display({
@@ -118,15 +123,32 @@ export function HelmReleasesTable({
   canManage: boolean
   showNamespace: boolean
 }) {
-  const cols = React.useMemo(() => columns(environmentId, canManage, showNamespace), [environmentId, canManage, showNamespace])
+  const i18n = useI18n()
+  const { t } = i18n
+  const cols = React.useMemo(
+    () => columns(i18n, environmentId, canManage, showNamespace),
+    [i18n, environmentId, canManage, showNamespace]
+  )
   return (
     <DataTable
       data={data}
       columns={cols}
       getRowId={(r) => r.id}
       searchText={(r) => `${r.name} ${r.namespace} ${r.chart} ${r.status}`}
-      searchPlaceholder="Search releases…"
-      emptyMessage="No Helm releases."
+      searchPlaceholder={t.kubernetes.helm.search}
+      emptyMessage={t.kubernetes.helm.empty}
+      columnLabels={
+        i18n.locale === "en"
+          ? undefined
+          : {
+              namespace: t.kubernetes.common.namespace,
+              chart: t.kubernetes.helm.chart,
+              appVersion: t.kubernetes.helm.appVersion,
+              status: t.common.fields.status,
+              revision: t.kubernetes.helm.revision,
+              updated: t.common.fields.updated,
+            }
+      }
       pageSize={20}
     />
   )

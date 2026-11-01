@@ -34,42 +34,44 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useI18n } from "@/lib/i18n/client"
+import type { I18n } from "@/lib/i18n"
 import type { ActionState } from "@/lib/validation"
 
-async function copy(text: string, what: string) {
+async function copy(i18n: I18n, text: string, what: string) {
   try {
     await navigator.clipboard.writeText(text)
-    toast.success(`${what} copied`)
+    toast.success(i18n.format(i18n.t.account.twoFactor.copied, { what }))
   } catch {
-    toast.error("Copy failed; select the text instead")
+    toast.error(i18n.t.account.twoFactor.copyFailed)
   }
 }
 
 /** Shown once: the recovery codes after enabling 2FA or regenerating them. */
 function RecoveryCodes({ codes }: { codes: string[] }) {
+  const i18n = useI18n()
+  const { t } = i18n
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted-foreground">
-        Store these somewhere safe. Each one signs you in once if you lose your authenticator. They won&apos;t be shown
-        again.
-      </p>
+      <p className="text-sm text-muted-foreground">{t.account.twoFactor.codesHelp}</p>
       <ol className="grid grid-cols-2 gap-2 rounded-md border bg-muted/40 p-3 font-mono text-sm" data-testid="recovery-codes">
         {codes.map((c) => (
           <li key={c}>{c}</li>
         ))}
       </ol>
-      <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => copy(codes.join("\n"), "Recovery codes")}>
+      <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => copy(i18n, codes.join("\n"), t.account.twoFactor.recoveryCodes)}>
         <CopyIcon data-icon="inline-start" />
-        Copy codes
+        {t.account.twoFactor.copyCodes}
       </Button>
     </div>
   )
 }
 
 function PasswordField({ id, error }: { id: string; error?: string }) {
+  const { t } = useI18n()
   return (
     <Field data-invalid={error ? true : undefined}>
-      <FieldLabel htmlFor={`${id}-password`}>Current password</FieldLabel>
+      <FieldLabel htmlFor={`${id}-password`}>{t.account.password.current}</FieldLabel>
       <Input id={`${id}-password`} name="password" type="password" autoComplete="current-password" required autoFocus />
       {error ? <FieldError>{error}</FieldError> : null}
     </Field>
@@ -77,9 +79,10 @@ function PasswordField({ id, error }: { id: string; error?: string }) {
 }
 
 function CodeField({ id, error, description }: { id: string; error?: string; description?: string }) {
+  const { t } = useI18n()
   return (
     <Field data-invalid={error ? true : undefined}>
-      <FieldLabel htmlFor={`${id}-code`}>Authentication code</FieldLabel>
+      <FieldLabel htmlFor={`${id}-code`}>{t.account.twoFactor.codeLabel}</FieldLabel>
       <Input
         id={`${id}-code`}
         name="code"
@@ -107,6 +110,8 @@ type Step = "closed" | "password" | "scan" | "codes"
  */
 export function TwoFactorCard({ enabled, recoveryCodesLeft }: { enabled: boolean; recoveryCodesLeft: number }) {
   const id = React.useId()
+  const i18n = useI18n()
+  const { t } = i18n
   const [step, setStep] = React.useState<Step>("closed")
   const [enrolment, setEnrolment] = React.useState<EnrolmentState>({})
   const [codes, setCodes] = React.useState<string[] | null>(null)
@@ -127,7 +132,7 @@ export function TwoFactorCard({ enabled, recoveryCodesLeft }: { enabled: boolean
       setEnrolment({})
       setCodes(res.recoveryCodes)
       setStep("codes")
-      toast.success(res.message ?? "Two-factor authentication is on")
+      toast.success(res.message ?? t.account.twoFactor.enabled)
     }
     return res
   }, {})
@@ -145,27 +150,29 @@ export function TwoFactorCard({ enabled, recoveryCodesLeft }: { enabled: boolean
           <>
             <Badge variant="outline" className="gap-1 text-emerald-700 dark:text-emerald-400" data-testid="2fa-status">
               <ShieldCheckIcon />
-              On
+              {t.account.twoFactor.on}
             </Badge>
-            <span className="text-sm text-muted-foreground">{recoveryCodesLeft} recovery code(s) left</span>
+            <span className="text-sm text-muted-foreground">
+              {i18n.format(t.account.twoFactor.codesLeft, { count: recoveryCodesLeft })}
+            </span>
             <div className="ml-auto flex gap-2">
               <Button size="sm" variant="outline" onClick={() => setManage("regenerate")}>
-                New recovery codes
+                {t.account.twoFactor.newCodes}
               </Button>
               <Button size="sm" variant="outline" onClick={() => setManage("off")}>
                 <ShieldOffIcon data-icon="inline-start" />
-                Turn off
+                {t.account.twoFactor.turnOff}
               </Button>
             </div>
           </>
         ) : (
           <>
             <Badge variant="outline" className="text-muted-foreground" data-testid="2fa-status">
-              Off
+              {t.account.twoFactor.off}
             </Badge>
             <Button size="sm" className="ml-auto" onClick={() => setStep("password")}>
               <ShieldCheckIcon data-icon="inline-start" />
-              Set up two-factor
+              {t.account.twoFactor.setUp}
             </Button>
           </>
         )}
@@ -174,13 +181,13 @@ export function TwoFactorCard({ enabled, recoveryCodesLeft }: { enabled: boolean
       <Dialog open={step !== "closed"} onOpenChange={(o) => !o && close()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{step === "codes" ? "Save your recovery codes" : "Set up two-factor authentication"}</DialogTitle>
+            <DialogTitle>{step === "codes" ? t.account.twoFactor.saveCodesTitle : t.account.twoFactor.setUpTitle}</DialogTitle>
             <DialogDescription>
               {step === "password"
-                ? "Confirm your password to start."
+                ? t.account.twoFactor.confirmPassword
                 : step === "scan"
-                  ? "Scan the QR code with an authenticator app (or enter the key), then type the 6-digit code it shows."
-                  : "Two-factor authentication is on."}
+                  ? t.account.twoFactor.scan
+                  : t.account.twoFactor.isOn}
             </DialogDescription>
           </DialogHeader>
           {step === "password" ? (
@@ -188,7 +195,7 @@ export function TwoFactorCard({ enabled, recoveryCodesLeft }: { enabled: boolean
               <PasswordField id={`${id}-start`} error={startState.fieldErrors?.password?.[0] ?? (startState.ok ? undefined : startState.error)} />
               <DialogFooter>
                 <Button type="submit" disabled={starting}>
-                  {starting ? "Checking…" : "Continue"}
+                  {starting ? t.account.twoFactor.checking : t.common.actions.continue}
                 </Button>
               </DialogFooter>
             </form>
@@ -199,28 +206,28 @@ export function TwoFactorCard({ enabled, recoveryCodesLeft }: { enabled: boolean
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={`data:image/svg+xml;utf8,${encodeURIComponent(enrolment.qrSvg)}`}
-                  alt="QR code for your authenticator app"
+                  alt={t.account.twoFactor.qrAlt}
                   className="mx-auto size-48 rounded-md bg-white p-1"
                 />
               ) : null}
               <div className="grid gap-1 text-sm">
-                <span className="text-muted-foreground">Key (if you can&apos;t scan)</span>
+                <span className="text-muted-foreground">{t.account.twoFactor.keyLabel}</span>
                 <div className="flex items-center gap-2">
                   <Mono className="break-all" data-testid="totp-secret">
                     {enrolment.secret}
                   </Mono>
-                  <Button type="button" variant="ghost" size="icon" className="size-7" aria-label="Copy key" onClick={() => copy(enrolment.secret!, "Key")}>
+                  <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={t.account.twoFactor.copyKey} onClick={() => copy(i18n, enrolment.secret!, t.account.twoFactor.key)}>
                     <CopyIcon />
                   </Button>
                 </div>
                 <a href={enrolment.uri} className="w-fit text-xs underline underline-offset-4">
-                  Open in authenticator app
+                  {t.account.twoFactor.openInApp}
                 </a>
               </div>
               <CodeField id={`${id}-confirm`} error={confirmState.fieldErrors?.code?.[0]} />
               <DialogFooter>
                 <Button type="submit" disabled={confirming}>
-                  {confirming ? "Verifying…" : "Turn on"}
+                  {confirming ? t.account.twoFactor.verifying : t.account.twoFactor.turnOn}
                 </Button>
               </DialogFooter>
             </form>
@@ -229,7 +236,7 @@ export function TwoFactorCard({ enabled, recoveryCodesLeft }: { enabled: boolean
               <RecoveryCodes codes={codes} />
               <DialogFooter>
                 <Button type="button" onClick={close}>
-                  Done
+                  {t.common.status.done}
                 </Button>
               </DialogFooter>
             </>
@@ -244,12 +251,13 @@ export function TwoFactorCard({ enabled, recoveryCodesLeft }: { enabled: boolean
 
 function ManageTwoFactorDialog({ mode, onClose }: { mode: "off" | "regenerate" | null; onClose: () => void }) {
   const id = React.useId()
+  const { t } = useI18n()
   const [codes, setCodes] = React.useState<string[] | null>(null)
   const [state, action, pending] = useActionState(async (prev: RecoveryCodesState, fd: FormData) => {
     const res: RecoveryCodesState =
       mode === "off" ? await disableTwoFactorAction(prev, fd) : await regenerateRecoveryCodesAction(prev, fd)
     if (res.ok) {
-      toast.success(res.message ?? "Done")
+      toast.success(res.message ?? t.common.status.done)
       if (res.recoveryCodes) setCodes(res.recoveryCodes)
       else onClose()
     }
@@ -268,11 +276,9 @@ function ManageTwoFactorDialog({ mode, onClose }: { mode: "off" | "regenerate" |
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{mode === "off" ? "Turn off two-factor authentication" : "New recovery codes"}</DialogTitle>
+          <DialogTitle>{mode === "off" ? t.account.twoFactor.turnOffTitle : t.account.twoFactor.newCodes}</DialogTitle>
           <DialogDescription>
-            {mode === "off"
-              ? "Your password alone will sign you in again. Other sessions are signed out."
-              : "The current recovery codes stop working."}
+            {mode === "off" ? t.account.twoFactor.turnOffDescription : t.account.twoFactor.newCodesDescription}
           </DialogDescription>
         </DialogHeader>
         {codes ? (
@@ -286,18 +292,18 @@ function ManageTwoFactorDialog({ mode, onClose }: { mode: "off" | "regenerate" |
                   onClose()
                 }}
               >
-                Done
+                {t.common.status.done}
               </Button>
             </DialogFooter>
           </>
         ) : (
           <form action={action} className="flex flex-col gap-5" key={mode ?? "closed"}>
             <PasswordField id={`${id}-pw`} />
-            <CodeField id={`${id}-code`} description="From your authenticator app, or a recovery code." />
+            <CodeField id={`${id}-code`} description={t.account.twoFactor.codeDescription} />
             {state.error ? <FieldError>{state.error}</FieldError> : null}
             <DialogFooter>
               <Button type="submit" variant={mode === "off" ? "destructive" : "default"} disabled={pending}>
-                {pending ? "Working…" : mode === "off" ? "Turn off" : "Create new codes"}
+                {pending ? t.common.status.working : mode === "off" ? t.account.twoFactor.turnOff : t.account.twoFactor.createCodes}
               </Button>
             </DialogFooter>
           </form>
@@ -322,6 +328,8 @@ export type TokenRow = {
 /** Personal API tokens: list, create (shown once), revoke. */
 export function ApiTokensCard({ tokens }: { tokens: TokenRow[] }) {
   const id = React.useId()
+  const i18n = useI18n()
+  const { t } = i18n
   const [open, setOpen] = React.useState(false)
   const [formKey, setFormKey] = React.useState(0)
   const [created, setCreated] = React.useState<string | null>(null)
@@ -344,39 +352,44 @@ export function ApiTokensCard({ tokens }: { tokens: TokenRow[] }) {
           }}
         >
           <PlusIcon data-icon="inline-start" />
-          New token
+          {t.account.tokens.new}
         </Button>
       </div>
       {tokens.length ? (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Token</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead>Expires</TableHead>
-              <TableHead>Last used</TableHead>
+              <TableHead>{t.common.fields.name}</TableHead>
+              <TableHead>{t.account.tokens.token}</TableHead>
+              <TableHead>{t.common.fields.created}</TableHead>
+              <TableHead>{t.account.tokens.expires}</TableHead>
+              <TableHead>{t.account.tokens.lastUsed}</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tokens.map((t) => (
-              <TableRow key={t.id}>
-                <TableCell className="font-medium">{t.name}</TableCell>
+            {tokens.map((token) => (
+              <TableRow key={token.id}>
+                <TableCell className="font-medium">{token.name}</TableCell>
                 <TableCell>
-                  <Mono className="text-muted-foreground">{t.prefix}…</Mono>
+                  <Mono className="text-muted-foreground">{token.prefix}…</Mono>
                 </TableCell>
-                <TableCell className="text-muted-foreground">{t.createdLabel}</TableCell>
-                <TableCell className={t.expired ? "text-destructive" : "text-muted-foreground"}>{t.expiresLabel}</TableCell>
-                <TableCell className="text-muted-foreground">{t.lastUsedLabel}</TableCell>
+                <TableCell className="text-muted-foreground">{token.createdLabel}</TableCell>
+                <TableCell className={token.expired ? "text-destructive" : "text-muted-foreground"}>{token.expiresLabel}</TableCell>
+                <TableCell className="text-muted-foreground">{token.lastUsedLabel}</TableCell>
                 <TableCell className="text-right">
                   <ConfirmAction
-                    title={`Revoke token ${t.name}?`}
-                    description="Scripts using it get 401 Unauthorized from now on."
-                    confirmLabel="Revoke"
-                    onConfirm={() => revokeToken(t.id)}
+                    title={i18n.format(t.account.tokens.revokeTitle, { name: token.name })}
+                    description={t.account.tokens.revokeDescription}
+                    confirmLabel={t.account.tokens.revoke}
+                    onConfirm={() => revokeToken(token.id)}
                   >
-                    <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Revoke ${t.name}`}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-muted-foreground"
+                      aria-label={i18n.format(t.account.tokens.revokeLabel, { name: token.name })}
+                    >
                       <Trash2Icon />
                     </Button>
                   </ConfirmAction>
@@ -386,17 +399,15 @@ export function ApiTokensCard({ tokens }: { tokens: TokenRow[] }) {
           </TableBody>
         </Table>
       ) : (
-        <p className="text-sm text-muted-foreground">No tokens yet.</p>
+        <p className="text-sm text-muted-foreground">{t.account.tokens.empty}</p>
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{created ? "Copy your token" : "New API token"}</DialogTitle>
+            <DialogTitle>{created ? t.account.tokens.copyTitle : t.account.tokens.newTitle}</DialogTitle>
             <DialogDescription>
-              {created
-                ? "This is the only time it is shown. It acts with your permissions on the /api endpoints."
-                : "For scripts: send it as Authorization: Bearer <token> to /api/* endpoints. It has your permissions."}
+              {created ? t.account.tokens.createdDescription : t.account.tokens.newDescription}
             </DialogDescription>
           </DialogHeader>
           {created ? (
@@ -405,7 +416,7 @@ export function ApiTokensCard({ tokens }: { tokens: TokenRow[] }) {
                 <Mono className="break-all" data-testid="new-token">
                   {created}
                 </Mono>
-                <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0" aria-label="Copy token" onClick={() => copy(created, "Token")}>
+                <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0" aria-label={t.account.tokens.copyToken} onClick={() => copy(i18n, created, t.account.tokens.token)}>
                   <CopyIcon />
                 </Button>
               </div>
@@ -417,7 +428,7 @@ export function ApiTokensCard({ tokens }: { tokens: TokenRow[] }) {
                     setOpen(false)
                   }}
                 >
-                  Done
+                  {t.common.status.done}
                 </Button>
               </DialogFooter>
             </>
@@ -426,21 +437,21 @@ export function ApiTokensCard({ tokens }: { tokens: TokenRow[] }) {
             <form key={formKey} method="post" onSubmit={submitKeepingValues(action)} className="flex flex-col gap-5">
               <FieldGroup>
                 <Field data-invalid={errs.name ? true : undefined}>
-                  <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
-                  <Input id={`${id}-name`} name="name" placeholder="backup script" maxLength={64} required autoFocus />
+                  <FieldLabel htmlFor={`${id}-name`}>{t.common.fields.name}</FieldLabel>
+                  <Input id={`${id}-name`} name="name" placeholder={t.account.tokens.namePlaceholder} maxLength={64} required autoFocus />
                   <FieldError>{errs.name?.[0]}</FieldError>
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor={`${id}-expires`}>Expires</FieldLabel>
+                  <FieldLabel htmlFor={`${id}-expires`}>{t.account.tokens.expires}</FieldLabel>
                   <Select name="expires" defaultValue="90">
                     <SelectTrigger id={`${id}-expires`} className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="30">In 30 days</SelectItem>
-                      <SelectItem value="90">In 90 days</SelectItem>
-                      <SelectItem value="365">In a year</SelectItem>
-                      <SelectItem value="never">Never</SelectItem>
+                      <SelectItem value="30">{t.account.tokens.in30Days}</SelectItem>
+                      <SelectItem value="90">{t.account.tokens.in90Days}</SelectItem>
+                      <SelectItem value="365">{t.account.tokens.inAYear}</SelectItem>
+                      <SelectItem value="never">{t.account.tokens.never}</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
@@ -449,7 +460,7 @@ export function ApiTokensCard({ tokens }: { tokens: TokenRow[] }) {
               <DialogFooter>
                 <Button type="submit" disabled={pending}>
                   <KeyRoundIcon data-icon="inline-start" />
-                  {pending ? "Creating…" : "Create token"}
+                  {pending ? t.account.tokens.creating : t.account.tokens.create}
                 </Button>
               </DialogFooter>
             </form>
@@ -464,10 +475,11 @@ export function ApiTokensCard({ tokens }: { tokens: TokenRow[] }) {
 
 export function LinkSsoButton() {
   const [pending, run] = useRunAction()
+  const { t } = useI18n()
   return (
     <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => linkSso() as Promise<ActionState>)}>
       <LinkIcon data-icon="inline-start" />
-      Link SSO account
+      {t.account.sso.link}
     </Button>
   )
 }

@@ -10,6 +10,7 @@ import { DockerUnavailable } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
 import { getCurrentEnvironment, getPermissions } from "@/lib/server/environments"
@@ -19,11 +20,14 @@ import { getProxySettings } from "@/lib/server/proxy"
 
 export async function generateMetadata({ params }: PageProps<"/templates/[key]">): Promise<Metadata> {
   const template = await getTemplate((await params).key)
-  return { title: template ? `${template.title} template` : "Template" }
+  const { t, format } = await getI18n()
+  return { title: template ? format(t.templates.detail.pageTitle, { title: template.title }) : t.templates.detail.template }
 }
 
 export default async function TemplatePage({ params }: PageProps<"/templates/[key]">) {
   const user = await requireUser()
+  const { t, rich } = await getI18n()
+  const text = t.templates.detail
   const template = await getTemplate((await params).key)
   if (!template) notFound()
   const isAdmin = user.role === "admin"
@@ -39,16 +43,16 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
           <Button asChild variant="link" size="sm" className="h-auto w-fit p-0 text-muted-foreground">
             <Link href="/templates">
               <ArrowLeftIcon data-icon="inline-start" />
-              Templates
+              {t.nav.pages.templates}
             </Link>
           </Button>
           <h2 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight">
             {template.title}
             <Badge variant="outline">{template.category}</Badge>
-            {template.source === "custom" ? <Badge variant="secondary">custom</Badge> : null}
+            {template.source === "custom" ? <Badge variant="secondary">{t.templates.gallery.customBadge}</Badge> : null}
           </h2>
           <p className="text-sm text-muted-foreground">
-            {template.description || "No description"}
+            {template.description || t.templates.gallery.noDescription}
             {template.website ? (
               <>
                 {" "}
@@ -58,7 +62,7 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
                   rel="noreferrer noopener"
                   className="inline-flex items-center gap-1 underline underline-offset-4"
                 >
-                  Website
+                  {text.website}
                   <ExternalLinkIcon className="size-3" />
                 </a>
               </>
@@ -73,10 +77,12 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
           env && env.type !== "kubernetes" ? (
             <Card>
               <CardHeader>
-                <CardTitle>Deploy</CardTitle>
+                <CardTitle>{t.common.actions.deploy}</CardTitle>
                 <CardDescription>
-                  Creates a stack on <span className="font-medium text-foreground">{env.name}</span> and runs{" "}
-                  <code>docker compose up -d</code>.
+                  {rich(text.deployDescription, {
+                    environment: <span className="font-medium text-foreground">{env.name}</span>,
+                    command: <code>docker compose up -d</code>,
+                  })}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -95,8 +101,8 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
         ) : (
           <Card>
             <CardHeader>
-              <CardTitle>Deploy</CardTitle>
-              <CardDescription>Deploying a template needs the manager role in this environment.</CardDescription>
+              <CardTitle>{t.common.actions.deploy}</CardTitle>
+              <CardDescription>{text.deployNeedsManager}</CardDescription>
             </CardHeader>
           </Card>
         )}
@@ -104,10 +110,8 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[ke
         {isAdmin || template.source === "builtin" ? (
           <Card className="min-w-0">
             <CardHeader>
-              <CardTitle>Compose file</CardTitle>
-              <CardDescription>
-                {"${VARIABLES}"} are filled in from the stack&apos;s .env.
-              </CardDescription>
+              <CardTitle>{text.composeFile}</CardTitle>
+              <CardDescription>{rich(text.composeDescription, { variables: "${VARIABLES}" })}</CardDescription>
             </CardHeader>
             <CardContent>
               <pre

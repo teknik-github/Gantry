@@ -7,23 +7,28 @@ import { YamlEditor } from "@/components/gantry/kubernetes/yaml-editor"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
+import { getI18n } from "@/lib/i18n/server"
 import { editableObject, editableResource, MAX_EDIT_BYTES, toYaml } from "@/lib/kubernetes/edit"
 import { namespaceSchema, objectNameSchema } from "@/lib/kubernetes/names"
 import { tryKube } from "@/lib/server/kubernetes"
 
 export async function generateMetadata({ params }: PageProps<"/kubernetes/edit/[resource]/[namespace]/[name]">): Promise<Metadata> {
   const { name } = await params
-  return { title: `Edit ${decodeURIComponent(name)}` }
+  const { t, format } = await getI18n()
+  return { title: format(t.kubernetes.edit.title, { name: decodeURIComponent(name) }) }
 }
 
-const BACK: Record<string, { href: string; label: string }> = {
-  deployments: { href: "/kubernetes/workloads", label: "Workloads" },
-  statefulsets: { href: "/kubernetes/workloads", label: "Workloads" },
-  daemonsets: { href: "/kubernetes/workloads", label: "Workloads" },
-  services: { href: "/kubernetes/services", label: "Services" },
-  ingresses: { href: "/kubernetes/services", label: "Services" },
-  configmaps: { href: "/kubernetes/config", label: "ConfigMaps & Secrets" },
-  secrets: { href: "/kubernetes/config", label: "ConfigMaps & Secrets" },
+type BackPage = "workloads" | "services" | "config" | "overview"
+
+/** The list page to go back to; the label is the page title (t.nav.pages). */
+const BACK: Record<string, { href: string; page: BackPage }> = {
+  deployments: { href: "/kubernetes/workloads", page: "workloads" },
+  statefulsets: { href: "/kubernetes/workloads", page: "workloads" },
+  daemonsets: { href: "/kubernetes/workloads", page: "workloads" },
+  services: { href: "/kubernetes/services", page: "services" },
+  ingresses: { href: "/kubernetes/services", page: "services" },
+  configmaps: { href: "/kubernetes/config", page: "config" },
+  secrets: { href: "/kubernetes/config", page: "config" },
 }
 
 // Loads the live object for the editor. Editing needs the manager role;
@@ -33,17 +38,19 @@ export default async function EditObjectPage({ params }: PageProps<"/kubernetes/
   const namespace = decodeURIComponent(rawNs)
   const name = decodeURIComponent(rawName)
   const resource = editableResource(rawResource)
-  const backTo = BACK[rawResource] ?? { href: "/kubernetes", label: "Overview" }
+  const { t, format } = await getI18n()
+  const k = t.kubernetes
+  const backTo = BACK[rawResource] ?? { href: "/kubernetes", page: "overview" as const }
   const back = (
     <Button variant="outline" size="sm" asChild>
       <Link href={backTo.href}>
         <ArrowLeftIcon data-icon="inline-start" />
-        {backTo.label}
+        {t.nav.pages[backTo.page]}
       </Link>
     </Button>
   )
   const header = (description?: string) => (
-    <PageHeader title={resource ? `Edit ${resource.kind} ${name}` : "Edit YAML"} description={description} actions={back} />
+    <PageHeader title={resource ? format(k.edit.titleKind, { kind: resource.kind, name }) : t.nav.pages.editYaml} description={description} actions={back} />
   )
 
   const { page, blocked } = await loadKubePage()
@@ -59,23 +66,23 @@ export default async function EditObjectPage({ params }: PageProps<"/kubernetes/
     return (
       <PageBody>
         {header()}
-        <KubeUnavailable message="This object can't be edited here" />
+        <KubeUnavailable message={k.edit.cannotEdit} />
       </PageBody>
     )
   }
   if (!page.can.manage) {
     return (
       <PageBody>
-        {header(`${resource.kind} in ${namespace}`)}
-        <p className="px-4 text-sm text-muted-foreground lg:px-6">Editing objects needs the manager role in this environment.</p>
+        {header(format(k.common.inNamespace, { kind: resource.kind, namespace }))}
+        <p className="px-4 text-sm text-muted-foreground lg:px-6">{k.common.managerOnlyEdit}</p>
       </PageBody>
     )
   }
   if ("adminOnly" in resource && resource.adminOnly && page.user.role !== "admin") {
     return (
       <PageBody>
-        {header(`${resource.kind} in ${namespace}`)}
-        <p className="px-4 text-sm text-muted-foreground lg:px-6">Secret values are shown to and edited by administrators only.</p>
+        {header(format(k.common.inNamespace, { kind: resource.kind, namespace }))}
+        <p className="px-4 text-sm text-muted-foreground lg:px-6">{k.edit.secretsAdminOnly}</p>
       </PageBody>
     )
   }
@@ -84,7 +91,7 @@ export default async function EditObjectPage({ params }: PageProps<"/kubernetes/
   if (result.error !== undefined) {
     return (
       <PageBody>
-        {header(`${resource.kind} in ${namespace}`)}
+        {header(format(k.common.inNamespace, { kind: resource.kind, namespace }))}
         <KubeUnavailable message={result.error} />
       </PageBody>
     )
@@ -95,9 +102,9 @@ export default async function EditObjectPage({ params }: PageProps<"/kubernetes/
 
   return (
     <PageBody>
-      {header(`${resource.kind} in ${namespace} · ${resource.apiVersion}`)}
+      {header(format(k.common.inNamespaceVersion, { kind: resource.kind, namespace, apiVersion: resource.apiVersion }))}
       {tooLarge ? (
-        <KubeUnavailable message="This object is too large to edit here; use kubectl edit." />
+        <KubeUnavailable message={k.edit.tooLarge} />
       ) : (
         <YamlEditor
           key={resourceVersion}

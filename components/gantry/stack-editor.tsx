@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { useI18n } from "@/lib/i18n/client"
 import type { ActionState } from "@/lib/validation"
 
 export const EXAMPLE_COMPOSE = `services:
@@ -36,6 +37,9 @@ export function StackEditor({
   /** Git stacks: only the .env is edited here; the compose file comes from the repository. */
   gitComposePath?: string
 }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const text = t.stacks.editor
   const isNew = !stack
   const isGit = Boolean(stack && gitComposePath)
   const [intent, setIntent] = React.useState<"save" | "deploy">("save")
@@ -45,9 +49,9 @@ export function StackEditor({
     {}
   )
   React.useEffect(() => {
-    if (state.ok) toast.success(state.message ?? "Saved")
+    if (state.ok) toast.success(state.message ?? t.common.status.saved)
     else if (state.error && !state.fieldErrors) toast.error(state.error)
-  }, [state])
+  }, [state, t])
   const errs = state.fieldErrors ?? {}
   const values = state.values ?? {}
   // Unique ids: Next keeps recently visited pages hidden in the DOM.
@@ -60,7 +64,7 @@ export function StackEditor({
       <FieldGroup>
         {isNew ? (
           <Field data-invalid={errs.name ? true : undefined} className="max-w-sm">
-            <FieldLabel htmlFor={`${uid}-stack-name`}>Name</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-stack-name`}>{t.common.fields.name}</FieldLabel>
             <Input
               id={`${uid}-stack-name`}
               name="name"
@@ -71,14 +75,14 @@ export function StackEditor({
               required
               aria-invalid={errs.name ? true : undefined}
             />
-            <FieldDescription>Used as the compose project name. Lowercase letters, digits, - and _.</FieldDescription>
+            <FieldDescription>{text.nameDescription}</FieldDescription>
             <FieldError>{errs.name?.[0]}</FieldError>
           </Field>
         ) : null}
 
         {isGit ? null : (
           <Field data-invalid={errs.compose ? true : undefined}>
-            <FieldLabel htmlFor={`${uid}-stack-compose`}>Compose file</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-stack-compose`}>{text.composeFile}</FieldLabel>
             <Textarea
               id={`${uid}-stack-compose`}
               name="compose"
@@ -91,20 +95,18 @@ export function StackEditor({
               required
               aria-invalid={errs.compose ? true : undefined}
             />
-            <FieldDescription>
-              docker-compose.yml. Relative paths resolve from the stack&apos;s folder in Gantry&apos;s data directory.
-            </FieldDescription>
+            <FieldDescription>{text.composeDescription}</FieldDescription>
             <FieldError>{errs.compose?.[0]}</FieldError>
           </Field>
         )}
 
         <Field data-invalid={errs.env ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-stack-env`}>Environment variables</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-stack-env`}>{text.environmentVariables}</FieldLabel>
           <Textarea
             id={`${uid}-stack-env`}
             name="env"
             defaultValue={values.env ?? stack?.env ?? ""}
-            placeholder={"# .env, used for ${VARIABLE} substitution\nTAG=latest"}
+            placeholder={i18n.format(text.envPlaceholder, { variable: "${VARIABLE}" })}
             className="max-h-[40vh] min-h-24 font-mono text-xs leading-relaxed md:text-xs"
             spellCheck={false}
             autoCapitalize="off"
@@ -114,14 +116,16 @@ export function StackEditor({
           />
           {isGit ? (
             <FieldDescription>
-              Kept in Gantry, not in the repository (KEY=value per line), and used for <code>${"{VARIABLE}"}</code>{" "}
-              substitution in <code>{gitComposePath}</code>. Pass values into containers with{" "}
-              <code>environment:</code> entries such as <code>KEY: ${"{KEY}"}</code>.
+              {i18n.rich(text.gitEnvDescription, {
+                variable: <code>${"{VARIABLE}"}</code>,
+                file: <code>{gitComposePath}</code>,
+                environment: <code>environment:</code>,
+                example: <code>KEY: ${"{KEY}"}</code>,
+              })}
             </FieldDescription>
           ) : (
             <FieldDescription>
-              Written to the stack&apos;s <code>.env</code> (KEY=value per line). Use <code>env_file: .env</code> in a
-              service to pass them into containers.
+              {i18n.rich(text.envDescription, { file: <code>.env</code>, envFile: <code>env_file: .env</code> })}
             </FieldDescription>
           )}
           <FieldError>{errs.env?.[0]}</FieldError>
@@ -138,7 +142,7 @@ export function StackEditor({
             onClick={() => setIntent("deploy")}
           >
             <RocketIcon data-icon="inline-start" />
-            {pending && intent === "deploy" ? "Deploying…" : isNew ? "Create & deploy" : "Save & deploy"}
+            {pending && intent === "deploy" ? text.deploying : isNew ? text.createDeploy : text.saveDeploy}
           </Button>
           <Button
             type="submit"
@@ -149,7 +153,7 @@ export function StackEditor({
             onClick={() => setIntent("save")}
           >
             <SaveIcon data-icon="inline-start" />
-            {pending && intent === "save" ? "Saving…" : isNew ? "Create" : "Save"}
+            {pending && intent === "save" ? t.common.status.saving : isNew ? t.common.actions.create : t.common.actions.save}
           </Button>
         </Field>
       </FieldGroup>

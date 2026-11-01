@@ -1,0 +1,87 @@
+// Dashboard: header, setup checks, summary cards and the resource usage chart.
+export const dashboard = {
+  environmentTitle: "Environment: {name}",
+  serverInfo: "Docker {version} · {os} · {cpus} CPU · {memory} RAM",
+  setupChecks: {
+    title: "Setup checks",
+    summary: {
+      one: "One thing to sort out before relying on Gantry.",
+      other: "{count} things to sort out before relying on Gantry.",
+    },
+    fix: "Fix",
+    https: {
+      title: "Gantry is served over plain HTTP",
+      detail:
+        "Passwords and session cookies cross the network unencrypted. Put Gantry behind HTTPS, for example with the built-in proxy (Expose via proxy on Gantry's own container), and keep COOKIE_SECURE=auto.",
+      action: "Set up the proxy",
+    },
+    cookie: {
+      title: "Session cookies aren't marked Secure",
+      detail: "COOKIE_SECURE=false lets browsers send the session over HTTP too. Set it to auto (or true).",
+    },
+    trustProxy: {
+      title: "Behind a proxy, but TRUST_PROXY is off",
+      detail:
+        "Login rate limits can't tell clients apart and fall back to per-account limits. Set TRUST_PROXY=true if the proxy in front of Gantry is yours and sets X-Forwarded-For.",
+    },
+    backups: {
+      title: "No scheduled backups",
+      detail: "Environment credentials, users and stacks live only in Gantry's database. Schedule a daily encrypted backup.",
+      action: "Set up backups",
+    },
+    twoFactor: {
+      title: "Your account has no two-factor authentication",
+      detail: "Administrators control every Docker host here; protect the account with an authenticator app.",
+      action: "Turn on 2FA",
+    },
+    notifications: {
+      title: "Nobody gets alerts",
+      detail: "Crashed containers, unreachable hosts and failed backups are only listed in Gantry. Add a channel to be told.",
+      action: "Add a channel",
+    },
+  },
+  cards: {
+    containers: "Containers",
+    running: "{count} running",
+    manageContainers: "Manage containers",
+    stopped: "{stopped} stopped",
+    stoppedPaused: "{stopped} stopped, {paused} paused",
+    images: "Images",
+    manageImages: "Manage images",
+    imagesFailed: "Couldn't list images",
+    dangling: "{count} dangling, can be pruned",
+    noDangling: "No dangling images",
+    volumes: "Volumes",
+    manageVolumes: "Manage volumes",
+    volumesHint: "Persistent data stores",
+    networks: "Networks",
+    custom: "{count} custom",
+    manageNetworks: "Manage networks",
+    networksHint: "Including built-in bridge, host, none",
+  },
+  chart: {
+    title: "Resource usage",
+    cpu: "CPU",
+    memory: "Memory",
+    timeRange: "Time range",
+    ranges: {
+      live: "Live",
+      "1h": "1 hour",
+      "24h": "24 hours",
+      "7d": "7 days",
+    },
+    statsFailed: "Failed to load stats",
+    historyFailed: "Failed to load history",
+    cpuOf: "{value}% of {ncpu} CPU",
+    memoryOf: "{value} of {total}",
+    loadingHistory: "Loading history…",
+    noSamples: "No samples recorded yet",
+    avgPeak: "avg {avg} · peak {peak}",
+    avgPeakOf: "avg {avg} · peak {peak} of {total}",
+    runningContainers: "{count} running container(s)",
+    last: "Last {range}",
+    avg: "avg",
+    collecting: "Collecting history…",
+    collectingHelp: "Usage is recorded every {seconds}s. Check back in a few minutes, or switch to Live.",
+  },
+} as const

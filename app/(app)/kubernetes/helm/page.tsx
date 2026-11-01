@@ -6,18 +6,22 @@ import { HelmReleasesTable } from "@/components/gantry/kubernetes/helm"
 import { KubeUnavailable, loadKubePage, NamespaceFilter } from "@/components/gantry/kubernetes/page"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
+import { getI18n } from "@/lib/i18n/server"
 import { Button } from "@/components/ui/button"
 import { tryKube } from "@/lib/server/kubernetes"
 import { listReleases } from "@/lib/server/kubernetes/helm"
 
-export const metadata: Metadata = { title: "Helm releases" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.helm }
+}
 
 export default async function HelmPage() {
+  const { t } = await getI18n()
   const { page, blocked } = await loadKubePage()
   const header = (
     <PageHeader
-      title="Helm releases"
-      description="Releases installed with Helm 3 (read from their release records in the cluster)."
+      title={t.nav.pages.helm}
+      description={t.kubernetes.helm.description}
       actions={
         page ? (
           <>
@@ -25,7 +29,7 @@ export default async function HelmPage() {
               <Button variant="outline" size="sm" asChild>
                 <Link href="/kubernetes/charts/repositories">
                   <LibraryIcon data-icon="inline-start" />
-                  Chart repositories
+                  {t.kubernetes.helm.chartRepositories}
                 </Link>
               </Button>
             ) : null}
@@ -33,7 +37,7 @@ export default async function HelmPage() {
               <Button size="sm" asChild>
                 <Link href="/kubernetes/charts">
                   <PackagePlusIcon data-icon="inline-start" />
-                  Install chart
+                  {t.kubernetes.helm.installChart}
                 </Link>
               </Button>
             ) : null}

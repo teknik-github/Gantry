@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useI18n } from "@/lib/i18n/client"
 import { cn } from "@/lib/utils"
 
 /** A history entry as rendered (see lib/server/images/builds.ts). */
@@ -34,29 +35,32 @@ const STATUS_STYLES: Record<BuildHistoryRow["status"], string> = {
 }
 
 export function BuildStatusBadge({ status }: { status: BuildHistoryRow["status"] }) {
+  const { t } = useI18n()
   return (
     <Badge variant="outline" className="gap-1.5 px-1.5 text-muted-foreground capitalize">
       <span className={cn("size-2 rounded-full", STATUS_STYLES[status])} />
-      {status}
+      {t.images.builds.statuses[status]}
     </Badge>
   )
 }
 
 /** Recent builds of this environment: open the log, or prefill the form for a rebuild. */
 export function ImageBuildHistory({ builds }: { builds: BuildHistoryRow[] }) {
+  const i18n = useI18n()
+  const text = i18n.t.images.builds
   const [open, setOpen] = React.useState<BuildHistoryRow | null>(null)
-  if (!builds.length) return <p className="text-sm text-muted-foreground">No builds yet.</p>
+  if (!builds.length) return <p className="text-sm text-muted-foreground">{text.none}</p>
   return (
     <>
       <div className="overflow-hidden rounded-lg border">
-        <Table aria-label="Recent builds">
+        <Table aria-label={i18n.t.images.build.recentBuilds}>
           <TableHeader className="bg-muted">
             <TableRow>
-              <TableHead>Build</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Tags</TableHead>
-              <TableHead className="hidden @3xl/main:table-cell">Source</TableHead>
-              <TableHead className="hidden @xl/main:table-cell">Started</TableHead>
+              <TableHead>{text.build}</TableHead>
+              <TableHead>{text.status}</TableHead>
+              <TableHead>{text.tags}</TableHead>
+              <TableHead className="hidden @3xl/main:table-cell">{text.source}</TableHead>
+              <TableHead className="hidden @xl/main:table-cell">{text.started}</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -69,9 +73,9 @@ export function ImageBuildHistory({ builds }: { builds: BuildHistoryRow[] }) {
                 </TableCell>
                 <TableCell>
                   <div className="flex max-w-80 flex-wrap gap-1">
-                    {b.tags.map((t) => (
-                      <Mono key={t} className="rounded bg-muted px-1.5 py-0.5">
-                        {t}
+                    {b.tags.map((tag) => (
+                      <Mono key={tag} className="rounded bg-muted px-1.5 py-0.5">
+                        {tag}
                       </Mono>
                     ))}
                   </div>
@@ -80,20 +84,20 @@ export function ImageBuildHistory({ builds }: { builds: BuildHistoryRow[] }) {
                   {b.sourceSummary}
                 </TableCell>
                 <TableCell className="hidden text-muted-foreground @xl/main:table-cell">
-                  {b.startedLabel} by {b.username}
+                  {i18n.format(text.startedBy, { when: b.startedLabel, user: b.username })}
                   {b.duration ? ` · ${b.duration}` : ""}
                 </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => setOpen(b)} aria-label={`Log of build #${b.id}`}>
+                    <Button variant="ghost" size="sm" onClick={() => setOpen(b)} aria-label={i18n.format(text.logOf, { id: b.id })}>
                       <ScrollTextIcon data-icon="inline-start" />
-                      Log
+                      {text.log}
                     </Button>
                     {b.sourceKind !== "upload" ? (
                       <Button asChild variant="ghost" size="sm">
-                        <Link href={`/images/build?from=${b.id}`} aria-label={`Rebuild build #${b.id}`}>
+                        <Link href={`/images/build?from=${b.id}`} aria-label={i18n.format(text.rebuildOf, { id: b.id })}>
                           <RotateCcwIcon data-icon="inline-start" />
-                          Rebuild
+                          {text.rebuild}
                         </Link>
                       </Button>
                     ) : null}
@@ -114,6 +118,9 @@ export function ImageBuildHistory({ builds }: { builds: BuildHistoryRow[] }) {
 }
 
 function BuildLogDialogBody({ build }: { build: BuildHistoryRow }) {
+  const i18n = useI18n()
+  const { t, format } = i18n
+  const text = t.images.builds
   const [log, setLog] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   React.useEffect(() => {
@@ -122,21 +129,21 @@ function BuildLogDialogBody({ build }: { build: BuildHistoryRow }) {
       .then(async (res) => {
         const body = await res.json().catch(() => null)
         if (!alive) return
-        if (!res.ok) setError(body?.error ?? `Could not load the log (${res.status})`)
+        if (!res.ok) setError(body?.error ?? format(text.loadFailedStatus, { status: res.status }))
         else setLog(typeof body?.log === "string" ? body.log : "")
       })
-      .catch(() => alive && setError("Could not load the log"))
+      .catch(() => alive && setError(text.loadFailed))
     return () => {
       alive = false
     }
-  }, [build.id])
+  }, [build.id, text, format])
 
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Build #{build.id}</DialogTitle>
+        <DialogTitle>{format(text.title, { id: build.id })}</DialogTitle>
         <DialogDescription>
-          {build.sourceSummary} · {build.startedLabel} by {build.username}
+          {build.sourceSummary} · {format(text.startedBy, { when: build.startedLabel, user: build.username })}
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -149,10 +156,10 @@ function BuildLogDialogBody({ build }: { build: BuildHistoryRow }) {
       ) : (
         <pre
           role="log"
-          aria-label={`Log of build #${build.id}`}
+          aria-label={format(text.logOf, { id: build.id })}
           className="max-h-[60vh] min-h-40 overflow-auto rounded-lg border bg-dock p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-slate-200"
         >
-          {log === null ? "Loading…" : log || "No output."}
+          {log === null ? t.common.status.loading : log || text.noOutput}
         </pre>
       )}
     </>

@@ -8,10 +8,13 @@ import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardAction, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { getI18n } from "@/lib/i18n/server"
 import { podsByPhase, toNodeRows } from "@/lib/kubernetes/rows"
 import { KubeError } from "@/lib/server/kubernetes/client"
 
-export const metadata: Metadata = { title: "Kubernetes" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.kubernetes }
+}
 
 /** Settles a call: the value, or the API's message (e.g. forbidden by RBAC). */
 async function settle<T>(promise: Promise<T>): Promise<{ data: T; error?: never } | { data?: never; error: string }> {
@@ -24,11 +27,13 @@ async function settle<T>(promise: Promise<T>): Promise<{ data: T; error?: never 
 }
 
 export default async function KubernetesOverviewPage() {
+  const { t, format } = await getI18n()
+  const k = t.kubernetes.overview
   const { page, blocked } = await loadKubePage()
   if (!page) {
     return (
       <PageBody>
-        <PageHeader title="Kubernetes" />
+        <PageHeader title={t.nav.pages.kubernetes} />
         {blocked}
       </PageBody>
     )
@@ -46,7 +51,7 @@ export default async function KubernetesOverviewPage() {
 
   const header = (
     <PageHeader
-      title={`Cluster: ${env.name}`}
+      title={format(k.cluster, { name: env.name })}
       description={version.data ? `Kubernetes ${version.data.gitVersion} · ${env.url}` : env.url}
       actions={<NamespaceFilter page={page} />}
     />
@@ -64,7 +69,6 @@ export default async function KubernetesOverviewPage() {
 
   const nodeRows = nodes.data ? toNodeRows(nodes.data) : []
   const phases = pods.data ? podsByPhase(pods.data) : null
-  const scope = namespace ? `in ${namespace}` : "in all namespaces"
 
   return (
     <PageBody>
@@ -72,7 +76,7 @@ export default async function KubernetesOverviewPage() {
       <div className="grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4 dark:*:data-[slot=card]:bg-card">
         <Card className="@container/card" data-testid="card-nodes">
           <CardHeader>
-            <CardDescription>Nodes ready</CardDescription>
+            <CardDescription>{k.nodesReady}</CardDescription>
             <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
               {nodes.data ? `${nodeRows.filter((n) => n.ready).length}/${nodeRows.length}` : "—"}
             </CardTitle>
@@ -86,7 +90,7 @@ export default async function KubernetesOverviewPage() {
         </Card>
         <Card className="@container/card" data-testid="card-pods">
           <CardHeader>
-            <CardDescription>Pods {scope}</CardDescription>
+            <CardDescription>{namespace ? format(k.podsIn, { namespace }) : k.podsInAll}</CardDescription>
             <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
               {pods.data ? pods.data.length : "—"}
             </CardTitle>
@@ -94,52 +98,57 @@ export default async function KubernetesOverviewPage() {
               {phases ? (
                 <Badge variant="outline">
                   <span className="size-2 rounded-full bg-emerald-500" />
-                  {phases.Running} running
+                  {format(k.running, { count: phases.Running })}
                 </Badge>
               ) : null}
             </CardAction>
           </CardHeader>
           <CardFooter className="flex-col items-start gap-1.5 text-sm">
             <Link href="/kubernetes/pods" className="flex gap-2 font-medium hover:underline">
-              Pods <CuboidIcon className="size-4" />
+              {t.nav.pages.pods} <CuboidIcon className="size-4" />
             </Link>
             <div className="text-muted-foreground">
               {phases
-                ? `${phases.Pending} pending, ${phases.Succeeded} succeeded, ${phases.Failed} failed${phases.Unknown ? `, ${phases.Unknown} unknown` : ""}`
+                ? format(phases.Unknown ? k.phasesUnknown : k.phases, {
+                    pending: phases.Pending,
+                    succeeded: phases.Succeeded,
+                    failed: phases.Failed,
+                    unknown: phases.Unknown,
+                  })
                 : pods.error}
             </div>
           </CardFooter>
         </Card>
         <Card className="@container/card" data-testid="card-namespaces">
           <CardHeader>
-            <CardDescription>Namespaces</CardDescription>
+            <CardDescription>{t.nav.pages.namespaces}</CardDescription>
             <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
               {namespaces.data ? namespaces.data.length : "—"}
             </CardTitle>
           </CardHeader>
           <CardFooter className="flex-col items-start gap-1.5 text-sm">
             <Link href="/kubernetes/namespaces" className="flex gap-2 font-medium hover:underline">
-              Namespaces <FolderTreeIcon className="size-4" />
+              {t.nav.pages.namespaces} <FolderTreeIcon className="size-4" />
             </Link>
             {namespaces.error ? <div className="text-muted-foreground">{namespaces.error}</div> : null}
           </CardFooter>
         </Card>
         <Card className="@container/card" data-testid="card-warnings">
           <CardHeader>
-            <CardDescription>Warning events {scope}</CardDescription>
+            <CardDescription>{namespace ? format(k.warningsIn, { namespace }) : k.warningsInAll}</CardDescription>
             <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
               {warnings.data ? warnings.data.length : "—"}
             </CardTitle>
           </CardHeader>
           <CardFooter className="flex-col items-start gap-1.5 text-sm">
             <Link href="/kubernetes/events" className="flex gap-2 font-medium hover:underline">
-              Events <TriangleAlertIcon className="size-4" />
+              {t.nav.pages.events} <TriangleAlertIcon className="size-4" />
             </Link>
             {warnings.error ? <div className="text-muted-foreground">{warnings.error}</div> : null}
           </CardFooter>
         </Card>
       </div>
-      <PageHeader title="Nodes" />
+      <PageHeader title={k.nodes} />
       {nodes.error !== undefined ? <KubeUnavailable message={nodes.error} /> : <NodesTable data={nodeRows} />}
     </PageBody>
   )

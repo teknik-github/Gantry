@@ -2,6 +2,8 @@
 
 import { z } from "zod"
 
+import type { I18n, Messages } from "@/lib/i18n"
+import { getI18n } from "@/lib/i18n/server"
 import { normalizeRegistryAddress, type RegistryCredentials } from "@/lib/registry"
 import { runAction, UserError } from "@/lib/server/action"
 import type { DockerApi } from "@/lib/server/docker/api"
@@ -18,30 +20,33 @@ import { fieldErrors, type ActionState } from "@/lib/validation"
 
 const idSchema = z.coerce.number().int().positive()
 
-const registrySchema = z.object({
-  name: z.string().trim().min(1, "Name is required").max(100),
-  address: z
-    .string()
-    .trim()
-    .min(1, "Address is required")
-    .max(255)
-    .transform((v, ctx) => {
-      const address = normalizeRegistryAddress(v)
-      if (!address) {
-        ctx.addIssue({ code: "custom", message: "Use a registry host, e.g. ghcr.io or registry.example.com:5000" })
-        return z.NEVER
-      }
-      return address
-    }),
-  username: z.string().trim().min(1, "Username is required").max(255),
-  password: z.string().max(4096, "Too long"),
-  verify: z.enum(["on"]).optional(),
-})
+function registrySchema(t: Messages) {
+  const e = t.registries.errors
+  return z.object({
+    name: z.string().trim().min(1, e.nameRequired).max(100),
+    address: z
+      .string()
+      .trim()
+      .min(1, e.addressRequired)
+      .max(255)
+      .transform((v, ctx) => {
+        const address = normalizeRegistryAddress(v)
+        if (!address) {
+          ctx.addIssue({ code: "custom", message: e.addressInvalid })
+          return z.NEVER
+        }
+        return address
+      }),
+    username: z.string().trim().min(1, e.usernameRequired).max(255),
+    password: z.string().max(4096, e.tooLong),
+    verify: z.enum(["on"]).optional(),
+  })
+}
 
-function parseForm(formData: FormData) {
+function parseForm(formData: FormData, t: Messages) {
   const raw: Record<string, string> = {}
   for (const [k, v] of formData) if (typeof v === "string") raw[k] = v
-  return registrySchema.safeParse(raw)
+  return registrySchema(t).safeParse(raw)
 }
 
 /** Echoed back so the dialog keeps what was typed (never the password). */
@@ -52,57 +57,61 @@ function echo(formData: FormData) {
 }
 
 /** Logs in through the current environment's daemon; a failure becomes a field error. */
-async function verifyLogin(api: DockerApi, cred: RegistryCredentials) {
+async function verifyLogin(api: DockerApi, cred: RegistryCredentials, { t, format }: I18n) {
   try {
     await api.registryLogin(cred)
   } catch (err) {
-    throw new UserError(`Login to ${cred.address} failed: ${(err as Error).message}`)
+    throw new UserError(format(t.registries.errors.loginFailed, { address: cred.address, message: (err as Error).message }))
   }
 }
 
 export async function createRegistry(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const parsed = parseForm(formData)
+  const i18n = await getI18n()
+  const { t, format } = i18n
+  const parsed = parseForm(formData, t)
   if (!parsed.success) return { ...fieldErrors(parsed.error), values: echo(formData) }
   const v = parsed.data
-  if (!v.password) return { error: "Please fix the highlighted fields", fieldErrors: { password: ["Password or token is required"] }, values: echo(formData) }
+  if (!v.password) return { error: t.common.errors.fixFields, fieldErrors: { password: [t.registries.errors.passwordRequired] }, values: echo(formData) }
 
   const res = await runAction("admin", "registry.create", v.address, async ({ docker }) => {
-    if (await findRegistryByAddress(v.address)) throw new UserError(`A login for ${v.address} already exists; edit it instead`)
-    if (v.verify === "on") await verifyLogin(await docker(), { address: v.address, username: v.username, password: v.password })
+    if (await findRegistryByAddress(v.address)) throw new UserError(format(t.registries.errors.exists, { address: v.address }))
+    if (v.verify === "on") await verifyLogin(await docker(), { address: v.address, username: v.username, password: v.password }, i18n)
     await insertRegistry({ name: v.name, address: v.address, username: v.username, password: v.password })
-    return `Registry ${v.name} added`
+    return format(t.registries.added, { name: v.name })
   })
   return res.ok ? res : { ...res, values: echo(formData) }
 }
 
 export async function updateRegistry(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const i18n = await getI18n()
+  const { t, format } = i18n
   const id = idSchema.safeParse(formData.get("id"))
-  if (!id.success) return { error: "Invalid registry" }
-  const parsed = parseForm(formData)
+  if (!id.success) return { error: t.registries.errors.invalid }
+  const parsed = parseForm(formData, t)
   if (!parsed.success) return { ...fieldErrors(parsed.error), values: echo(formData) }
   const v = parsed.data
 
   const res = await runAction("admin", "registry.update", v.address, async ({ docker }) => {
     const other = await findRegistryByAddress(v.address)
-    if (other && other.id !== id.data) throw new UserError(`${other.name} already uses ${v.address}`)
+    if (other && other.id !== id.data) throw new UserError(format(t.registries.errors.addressInUse, { name: other.name, address: v.address }))
     let stored: RegistryCredentials | null
     try {
       stored = await getRegistryCredentials(id.data)
     } catch (err) {
       if (!(err instanceof SecretDecryptError) || v.password) throw err
-      throw new UserError("The stored password can't be decrypted (the Gantry secret changed). Enter it again.")
+      throw new UserError(t.registries.errors.cannotDecrypt)
     }
-    if (!stored) throw new UserError("Registry not found")
+    if (!stored) throw new UserError(t.registries.errors.notFound)
     // An empty password field keeps the stored one.
     const password = v.password || stored.password
-    if (v.verify === "on") await verifyLogin(await docker(), { address: v.address, username: v.username, password })
+    if (v.verify === "on") await verifyLogin(await docker(), { address: v.address, username: v.username, password }, i18n)
     await updateRegistryRecord(id.data, {
       name: v.name,
       address: v.address,
       username: v.username,
       password: v.password ? v.password : undefined,
     })
-    return `Registry ${v.name} saved`
+    return format(t.registries.saved, { name: v.name })
   })
   return res.ok ? res : { ...res, values: echo(formData) }
 }
@@ -113,18 +122,21 @@ async function registryLabel(id: number) {
 }
 
 export async function deleteRegistry(id: number): Promise<ActionState> {
+  const { t } = await getI18n()
   const parsed = idSchema.safeParse(id)
-  if (!parsed.success) return { error: "Invalid registry" }
+  if (!parsed.success) return { error: t.registries.errors.invalid }
   return runAction("admin", "registry.delete", await registryLabel(parsed.data), async () => {
     await deleteRegistryRecord(parsed.data)
-    return "Registry removed"
+    return t.registries.removed
   })
 }
 
 /** Tries the stored login against the registry (through the current environment). */
 export async function testRegistry(id: number): Promise<ActionState> {
+  const i18n = await getI18n()
+  const { t, format } = i18n
   const parsed = idSchema.safeParse(id)
-  if (!parsed.success) return { error: "Invalid registry" }
+  if (!parsed.success) return { error: t.registries.errors.invalid }
   return runAction("admin", "registry.test", await registryLabel(parsed.data), async ({ docker }) => {
     let cred: RegistryCredentials | null
     try {
@@ -133,8 +145,8 @@ export async function testRegistry(id: number): Promise<ActionState> {
       if (err instanceof SecretDecryptError) throw new UserError(err.message)
       throw err
     }
-    if (!cred) throw new UserError("Registry not found")
-    await verifyLogin(await docker(), cred)
-    return `Logged in to ${cred.address} as ${cred.username}`
+    if (!cred) throw new UserError(t.registries.errors.notFound)
+    await verifyLogin(await docker(), cred, i18n)
+    return format(t.registries.loggedIn, { address: cred.address, username: cred.username })
   })
 }

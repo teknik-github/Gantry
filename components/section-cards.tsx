@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { getI18n } from "@/lib/i18n/server"
 
 export type DashboardSummary = {
   containers: { total: number; running: number; stopped: number; paused: number }
@@ -22,8 +23,10 @@ export type DashboardSummary = {
  * The four summary cards. The images card is passed in (usually under
  * Suspense): listing images can take seconds with the containerd store.
  */
-export function SectionCards({ summary, images }: { summary: DashboardSummary; images: React.ReactNode }) {
+export async function SectionCards({ summary, images }: { summary: DashboardSummary; images: React.ReactNode }) {
   const { containers, volumes, networks } = summary
+  const { t, format } = await getI18n()
+  const text = t.dashboard.cards
 
   return (
     <div className="grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:relative *:data-[slot=card]:overflow-hidden *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
@@ -31,7 +34,7 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
         <ContainerStripe tone="harbor" />
         <CardHeader>
           <CardDescription>
-          <Kind tone="harbor" icon={<BoxIcon />}>Containers</Kind>
+          <Kind tone="harbor" icon={<BoxIcon />}>{text.containers}</Kind>
         </CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
             {containers.total}
@@ -39,16 +42,18 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
           <CardAction>
             <Badge variant="outline">
               <span className="size-2 rounded-full bg-emerald-500" />
-              {containers.running} running
+              {format(text.running, { count: containers.running })}
             </Badge>
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-1 flex-col items-start gap-1.5 text-sm">
           <Link href="/containers" className="line-clamp-1 flex gap-2 font-medium hover:underline">
-            Manage containers <BoxIcon className="size-4" />
+            {text.manageContainers} <BoxIcon className="size-4" />
           </Link>
           <div className="text-muted-foreground">
-            {containers.stopped} stopped{containers.paused ? `, ${containers.paused} paused` : ""}
+            {containers.paused
+              ? format(text.stoppedPaused, { stopped: containers.stopped, paused: containers.paused })
+              : format(text.stopped, { stopped: containers.stopped })}
           </div>
         </CardFooter>
       </Card>
@@ -57,7 +62,7 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
         <ContainerStripe tone="rust" />
         <CardHeader>
           <CardDescription>
-          <Kind tone="rust" icon={<HardDriveIcon />}>Volumes</Kind>
+          <Kind tone="rust" icon={<HardDriveIcon />}>{text.volumes}</Kind>
         </CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
             {volumes.total}
@@ -65,42 +70,44 @@ export function SectionCards({ summary, images }: { summary: DashboardSummary; i
         </CardHeader>
         <CardFooter className="flex-1 flex-col items-start gap-1.5 text-sm">
           <Link href="/volumes" className="line-clamp-1 flex gap-2 font-medium hover:underline">
-            Manage volumes <HardDriveIcon className="size-4" />
+            {text.manageVolumes} <HardDriveIcon className="size-4" />
           </Link>
-          <div className="text-muted-foreground">Persistent data stores</div>
+          <div className="text-muted-foreground">{text.volumesHint}</div>
         </CardFooter>
       </Card>
       <Card className="@container/card">
         <ContainerStripe tone="sea" />
         <CardHeader>
           <CardDescription>
-          <Kind tone="sea" icon={<NetworkIcon />}>Networks</Kind>
+          <Kind tone="sea" icon={<NetworkIcon />}>{text.networks}</Kind>
         </CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
             {networks.total}
           </CardTitle>
           <CardAction>
-            <Badge variant="outline">{networks.custom} custom</Badge>
+            <Badge variant="outline">{format(text.custom, { count: networks.custom })}</Badge>
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-1 flex-col items-start gap-1.5 text-sm">
           <Link href="/networks" className="line-clamp-1 flex gap-2 font-medium hover:underline">
-            Manage networks <NetworkIcon className="size-4" />
+            {text.manageNetworks} <NetworkIcon className="size-4" />
           </Link>
-          <div className="text-muted-foreground">Including built-in bridge, host, none</div>
+          <div className="text-muted-foreground">{text.networksHint}</div>
         </CardFooter>
       </Card>
     </div>
   )
 }
 
-export function ImagesCard({ images }: { images: { total: number; size: string; dangling: number } | null }) {
+export async function ImagesCard({ images }: { images: { total: number; size: string; dangling: number } | null }) {
+  const { t, format } = await getI18n()
+  const text = t.dashboard.cards
   return (
     <Card className="@container/card">
       <ContainerStripe tone="steel" />
       <CardHeader>
         <CardDescription>
-          <Kind tone="steel" icon={<LayersIcon />}>Images</Kind>
+          <Kind tone="steel" icon={<LayersIcon />}>{text.images}</Kind>
         </CardDescription>
         <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
           {images ? images.total : "—"}
@@ -113,27 +120,28 @@ export function ImagesCard({ images }: { images: { total: number; size: string; 
       </CardHeader>
       <CardFooter className="flex-1 flex-col items-start gap-1.5 text-sm">
         <Link href="/images" className="line-clamp-1 flex gap-2 font-medium hover:underline">
-          Manage images <LayersIcon className="size-4" />
+          {text.manageImages} <LayersIcon className="size-4" />
         </Link>
         <div className="text-muted-foreground">
           {!images
-            ? "Couldn't list images"
+            ? text.imagesFailed
             : images.dangling
-              ? `${images.dangling} dangling, can be pruned`
-              : "No dangling images"}
+              ? format(text.dangling, { count: images.dangling })
+              : text.noDangling}
         </div>
       </CardFooter>
     </Card>
   )
 }
 
-export function ImagesCardSkeleton() {
+export async function ImagesCardSkeleton() {
+  const { t } = await getI18n()
   return (
     <Card className="@container/card" aria-busy="true">
       <ContainerStripe tone="steel" />
       <CardHeader>
         <CardDescription>
-          <Kind tone="steel" icon={<LayersIcon />}>Images</Kind>
+          <Kind tone="steel" icon={<LayersIcon />}>{t.dashboard.cards.images}</Kind>
         </CardDescription>
         <Skeleton className="h-8 w-16" />
       </CardHeader>

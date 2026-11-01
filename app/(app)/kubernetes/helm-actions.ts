@@ -15,6 +15,8 @@ import {
   type ChartSource,
   type ChartVersion,
 } from "@/lib/kubernetes/helm-charts"
+import type { I18n } from "@/lib/i18n"
+import { getI18n } from "@/lib/i18n/server"
 import { namespaceSchema } from "@/lib/kubernetes/names"
 import { authorize, inEnvironment, runAction, UserError } from "@/lib/server/action"
 import { audit } from "@/lib/server/audit"
@@ -50,19 +52,20 @@ const envIdSchema = z.number().int().positive()
 
 /** FormDialog action: name, url, username, password. */
 export async function addHelmRepository(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const name = repoNameSchema.safeParse(formData.get("name") ?? "")
   const username = String(formData.get("username") ?? "").trim()
   const password = String(formData.get("password") ?? "")
   const errors: Record<string, string[]> = {}
-  if (!name.success) errors.name = [name.error.issues[0]?.message ?? "Invalid name"]
+  if (!name.success) errors.name = [name.error.issues[0]?.message ?? t.kubernetes.actions.invalidName]
   const credError = checkRepoCredentials(username, password)
   if (credError) errors[username ? "password" : "username"] = [credError]
   const url = validateRepoUrl(String(formData.get("url") ?? ""), { withCredentials: Boolean(username || password) })
   if (!url.ok) errors.url = [url.error]
-  if (Object.keys(errors).length || !name.success || !url.ok) return { error: "Please fix the highlighted fields", fieldErrors: errors }
+  if (Object.keys(errors).length || !name.success || !url.ok) return { error: t.common.errors.fixFields, fieldErrors: errors }
 
   return runAction("admin", "kubernetes.helm.repo.add", `${name.data} (${url.value.url})`, async () => {
-    if (await findHelmRepoByName(name.data)) throw new UserError(`A repository named "${name.data}" exists already`)
+    if (await findHelmRepoByName(name.data)) throw new UserError(format(t.kubernetes.actions.repoExists, { name: name.data }))
     const credentials = username ? { username, password } : null
     // Index repositories are checked by downloading their index; registries can't be listed.
     try {
@@ -72,18 +75,19 @@ export async function addHelmRepository(_prev: ActionState, formData: FormData):
       throw err
     }
     await insertHelmRepo({ name: name.data, url: url.value.url, credentials })
-    return `Repository ${name.data} added`
+    return format(t.kubernetes.actions.repoAdded, { name: name.data })
   })
 }
 
 export async function removeHelmRepository(id: number): Promise<ActionState> {
-  if (!Number.isSafeInteger(id) || id < 1) return { error: "Invalid repository" }
+  const { t, format } = await getI18n()
+  if (!Number.isSafeInteger(id) || id < 1) return { error: t.kubernetes.actions.invalidRepository }
   const repo = await getHelmRepo(id).catch(() => null)
   return runAction("admin", "kubernetes.helm.repo.remove", repo?.name ?? String(id), async () => {
-    if (!repo) throw new UserError("The repository no longer exists")
+    if (!repo) throw new UserError(t.kubernetes.actions.repoGone)
     await deleteHelmRepo(id)
     await dropIndex(repo.name)
-    return `Repository ${repo.name} removed`
+    return format(t.kubernetes.actions.repoRemoved, { name: repo.name })
   })
 }
 
@@ -91,16 +95,17 @@ export async function removeHelmRepository(id: number): Promise<ActionState> {
 
 type QueryResult<T> = { data: T; error?: never } | { data?: never; error: string }
 
-async function query<T>(environmentId: number, fn: (isAdmin: boolean) => Promise<T>): Promise<QueryResult<T>> {
-  if (!envIdSchema.safeParse(environmentId).success) return { error: "Invalid environment" }
+async function query<T>(environmentId: number, fn: (isAdmin: boolean, t: I18n["t"]) => Promise<T>): Promise<QueryResult<T>> {
+  const { t } = await getI18n()
+  if (!envIdSchema.safeParse(environmentId).success) return { error: t.kubernetes.actions.invalidEnvironment }
   const auth = await authorize(inEnvironment("manage", environmentId))
   if ("error" in auth) return { error: auth.error }
   try {
-    return { data: await fn(auth.user.role === "admin") }
+    return { data: await fn(auth.user.role === "admin", t) }
   } catch (err) {
     if (err instanceof KubeError || err instanceof UserError) return { error: err.message }
     console.error("[gantry] helm query failed", err)
-    return { error: "Something went wrong. Check the server logs." }
+    return { error: t.common.errors.somethingWentWrong }
   }
 }
 
@@ -114,16 +119,16 @@ const sourceSchema = z.discriminatedUnion("type", [
  * contact that registry, so for non-administrators they must lie under an
  * OCI repository an administrator added (no arbitrary hosts).
  */
-async function parseSource(input: unknown, isAdmin: boolean): Promise<ChartSource> {
+async function parseSource(input: unknown, isAdmin: boolean, t: I18n["t"]): Promise<ChartSource> {
   const parsed = sourceSchema.safeParse(input)
-  if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Pick a chart")
+  if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? t.kubernetes.actions.pickChart)
   if (parsed.data.type === "oci") {
     const ref = validateOciRef(parsed.data.ref)
     if (!ref.ok) throw new UserError(ref.error)
     if (!isAdmin) {
       const repo = await helmRepoForOciRef(ref.value)
       if (!repo || !ref.value.startsWith(`${repo.url}/`)) {
-        throw new UserError("Only administrators can install from OCI registries that aren't added as chart repositories")
+        throw new UserError(t.kubernetes.actions.ociAdminsOnly)
       }
     }
     return { type: "oci", ref: ref.value }
@@ -131,31 +136,31 @@ async function parseSource(input: unknown, isAdmin: boolean): Promise<ChartSourc
   return parsed.data
 }
 
-function parseVersion(input: unknown): string {
+function parseVersion(input: unknown, t: I18n["t"]): string {
   const v = chartVersionSchema.safeParse(input ?? "")
-  if (!v.success) throw new UserError(v.error.issues[0]?.message ?? "Invalid version")
+  if (!v.success) throw new UserError(v.error.issues[0]?.message ?? t.kubernetes.actions.invalidVersion)
   return v.data
 }
 
 export async function listHelmCharts(environmentId: number, repoId: number, refresh = false): Promise<QueryResult<ChartVersion[]>> {
-  return query(environmentId, () => {
-    if (!Number.isSafeInteger(repoId) || repoId < 1) throw new UserError("Pick a repository")
+  return query(environmentId, (_isAdmin, t) => {
+    if (!Number.isSafeInteger(repoId) || repoId < 1) throw new UserError(t.kubernetes.actions.pickRepository)
     return listRepoCharts(repoId, refresh)
   })
 }
 
 export async function listHelmChartVersions(environmentId: number, repoId: number, chart: string): Promise<QueryResult<ChartVersion[]>> {
-  return query(environmentId, () => {
-    if (!Number.isSafeInteger(repoId) || repoId < 1) throw new UserError("Pick a repository")
+  return query(environmentId, (_isAdmin, t) => {
+    if (!Number.isSafeInteger(repoId) || repoId < 1) throw new UserError(t.kubernetes.actions.pickRepository)
     const name = chartNameSchema.safeParse(chart)
-    if (!name.success) throw new UserError("Invalid chart name")
+    if (!name.success) throw new UserError(t.kubernetes.actions.invalidChartName)
     return listChartVersions(repoId, name.data)
   })
 }
 
 /** The chart's default values (public: part of the chart). */
 export async function loadHelmChartValues(environmentId: number, source: ChartSource, version: string): Promise<QueryResult<string>> {
-  return query(environmentId, async (isAdmin) => showChartValues(await parseSource(source, isAdmin), parseVersion(version)))
+  return query(environmentId, async (isAdmin, t) => showChartValues(await parseSource(source, isAdmin, t), parseVersion(version, t)))
 }
 
 // -------------------------------------------------------------- operations
@@ -176,11 +181,11 @@ const releaseRefSchema = z.object({
 
 type ReleaseRef = z.infer<typeof releaseRefSchema>
 
-function parse<T>(schema: z.ZodType<T>, input: unknown): { data: T; error?: never } | { data?: never; error: string } {
+function parse<T>(schema: z.ZodType<T>, input: unknown, t: I18n["t"]): { data: T; error?: never } | { data?: never; error: string } {
   const parsed = schema.safeParse(input)
   if (parsed.success) return { data: parsed.data }
   const issue = parsed.error.issues[0]
-  return { error: issue ? `${issue.path.join(".") || "input"}: ${issue.message}` : "Invalid input" }
+  return { error: issue ? `${issue.path.join(".") || "input"}: ${issue.message}` : t.kubernetes.actions.invalidInput }
 }
 
 async function operationContext(ref: ReleaseRef, user: { id: number; username: string; role: "admin" | "user" }, failedAction: string): Promise<OperationContext> {
@@ -210,9 +215,10 @@ export async function installHelmChart(input: {
   atomic: boolean
   timeoutMinutes: number
 }): Promise<HelmOperationState> {
-  const ref = parse(releaseRefSchema, input)
+  const { t, format } = await getI18n()
+  const ref = parse(releaseRefSchema, input, t)
   if (ref.error !== undefined) return { error: ref.error }
-  const opts = parse(optionsSchema, input)
+  const opts = parse(optionsSchema, input, t)
   if (opts.error !== undefined) return { error: opts.error }
   const values = checkValuesYaml(typeof input.values === "string" ? input.values : "")
   if (!values.ok) return { error: values.error, fieldErrors: { values: [values.error] } }
@@ -224,8 +230,8 @@ export async function installHelmChart(input: {
     "kubernetes.helm.install",
     `${ref.data.namespace}/${ref.data.release} (${label}${input.version ? ` ${input.version}` : ""})`.slice(0, 250),
     async ({ user }) => {
-      const source = await parseSource(input.source, user.role === "admin")
-      const version = parseVersion(input.version)
+      const source = await parseSource(input.source, user.role === "admin", t)
+      const version = parseVersion(input.version, t)
       const ctx = await operationContext(ref.data, user, "kubernetes.helm.install.failed")
       operation = await startInstall(ctx, {
         source,
@@ -235,7 +241,7 @@ export async function installHelmChart(input: {
         ...opts.data,
         hideNotes: user.role !== "admin",
       })
-      return `Installing ${ref.data.release}…`
+      return format(t.kubernetes.actions.installing, { name: ref.data.release })
     }
   )
   return { ...res, operation }
@@ -257,9 +263,10 @@ export async function upgradeHelmRelease(input: {
   atomic: boolean
   timeoutMinutes: number
 }): Promise<HelmOperationState> {
-  const ref = parse(releaseRefSchema, input)
+  const { t, format } = await getI18n()
+  const ref = parse(releaseRefSchema, input, t)
   if (ref.error !== undefined) return { error: ref.error }
-  const opts = parse(optionsSchema, input)
+  const opts = parse(optionsSchema, input, t)
   if (opts.error !== undefined) return { error: opts.error }
 
   let operation: HelmOperationInfo | undefined
@@ -271,14 +278,14 @@ export async function upgradeHelmRelease(input: {
       let values: string | null = null
       if (user.role === "admin" && typeof input.values === "string") {
         const checked = checkValuesYaml(input.values)
-        if (!checked.ok) throw new UserError(`Values: ${checked.error}`)
+        if (!checked.ok) throw new UserError(format(t.kubernetes.actions.values, { error: checked.error }))
         values = checked.value
       }
-      const source = await parseSource(input.source, user.role === "admin")
-      const version = parseVersion(input.version)
+      const source = await parseSource(input.source, user.role === "admin", t)
+      const version = parseVersion(input.version, t)
       const ctx = await operationContext(ref.data, user, "kubernetes.helm.upgrade.failed")
       operation = await startUpgrade(ctx, { source, version, values, ...opts.data, hideNotes: user.role !== "admin" })
-      return `Upgrading ${ref.data.release}…`
+      return format(t.kubernetes.actions.upgrading, { name: ref.data.release })
     }
   )
   return { ...res, operation }
@@ -292,9 +299,10 @@ export async function rollbackHelmRelease(input: {
   wait: boolean
   timeoutMinutes: number
 }): Promise<HelmOperationState> {
-  const ref = parse(releaseRefSchema, input)
+  const { t, format } = await getI18n()
+  const ref = parse(releaseRefSchema, input, t)
   if (ref.error !== undefined) return { error: ref.error }
-  const opts = parse(optionsSchema.omit({ atomic: true }).extend({ revision: z.number().int().positive() }), input)
+  const opts = parse(optionsSchema.omit({ atomic: true }).extend({ revision: z.number().int().positive() }), input, t)
   if (opts.error !== undefined) return { error: opts.error }
 
   let operation: HelmOperationInfo | undefined
@@ -305,7 +313,7 @@ export async function rollbackHelmRelease(input: {
     async ({ user }) => {
       const ctx = await operationContext(ref.data, user, "kubernetes.helm.rollback.failed")
       operation = await startRollback(ctx, opts.data)
-      return `Rolling ${ref.data.release} back to revision ${opts.data.revision}…`
+      return format(t.kubernetes.actions.rollingBack, { name: ref.data.release, revision: opts.data.revision })
     }
   )
   return { ...res, operation }
@@ -317,21 +325,22 @@ export async function rollbackHelmRelease(input: {
  * release records directly (no hooks).
  */
 export async function uninstallHelmRelease(input: { environmentId: number; namespace: string; name: string }): Promise<ActionState> {
-  const ref = parse(releaseRefSchema, { ...input, release: input?.name })
-  if (ref.error !== undefined) return { error: "Invalid release" }
+  const { t, format } = await getI18n()
+  const ref = parse(releaseRefSchema, { ...input, release: input?.name }, t)
+  if (ref.error !== undefined) return { error: t.kubernetes.actions.invalidRelease }
   const r = ref.data
   return runAction(inEnvironment("manage", r.environmentId), "kubernetes.helm.uninstall", `${r.namespace}/${r.release}`, async () => {
     const { env, api } = await getKube(r.environmentId)
     if (await helmVersion()) {
       const res = await helmUninstall({ environmentId: env.id, target: kubeTarget(env), namespace: r.namespace, release: r.release })
       if (!res.ok) throw new UserError(res.message)
-      return res.message
+      return format(t.kubernetes.actions.uninstalled, { name: r.release })
     }
     const res = await uninstallRelease(api, r.namespace, r.release)
     if (res.failed.length) {
-      throw new UserError(`Some objects could not be deleted, so the release was kept: ${res.failed.join("; ")}`)
+      throw new UserError(format(t.kubernetes.actions.uninstallFailed, { failed: res.failed.join("; ") }))
     }
-    const kept = res.kept.length ? ` (kept by resource policy: ${res.kept.join(", ")})` : ""
-    return `Release ${r.release} uninstalled without hooks (helm CLI not available): ${res.deleted} object(s) deleted${kept}`
+    const kept = res.kept.length ? format(t.kubernetes.actions.keptByPolicy, { kept: res.kept.join(", ") }) : ""
+    return format(t.kubernetes.actions.uninstalledWithoutHooks, { name: r.release, count: res.deleted, kept })
   })
 }

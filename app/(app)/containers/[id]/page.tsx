@@ -14,7 +14,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { formatDate, shortId } from "@/lib/format"
+import { shortId } from "@/lib/format"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import {
   composeProject,
@@ -32,6 +33,9 @@ import { tryDocker } from "@/lib/server/views"
 
 export default async function ContainerPage({ params, searchParams }: PageProps<"/containers/[id]">) {
   await requireUser()
+  const i18n = await getI18n()
+  const { t, format } = i18n
+  const text = t.containers.detail
   const { id } = await params
   const { tab } = await searchParams
   if (!/^[a-f0-9]{12,64}$/.test(id)) notFound()
@@ -73,7 +77,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
           <Button asChild variant="link" size="sm" className="h-auto w-fit p-0 text-muted-foreground">
             <Link href="/containers">
               <ArrowLeftIcon data-icon="inline-start" />
-              Containers
+              {t.nav.pages.containers}
             </Link>
           </Button>
           <h2 className="flex items-center gap-3 text-xl font-semibold tracking-tight">
@@ -93,11 +97,11 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
       <div className="grid gap-4 px-4 lg:px-6 @4xl/main:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Overview</CardTitle>
+            <CardTitle>{text.overview}</CardTitle>
           </CardHeader>
           <CardContent>
-            <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm">
-              <Row label="Image">
+            <dl className="grid grid-cols-[minmax(6rem,8rem)_1fr] gap-x-4 gap-y-2 text-sm">
+              <Row label={t.common.fields.image}>
                 <span className="flex flex-wrap items-center gap-1.5">
                   <Mono>{c.Config.Image}</Mono>
                   {update?.status === "update" ? (
@@ -105,18 +109,18 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
                       variant="outline"
                       className="border-amber-500/50 px-1.5 text-amber-700 dark:text-amber-400"
                       data-testid="update-badge"
-                      title={`A newer image is available for ${update.reference}`}
+                      title={format(t.containers.updateTitle, { reference: update.reference })}
                     >
-                      update available
+                      {t.containers.updateAvailable}
                     </Badge>
                   ) : null}
                 </span>
               </Row>
-              <Row label="Vulnerabilities">
+              <Row label={text.vulnerabilities}>
                 <ContainerImageScan imageId={c.Image} name={c.Config.Image} />
               </Row>
               {domains.length ? (
-                <Row label="Domains">
+                <Row label={text.domains}>
                   <span className="flex flex-col">
                     {domains.flatMap((h) =>
                       h.domains.map((d) => (
@@ -134,21 +138,21 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
                   </span>
                 </Row>
               ) : null}
-              <Row label="Created">{formatDate(c.Created)}</Row>
-              <Row label="Started">{c.State.Running ? formatDate(c.State.StartedAt) : "—"}</Row>
+              <Row label={t.common.fields.created}>{i18n.formatDate(c.Created)}</Row>
+              <Row label={text.started}>{c.State.Running ? i18n.formatDate(c.State.StartedAt) : "—"}</Row>
               {!c.State.Running && !c.State.FinishedAt.startsWith("0001") ? (
-                <Row label="Exited">
-                  {formatDate(c.State.FinishedAt)} (code {c.State.ExitCode})
+                <Row label={text.exited}>
+                  {format(text.exitedAt, { date: i18n.formatDate(c.State.FinishedAt), code: c.State.ExitCode })}
                 </Row>
               ) : null}
-              {c.State.Health ? <Row label="Health">{c.State.Health.Status}</Row> : null}
-              <Row label="Restart policy">
-                {c.HostConfig.RestartPolicy.Name || "no"} · restarted {c.RestartCount}×
+              {c.State.Health ? <Row label={text.health}>{c.State.Health.Status}</Row> : null}
+              <Row label={text.restartPolicy}>
+                {format(text.restartCount, { policy: c.HostConfig.RestartPolicy.Name || "no", count: c.RestartCount })}
               </Row>
-              <Row label="Command">
+              <Row label={text.command}>
                 <Mono>{[...(c.Config.Entrypoint ?? []), ...(c.Config.Cmd ?? [])].join(" ") || "—"}</Mono>
               </Row>
-              <Row label="Ports">
+              <Row label={t.common.fields.ports}>
                 {ports.length ? (
                   <div className="flex flex-col gap-0.5">
                     {ports.map((p) => (
@@ -159,7 +163,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
                   "—"
                 )}
               </Row>
-              <Row label="Networks">
+              <Row label={text.networks}>
                 {Object.entries(c.NetworkSettings.Networks).map(([net, n]) => (
                   <div key={net}>
                     {net} {n.IPAddress ? <Mono className="text-muted-foreground">{n.IPAddress}</Mono> : null}
@@ -172,15 +176,15 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
 
         <Card>
           <CardHeader>
-            <CardTitle>Mounts</CardTitle>
+            <CardTitle>{text.mounts}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
-            {c.Mounts.length === 0 ? <p className="text-muted-foreground">No mounts.</p> : null}
+            {c.Mounts.length === 0 ? <p className="text-muted-foreground">{text.noMounts}</p> : null}
             {c.Mounts.map((m) => (
               <div key={m.Destination} className="rounded-lg border p-2">
                 <Mono className="block">{m.Destination}</Mono>
                 <span className="text-xs text-muted-foreground">
-                  {m.Type} · {m.Name ?? m.Source} · {m.RW ? "read-write" : "read-only"}
+                  {m.Type} · {m.Name ?? m.Source} · {m.RW ? text.readWrite : text.readOnly}
                 </span>
               </div>
             ))}
@@ -189,7 +193,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
 
         <Card className="@4xl/main:col-span-2">
           <CardHeader>
-            <CardTitle>Environment variables</CardTitle>
+            <CardTitle>{text.envVars}</CardTitle>
           </CardHeader>
           <CardContent>
             {c.Config.Env?.length ? (
@@ -197,7 +201,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
                 {c.Config.Env.map((e) => {
                   const [key, ...rest] = e.split("=")
                   return (
-                    <div key={e} className="grid grid-cols-[minmax(8rem,16rem)_1fr] gap-3 break-all">
+                    <div key={e} className="grid gap-x-3 break-all max-sm:gap-y-0.5 sm:grid-cols-[minmax(8rem,16rem)_1fr]">
                       <span className="font-medium">{key}</span>
                       {/* Values may hold secrets; only managers (and administrators) see them. */}
                       <span className="text-muted-foreground">{can.manage ? rest.join("=") : "••••••"}</span>
@@ -206,7 +210,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
                 })}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">None.</p>
+              <p className="text-sm text-muted-foreground">{text.noEnv}</p>
             )}
           </CardContent>
         </Card>
@@ -218,16 +222,16 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
             <TabsList>
               <TabsTrigger value="logs">
                 <ScrollTextIcon />
-                Logs
+                {text.logs}
               </TabsTrigger>
               <TabsTrigger value="files">
                 <FolderIcon />
-                Files
+                {text.files}
               </TabsTrigger>
               {can.manage ? (
                 <TabsTrigger value="console">
                   <TerminalSquareIcon />
-                  Console
+                  {text.console}
                 </TabsTrigger>
               ) : null}
             </TabsList>
@@ -246,7 +250,7 @@ export default async function ContainerPage({ params, searchParams }: PageProps<
           </Tabs>
         ) : (
           <p className="text-sm text-muted-foreground" data-testid="logs-hidden">
-            Logs and files need the operator role in this environment.
+            {text.logsHidden}
           </p>
         )}
       </div>

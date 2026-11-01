@@ -6,26 +6,30 @@ import { HelmInstallForm } from "@/components/gantry/kubernetes/helm-forms"
 import { KubeUnavailable, loadKubePage } from "@/components/gantry/kubernetes/page"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
+import { getI18n } from "@/lib/i18n/server"
 import { Button } from "@/components/ui/button"
-import { HELM_MISSING, helmVersion } from "@/lib/server/kubernetes/helm-cli"
+import { helmVersion } from "@/lib/server/kubernetes/helm-cli"
 import { listHelmRepos } from "@/lib/server/kubernetes/helm-repos"
 
-export const metadata: Metadata = { title: "Install a Helm chart" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.kubernetes.charts.title }
+}
 
 export default async function ChartsPage() {
+  const { t } = await getI18n()
   const { page, blocked } = await loadKubePage()
   const reposLink = (
     <Button variant="outline" size="sm" asChild>
       <Link href="/kubernetes/charts/repositories">
         <LibraryIcon data-icon="inline-start" />
-        Chart repositories
+        {t.kubernetes.helm.chartRepositories}
       </Link>
     </Button>
   )
   const header = (
     <PageHeader
-      title="Install a Helm chart"
-      description="Install a chart from a repository or an OCI registry with helm install."
+      title={t.kubernetes.charts.title}
+      description={t.kubernetes.charts.description}
       actions={page?.user.role === "admin" ? reposLink : null}
     />
   )
@@ -41,7 +45,7 @@ export default async function ChartsPage() {
     return (
       <PageBody>
         {header}
-        <p className="px-4 text-sm text-muted-foreground lg:px-6">Installing charts needs the manager role in this environment.</p>
+        <p className="px-4 text-sm text-muted-foreground lg:px-6">{t.kubernetes.common.managerOnlyInstall}</p>
       </PageBody>
     )
   }
@@ -58,7 +62,7 @@ export default async function ChartsPage() {
     return (
       <PageBody>
         {header}
-        <KubeUnavailable message={HELM_MISSING} />
+        <KubeUnavailable message={t.kubernetes.helm.missing} />
       </PageBody>
     )
   }

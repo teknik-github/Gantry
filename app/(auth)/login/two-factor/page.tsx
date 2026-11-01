@@ -6,8 +6,11 @@ import type { Metadata } from "next"
 import { TwoFactorForm } from "@/components/two-factor-form"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PENDING_2FA_COOKIE, verifyPending2fa } from "@/lib/server/auth/flow-tokens"
+import { getI18n } from "@/lib/i18n/server"
 
-export const metadata: Metadata = { title: "Two-factor authentication" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.auth.titles.twoFactor }
+}
 
 export default function TwoFactorPage() {
   return (

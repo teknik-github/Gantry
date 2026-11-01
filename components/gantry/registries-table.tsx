@@ -14,6 +14,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 
 export type RegistryRow = {
   id: number
@@ -27,48 +29,54 @@ type Errors = Record<string, string[] | undefined>
 
 const helper = columnHelperFor<RegistryRow>()
 
-const columns = helper.columns([
-  helper.accessor("name", {
-    header: ({ column }) => <SortHeader column={column} title="Name" />,
-    cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
-    enableHiding: false,
-  }),
-  helper.accessor("address", {
-    header: ({ column }) => <SortHeader column={column} title="Registry" />,
-    cell: ({ row }) => <Mono>{row.original.address}</Mono>,
-  }),
-  helper.accessor("username", { header: "Username" }),
-  helper.accessor("updatedLabel", {
-    header: "Updated",
-    cell: ({ row }) => <span className="text-muted-foreground">{row.original.updatedLabel}</span>,
-  }),
-  helper.display({
-    id: "actions",
-    cell: ({ row }) => <RowActions row={row.original} />,
-    enableHiding: false,
-  }),
-])
+function buildColumns({ t }: I18n) {
+  return helper.columns([
+    helper.accessor("name", {
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.name} />,
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+      enableHiding: false,
+    }),
+    helper.accessor("address", {
+      header: ({ column }) => <SortHeader column={column} title={t.registries.columns.address} />,
+      cell: ({ row }) => <Mono>{row.original.address}</Mono>,
+    }),
+    helper.accessor("username", { header: t.registries.columns.username }),
+    helper.accessor("updatedLabel", {
+      header: t.registries.columns.updatedLabel,
+      cell: ({ row }) => <span className="text-muted-foreground">{row.original.updatedLabel}</span>,
+    }),
+    helper.display({
+      id: "actions",
+      cell: ({ row }) => <RowActions row={row.original} />,
+      enableHiding: false,
+    }),
+  ])
+}
 
 export function RegistriesTable({ data }: { data: RegistryRow[] }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const columns = React.useMemo(() => buildColumns(i18n), [i18n])
   return (
     <DataTable
       data={data}
       columns={columns}
       getRowId={(r) => String(r.id)}
       searchText={(r) => `${r.name} ${r.address} ${r.username}`}
-      searchPlaceholder="Search registries…"
-      emptyMessage="No registry logins yet. Public images need none."
+      searchPlaceholder={t.registries.searchPlaceholder}
+      emptyMessage={t.registries.empty}
+      columnLabels={t.registries.columns}
       toolbar={
         <FormDialog
           trigger={
             <Button size="sm">
               <PlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">Add registry</span>
+              <span className="max-lg:sr-only">{t.registries.add}</span>
             </Button>
           }
-          title="Add registry"
-          description="The login is used for every image from this registry."
-          submitLabel="Save"
+          title={t.registries.add}
+          description={t.registries.addDescription}
+          submitLabel={t.common.actions.save}
           action={createRegistry}
         >
           {(errors) => <RegistryFields errors={errors} />}
@@ -79,6 +87,7 @@ export function RegistriesTable({ data }: { data: RegistryRow[] }) {
 }
 
 function RowActions({ row }: { row: RegistryRow }) {
+  const { t, format } = useI18n()
   const [pending, run] = useRunAction()
   return (
     <div className="flex justify-end gap-1">
@@ -86,7 +95,7 @@ function RowActions({ row }: { row: RegistryRow }) {
         variant="ghost"
         size="icon"
         className="size-8 text-muted-foreground"
-        aria-label={`Test login to ${row.address}`}
+        aria-label={format(t.registries.testLogin, { address: row.address })}
         disabled={pending}
         onClick={() => run(() => testRegistry(row.id))}
       >
@@ -94,12 +103,12 @@ function RowActions({ row }: { row: RegistryRow }) {
       </Button>
       <FormDialog
         trigger={
-          <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Edit ${row.name}`}>
+          <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={format(t.registries.editName, { name: row.name })}>
             <PencilIcon />
           </Button>
         }
-        title={`Edit ${row.name}`}
-        submitLabel="Save"
+        title={format(t.registries.editName, { name: row.name })}
+        submitLabel={t.common.actions.save}
         action={updateRegistry}
       >
         {(errors) => (
@@ -110,12 +119,12 @@ function RowActions({ row }: { row: RegistryRow }) {
         )}
       </FormDialog>
       <ConfirmAction
-        title={`Remove the login for ${row.address}?`}
-        description="Pulls from this registry will be anonymous again."
-        confirmLabel="Remove"
+        title={format(t.registries.removeTitle, { address: row.address })}
+        description={t.registries.removeDescription}
+        confirmLabel={t.common.actions.remove}
         onConfirm={() => deleteRegistry(row.id)}
       >
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Remove ${row.name}`}>
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={format(t.registries.removeName, { name: row.name })}>
           <Trash2Icon />
         </Button>
       </ConfirmAction>
@@ -124,15 +133,17 @@ function RowActions({ row }: { row: RegistryRow }) {
 }
 
 function RegistryFields({ errors, initial }: { errors: Errors; initial?: RegistryRow }) {
+  const i18n = useI18n()
+  const f = i18n.t.registries.fields
   return (
     <FieldGroup className="gap-4">
       <Field data-invalid={errors.name ? true : undefined}>
-        <FieldLabel htmlFor="r-name">Name</FieldLabel>
-        <Input id="r-name" name="name" defaultValue={initial?.name} placeholder="GitHub packages" required autoFocus />
+        <FieldLabel htmlFor="r-name">{f.name}</FieldLabel>
+        <Input id="r-name" name="name" defaultValue={initial?.name} placeholder={f.namePlaceholder} required autoFocus />
         <FieldError>{errors.name?.[0]}</FieldError>
       </Field>
       <Field data-invalid={errors.address ? true : undefined}>
-        <FieldLabel htmlFor="r-address">Registry</FieldLabel>
+        <FieldLabel htmlFor="r-address">{f.registry}</FieldLabel>
         <Input
           id="r-address"
           name="address"
@@ -143,32 +154,36 @@ function RegistryFields({ errors, initial }: { errors: Errors; initial?: Registr
           required
         />
         <FieldDescription>
-          Host as it appears in image names: <code>ghcr.io</code>, <code>registry.gitlab.com</code>,{" "}
-          <code>registry.example.com:5000</code>, or <code>docker.io</code> for Docker Hub.
+          {i18n.rich(f.registryHelp, {
+            ghcr: <code>ghcr.io</code>,
+            gitlab: <code>registry.gitlab.com</code>,
+            example: <code>registry.example.com:5000</code>,
+            dockerHub: <code>docker.io</code>,
+          })}
         </FieldDescription>
         <FieldError>{errors.address?.[0]}</FieldError>
       </Field>
       <Field data-invalid={errors.username ? true : undefined}>
-        <FieldLabel htmlFor="r-username">Username</FieldLabel>
+        <FieldLabel htmlFor="r-username">{f.username}</FieldLabel>
         <Input id="r-username" name="username" defaultValue={initial?.username} autoComplete="off" required />
         <FieldError>{errors.username?.[0]}</FieldError>
       </Field>
       <Field data-invalid={errors.password ? true : undefined}>
-        <FieldLabel htmlFor="r-password">Password or access token</FieldLabel>
+        <FieldLabel htmlFor="r-password">{f.password}</FieldLabel>
         <Input
           id="r-password"
           name="password"
           type="password"
           autoComplete="new-password"
-          placeholder={initial ? "Leave empty to keep the current one" : undefined}
+          placeholder={initial ? f.passwordKeep : undefined}
           required={!initial}
         />
-        <FieldDescription>Stored encrypted. Prefer a read-only token (e.g. a GitHub PAT with read:packages).</FieldDescription>
+        <FieldDescription>{f.passwordHelp}</FieldDescription>
         <FieldError>{errors.password?.[0]}</FieldError>
       </Field>
       <Label className="font-normal">
         <Checkbox name="verify" value="on" defaultChecked />
-        Check the login before saving
+        {f.verify}
       </Label>
     </FieldGroup>
   )

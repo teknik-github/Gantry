@@ -2,6 +2,7 @@ import { Suspense } from "react"
 
 import { AdminNav, AppSidebar, DockerNav, KubernetesNav, ManagerNav } from "@/components/app-sidebar"
 import { EnvSwitcher } from "@/components/env-switcher"
+import { LocaleScope } from "@/components/i18n/locale-scope"
 import { LiveUpdates } from "@/components/live-updates"
 import { NavUser } from "@/components/nav-user"
 import { SiteHeader } from "@/components/site-header"
@@ -10,12 +11,16 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getPermissions, listEnvironments } from "@/lib/server/environments"
 
+import Loading from "./loading"
+
 // Every page below reads the session and live Docker state, so nothing here
 // can be prefetched into an instant App Shell; loading.tsx streams instead.
 export const instant = false
 
 // dashboard-01 shell. The session is read only inside Suspense boundaries
-// so the sidebar chrome stays in the static shell.
+// so the sidebar chrome stays in the static shell. So is the language cookie:
+// each boundary's content is wrapped in a LocaleScope, which renders it in
+// the visitor's language on the server (no flash of English).
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <SidebarProvider
@@ -30,31 +35,47 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
         variant="inset"
         header={
           <Suspense fallback={<MenuSkeleton />}>
-            <SidebarEnvironments />
+            <LocaleScope>
+              <SidebarEnvironments />
+            </LocaleScope>
           </Suspense>
         }
         nav={
           <Suspense fallback={<NavSkeleton />}>
-            <SidebarNav />
+            <LocaleScope>
+              <SidebarNav />
+            </LocaleScope>
           </Suspense>
         }
         showAdmin={
           <Suspense fallback={null}>
-            <SidebarAdmin />
+            <LocaleScope>
+              <SidebarAdmin />
+            </LocaleScope>
           </Suspense>
         }
         footer={
           <Suspense fallback={<MenuSkeleton />}>
-            <SidebarUser />
+            <LocaleScope>
+              <SidebarUser />
+            </LocaleScope>
           </Suspense>
         }
       />
       <SidebarInset>
         <Suspense fallback={<div className="h-(--header-height) border-b" />}>
-          <SiteHeader />
+          <LocaleScope>
+            <SiteHeader />
+          </LocaleScope>
         </Suspense>
         <div className="flex flex-1 flex-col">
-          <div className="@container/main flex flex-1 flex-col gap-2">{children}</div>
+          <div className="@container/main flex min-w-0 flex-1 flex-col gap-2">
+            {/* Pages stream in under their own loading.tsx; this boundary only
+                waits for the language cookie on the first request. */}
+            <Suspense fallback={<Loading />}>
+              <LocaleScope>{children}</LocaleScope>
+            </Suspense>
+          </div>
         </div>
       </SidebarInset>
       <Suspense fallback={null}>

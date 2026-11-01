@@ -4,15 +4,19 @@ import { ApplyForm } from "@/components/gantry/kubernetes/apply-form"
 import { loadKubePage } from "@/components/gantry/kubernetes/page"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
+import { getI18n } from "@/lib/i18n/server"
 
-export const metadata: Metadata = { title: "Apply manifest" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.apply }
+}
 
 export default async function ApplyPage() {
+  const { t } = await getI18n()
   const { page, blocked } = await loadKubePage()
   const header = (
     <PageHeader
-      title="Apply manifest"
-      description="Create or update objects from YAML with server-side apply."
+      title={t.nav.pages.apply}
+      description={t.kubernetes.apply.description}
     />
   )
   if (!page) {
@@ -27,7 +31,7 @@ export default async function ApplyPage() {
     return (
       <PageBody>
         {header}
-        <p className="px-4 text-sm text-muted-foreground lg:px-6">Applying manifests needs the manager role in this environment.</p>
+        <p className="px-4 text-sm text-muted-foreground lg:px-6">{t.kubernetes.common.managerOnlyApply}</p>
       </PageBody>
     )
   }

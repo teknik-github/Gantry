@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
+import { useI18n } from "@/lib/i18n/client"
 
 type Env = { id: number; name: string; type: string; url: string }
 
@@ -33,6 +34,8 @@ export function EnvSwitcher({
   const router = useRouter()
   const pathname = usePathname()
   const current = environments.find((e) => e.id === currentId)
+  const { t } = useI18n()
+  const text = t.nav.environments
 
   return (
     <SidebarMenu>
@@ -44,16 +47,16 @@ export function EnvSwitcher({
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">Gantry</span>
                 <span className="truncate text-xs text-muted-foreground">
-                  {current ? current.name : isAdmin ? "No environment" : "No environment assigned"}
+                  {current ? current.name : isAdmin ? text.noEnvironment : text.noEnvironmentAssigned}
                 </span>
               </div>
               <ChevronsUpDownIcon className="ml-auto size-4" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent className="min-w-56 rounded-lg" align="start" sideOffset={4}>
-            <DropdownMenuLabel className="text-xs text-muted-foreground">Environments</DropdownMenuLabel>
+            <DropdownMenuLabel className="text-xs text-muted-foreground">{text.label}</DropdownMenuLabel>
             {environments.length === 0 ? (
-              <DropdownMenuItem disabled>{isAdmin ? "No environments" : "None assigned — ask an administrator"}</DropdownMenuItem>
+              <DropdownMenuItem disabled>{isAdmin ? text.noEnvironments : text.noneAssigned}</DropdownMenuItem>
             ) : null}
             {environments.map((env) => (
               <DropdownMenuItem
@@ -84,7 +87,7 @@ export function EnvSwitcher({
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href="/environments">Manage environments</Link>
+                  <Link href="/environments">{text.manage}</Link>
                 </DropdownMenuItem>
               </>
             ) : null}

@@ -12,6 +12,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegen
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { submitKeepingValues } from "@/components/gantry/use-action"
+import { useI18n } from "@/lib/i18n/client"
 import type { ServicePort } from "@/lib/compose-ports"
 import { TLS_MODE_KEYS, TLS_MODES, type ProxyMode, type TlsMode } from "@/lib/proxy"
 import { generatePassword, type TemplateVariable } from "@/lib/templates"
@@ -37,6 +38,8 @@ export function TemplateDeployForm({
   exposable?: ServicePort[]
   proxyMode?: ProxyMode
 }) {
+  const { t } = useI18n()
+  const text = t.templates.deploy
   const [state, formAction, pending] = useActionState<ActionState, FormData>(deployTemplate, {})
   React.useEffect(() => {
     if (state.error && !state.fieldErrors) toast.error(state.error)
@@ -52,7 +55,7 @@ export function TemplateDeployForm({
       <input type="hidden" name="template" value={templateKey} />
       <FieldGroup>
         <Field data-invalid={errs.name ? true : undefined} className="max-w-sm">
-          <FieldLabel htmlFor={nameId}>Stack name</FieldLabel>
+          <FieldLabel htmlFor={nameId}>{text.stackName}</FieldLabel>
           <Input
             id={nameId}
             name="name"
@@ -62,14 +65,14 @@ export function TemplateDeployForm({
             required
             aria-invalid={errs.name ? true : undefined}
           />
-          <FieldDescription>Compose project name. Lowercase letters, digits, - and _.</FieldDescription>
+          <FieldDescription>{text.stackNameDescription}</FieldDescription>
           <FieldError>{errs.name?.[0]}</FieldError>
         </Field>
 
         {variables.length ? (
           <FieldSet>
-            <FieldLegend variant="label">Settings</FieldLegend>
-            <FieldDescription>Written to the stack&apos;s .env; you can change them later on the stack page.</FieldDescription>
+            <FieldLegend variant="label">{text.settings}</FieldLegend>
+            <FieldDescription>{text.settingsDescription}</FieldDescription>
             <div className="grid gap-4 @3xl/main:grid-cols-2">
               {variables.map((v) => (
                 <VariableField
@@ -90,7 +93,7 @@ export function TemplateDeployForm({
         <Field orientation="horizontal">
           <Button type="submit" disabled={pending}>
             <RocketIcon data-icon="inline-start" />
-            {pending ? "Deploying…" : "Deploy"}
+            {pending ? text.deploying : t.common.actions.deploy}
           </Button>
         </Field>
       </FieldGroup>
@@ -99,6 +102,8 @@ export function TemplateDeployForm({
 }
 
 function VariableField({ variable: v, value, error }: { variable: TemplateVariable; value?: string; error?: string }) {
+  const i18n = useI18n()
+  const text = i18n.t.templates.deploy
   const id = `${React.useId()}-${v.name}`
   const ref = React.useRef<HTMLInputElement>(null)
   const [visible, setVisible] = React.useState(false)
@@ -119,7 +124,7 @@ function VariableField({ variable: v, value, error }: { variable: TemplateVariab
           min={v.type === "port" ? 1 : undefined}
           max={v.type === "port" ? 65535 : undefined}
           defaultValue={value ?? (isPassword ? "" : (v.default ?? ""))}
-          placeholder={isPassword ? "Generated when empty" : v.default}
+          placeholder={isPassword ? text.generatedWhenEmpty : v.default}
           autoComplete={isPassword ? "new-password" : "off"}
           spellCheck={false}
           required={v.required && !isPassword && v.default === undefined}
@@ -132,7 +137,7 @@ function VariableField({ variable: v, value, error }: { variable: TemplateVariab
               type="button"
               variant="outline"
               size="icon"
-              aria-label={visible ? `Hide ${v.name}` : `Show ${v.name}`}
+              aria-label={i18n.format(visible ? text.hide : text.show, { name: v.name })}
               onClick={() => setVisible((s) => !s)}
             >
               {visible ? <EyeOffIcon /> : <EyeIcon />}
@@ -141,8 +146,8 @@ function VariableField({ variable: v, value, error }: { variable: TemplateVariab
               type="button"
               variant="outline"
               size="icon"
-              aria-label={`Generate ${v.name}`}
-              title="Generate a random password"
+              aria-label={i18n.format(text.generate, { name: v.name })}
+              title={text.generateTitle}
               onClick={() => {
                 if (!ref.current) return
                 ref.current.value = generatePassword((b) => crypto.getRandomValues(b))
@@ -171,25 +176,23 @@ function ExposeFields({
   values: Record<string, string>
   errors: Record<string, string[] | undefined>
 }) {
+  const { t } = useI18n()
+  const text = t.templates.deploy
   const uid = React.useId()
   const [expose, setExpose] = React.useState(values.expose || `${options[0].service}:${options[0].port}`)
   const [tls, setTls] = React.useState<TlsMode>((values.tls as TlsMode) || "auto")
   return (
     <FieldSet>
-      <FieldLegend variant="label">Domain (optional)</FieldLegend>
-      <FieldDescription>
-        {proxyMode === "off"
-          ? "Saved as a proxy host; it's served once the proxy is turned on (Proxy page)."
-          : "Creates a proxy host after the deploy. Point the domain's DNS at this Docker host."}
-      </FieldDescription>
+      <FieldLegend variant="label">{text.domainOptional}</FieldLegend>
+      <FieldDescription>{proxyMode === "off" ? text.domainProxyOff : text.domainProxyOn}</FieldDescription>
       <div className="grid gap-4 @3xl/main:grid-cols-3">
         <Field data-invalid={errors.domains ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-domains`}>Domain</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-domains`}>{text.domain}</FieldLabel>
           <Input id={`${uid}-domains`} name="domains" defaultValue={values.domains ?? ""} placeholder="app.example.com" autoComplete="off" spellCheck={false} />
           <FieldError>{errors.domains?.[0]}</FieldError>
         </Field>
         <Field data-invalid={errors.expose ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-expose`}>Service</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-expose`}>{text.service}</FieldLabel>
           <Select name="expose" value={expose} onValueChange={setExpose}>
             <SelectTrigger id={`${uid}-expose`} className="w-full">
               <SelectValue />
@@ -205,7 +208,7 @@ function ExposeFields({
           <FieldError>{errors.expose?.[0]}</FieldError>
         </Field>
         <Field data-invalid={errors.tls ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-tls`}>TLS</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-tls`}>{text.tls}</FieldLabel>
           <Select name="tls" value={tls} onValueChange={(v) => setTls(v as TlsMode)}>
             <SelectTrigger id={`${uid}-tls`} className="w-full">
               <SelectValue />

@@ -8,7 +8,7 @@ import {
 } from "@/components/gantry/stacks-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
-import { timeAgo } from "@/lib/format"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { groupByProject, listStacks } from "@/lib/server/stacks"
@@ -18,16 +18,19 @@ import { tryDocker } from "@/lib/server/views"
 import { STACK_NAME_RE, validateCompose } from "@/lib/stacks"
 import { KUBERNETES_ENVIRONMENT } from "@/lib/messages"
 
-export const metadata: Metadata = { title: "Stacks" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.stacks }
+}
 
 export default async function StacksPage() {
   const user = await requireUser()
+  const { t, format, timeAgo } = await getI18n()
   const can = await getPermissions()
   const env = await getCurrentEnvironment()
   if (!env) {
     return (
       <PageBody>
-        <PageHeader title="Stacks" />
+        <PageHeader title={t.nav.pages.stacks} />
         <DockerUnavailable message="No Docker environment configured" />
       </PageBody>
     )
@@ -36,7 +39,7 @@ export default async function StacksPage() {
   if (env.type === "kubernetes") {
     return (
       <PageBody>
-        <PageHeader title="Stacks" />
+        <PageHeader title={t.nav.pages.stacks} />
         <DockerUnavailable message={KUBERNETES_ENVIRONMENT} />
       </PageBody>
     )
@@ -90,18 +93,24 @@ export default async function StacksPage() {
   return (
     <PageBody>
       <PageHeader
-        title="Stacks"
-        description={`Docker Compose stacks on ${env.name}: ${rows.length} managed by Gantry${
-          result.error === undefined ? `, ${external.length} external` : ""
-        }.`}
+        title={t.nav.pages.stacks}
+        description={
+          result.error === undefined
+            ? format(t.stacks.list.descriptionWithExternal, {
+                environment: env.name,
+                managed: rows.length,
+                external: external.length,
+              })
+            : format(t.stacks.list.description, { environment: env.name, managed: rows.length })
+        }
       />
       {result.error !== undefined ? <DockerUnavailable message={result.error} /> : null}
       <StacksTable data={rows} canManage={can.manage} />
       {result.error === undefined ? (
         <>
           <PageHeader
-            title="External projects"
-            description="Compose projects running on this environment that Gantry doesn't manage (read-only)."
+            title={t.stacks.list.externalTitle}
+            description={t.stacks.list.externalDescription}
           />
           {/* Importing reads a file path named by container labels: administrators only. */}
           <ExternalProjectsTable data={external} canImport={user.role === "admin"} />

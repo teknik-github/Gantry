@@ -20,6 +20,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useI18n } from "@/lib/i18n/client"
 import { registryOf } from "@/lib/registry"
 
 // Row actions of the Images table: Tag (Server Action) and Push (streamed
@@ -39,24 +40,26 @@ export function ImageTagPushActions({ row }: { row: Row }) {
 const label = (row: Row) => row.tags[0] ?? row.shortId
 
 function TagImageDialog({ row }: { row: Row }) {
+  const i18n = useI18n()
+  const text = i18n.t.images.tag
   const inputId = React.useId()
   return (
     <FormDialog
       trigger={
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={`Tag ${label(row)}`}>
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={i18n.format(text.label, { name: label(row) })}>
           <TagIcon />
         </Button>
       }
-      title={`Tag ${label(row)}`}
-      description="Adds another name to this image, e.g. to push it to a registry."
-      submitLabel="Tag"
+      title={i18n.format(text.title, { name: label(row) })}
+      description={text.description}
+      submitLabel={text.submit}
       action={tagImage}
     >
       {(errors) => (
         <>
           <input type="hidden" name="id" value={row.id} />
           <Field data-invalid={errors.reference ? true : undefined}>
-            <FieldLabel htmlFor={inputId}>New tag</FieldLabel>
+            <FieldLabel htmlFor={inputId}>{text.newTag}</FieldLabel>
             <Input
               id={inputId}
               name="reference"
@@ -67,9 +70,7 @@ function TagImageDialog({ row }: { row: Row }) {
               autoFocus
               aria-invalid={errors.reference ? true : undefined}
             />
-            <FieldDescription>
-              Prefix a registry (host[:port]/) to push there; :latest when no tag is given.
-            </FieldDescription>
+            <FieldDescription>{text.help}</FieldDescription>
             <FieldError>{errors.reference?.[0]}</FieldError>
           </Field>
         </>
@@ -79,6 +80,7 @@ function TagImageDialog({ row }: { row: Row }) {
 }
 
 function PushImageDialog({ row }: { row: Row }) {
+  const i18n = useI18n()
   const [open, setOpen] = React.useState(false)
   const disabled = row.tags.length === 0
   return (
@@ -88,8 +90,8 @@ function PushImageDialog({ row }: { row: Row }) {
           variant="ghost"
           size="icon"
           className="size-8 text-muted-foreground"
-          aria-label={`Push ${label(row)}`}
-          title={disabled ? "Tag the image first" : undefined}
+          aria-label={i18n.format(i18n.t.images.push.label, { name: label(row) })}
+          title={disabled ? i18n.t.images.push.tagFirst : undefined}
           disabled={disabled}
         >
           <UploadIcon />
@@ -104,6 +106,8 @@ function PushImageDialog({ row }: { row: Row }) {
 }
 
 function PushBody({ row }: { row: Row }) {
+  const i18n = useI18n()
+  const text = i18n.t.images.push
   const environmentId = useEnvironmentId()
   const selectId = React.useId()
   const [reference, setReference] = React.useState(row.tags[0] ?? "")
@@ -123,44 +127,41 @@ function PushBody({ row }: { row: Row }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Push {label(row)}</DialogTitle>
-        <DialogDescription>
-          Uploads a tag to its registry with the login stored under Registries for that address.
-        </DialogDescription>
+        <DialogTitle>{i18n.format(text.title, { name: label(row) })}</DialogTitle>
+        <DialogDescription>{text.description}</DialogDescription>
       </DialogHeader>
       <Field>
-        <FieldLabel htmlFor={selectId}>Tag to push</FieldLabel>
+        <FieldLabel htmlFor={selectId}>{text.tagToPush}</FieldLabel>
         <Select value={reference} onValueChange={setReference} disabled={state.running}>
           <SelectTrigger id={selectId} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {row.tags.map((t) => (
-              <SelectItem key={t} value={t}>
-                {t}
+            {row.tags.map((tag) => (
+              <SelectItem key={tag} value={tag}>
+                {tag}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <FieldDescription>
-          Registry: <span className="font-mono">{reference ? registryOf(reference) : "?"}</span>. Closing this dialog
-          cancels a running push.
+          {i18n.rich(text.registry, { registry: <span className="font-mono">{reference ? registryOf(reference) : "?"}</span> })}
         </FieldDescription>
       </Field>
       {error ? <FieldError>{error}</FieldError> : null}
-      {state.running ? <RunningNote text={`Pushing ${reference}…`} /> : null}
+      {state.running ? <RunningNote text={i18n.format(text.pushing, { reference })} /> : null}
       {state.done ? <StreamResult done={state.done} what="push" /> : null}
-      {state.running || state.segments.length ? <StreamLog state={state} label="Push log" /> : null}
+      {state.running || state.segments.length ? <StreamLog state={state} label={text.log} /> : null}
       <DialogFooter>
         {state.running ? (
           <Button key="cancel" type="button" variant="destructive" onClick={cancel}>
             <SquareIcon data-icon="inline-start" />
-            Cancel push
+            {text.cancel}
           </Button>
         ) : (
           <Button key="push" type="button" onClick={push} disabled={!reference}>
             <UploadIcon data-icon="inline-start" />
-            Push
+            {text.submit}
           </Button>
         )}
       </DialogFooter>

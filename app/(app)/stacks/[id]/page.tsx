@@ -13,8 +13,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { formatDate, timeAgo } from "@/lib/format"
 import { shortSha } from "@/lib/git-stacks"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { getStack, isStackBusy, PROJECT_LABEL } from "@/lib/server/stacks"
@@ -24,19 +24,15 @@ import { tryDocker } from "@/lib/server/views"
 import { parseDotenv, validateCompose } from "@/lib/stacks"
 import { cn } from "@/lib/utils"
 
-export const metadata: Metadata = { title: "Stack" }
-
-const ACTION_LABELS: Record<string, string> = {
-  deploy: "Deploy",
-  redeploy: "Pull & redeploy",
-  start: "Start",
-  stop: "Stop",
-  restart: "Restart",
-  down: "Down",
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.common.fields.stack }
 }
 
 export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
   const user = await requireUser()
+  const { t, format, rich, timeAgo, formatDate } = await getI18n()
+  const text = t.stacks.detail
+  const operations: Record<string, string> = t.stacks.operations
   const isManager = (await getPermissions()).manage
   // Git credentials and webhook secrets stay with global administrators.
   const isAdmin = user.role === "admin"
@@ -53,10 +49,8 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
         <div className="px-4 lg:px-6">
           <Card>
             <CardHeader>
-              <CardTitle>Stack is in another environment</CardTitle>
-              <CardDescription>
-                This stack belongs to a different Docker environment. Switch environments in the sidebar to manage it.
-              </CardDescription>
+              <CardTitle>{text.otherEnvironmentTitle}</CardTitle>
+              <CardDescription>{text.otherEnvironmentDescription}</CardDescription>
             </CardHeader>
           </Card>
         </div>
@@ -93,8 +87,12 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
             ) : null}
           </h2>
           <p className="text-sm text-muted-foreground">
-            On {env.name} · created by {stack.created_by} {timeAgo(stack.created_at)} · updated{" "}
-            {timeAgo(stack.updated_at)}
+            {format(text.meta, {
+              environment: env.name,
+              user: stack.created_by,
+              created: timeAgo(stack.created_at),
+              updated: timeAgo(stack.updated_at),
+            })}
           </p>
         </div>
         {isManager && result.error === undefined ? (
@@ -117,9 +115,9 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
         {result.error === undefined ? (
           <Card>
             <CardHeader>
-              <CardTitle>Services</CardTitle>
+              <CardTitle>{text.services}</CardTitle>
               <CardDescription>
-                Containers labelled <Mono>{`${PROJECT_LABEL}=${stack.name}`}</Mono>
+                {rich(text.servicesDescription, { label: <Mono>{`${PROJECT_LABEL}=${stack.name}`}</Mono> })}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -127,11 +125,11 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
                 <Table>
                   <TableHeader className="bg-muted">
                     <TableRow>
-                      <TableHead>Service</TableHead>
-                      <TableHead>Container</TableHead>
-                      <TableHead>State</TableHead>
-                      <TableHead>Image</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>{text.service}</TableHead>
+                      <TableHead>{text.container}</TableHead>
+                      <TableHead>{t.common.fields.state}</TableHead>
+                      <TableHead>{t.common.fields.image}</TableHead>
+                      <TableHead>{t.common.fields.status}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -158,7 +156,7 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
                         <TableCell className="text-muted-foreground">—</TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-muted-foreground">
-                            not created
+                            {text.notCreated}
                           </Badge>
                         </TableCell>
                         <TableCell />
@@ -168,7 +166,7 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
                     {summary.containers.length === 0 && notCreated.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={5} className="h-16 text-center text-muted-foreground">
-                          No containers.
+                          {text.noContainers}
                         </TableCell>
                       </TableRow>
                     ) : null}
@@ -182,25 +180,30 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
         <Card className={cn(stack.last_status === "error" && "border-destructive/40")}>
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2">
-              Last run
+              {text.lastRun}
               {stack.last_status ? (
                 <Badge variant={stack.last_status === "error" ? "destructive" : "secondary"}>
-                  {stack.last_status === "error" ? "failed" : "succeeded"}
+                  {stack.last_status === "error" ? text.failed : text.succeeded}
                 </Badge>
               ) : null}
-              {isStackBusy(stack.id) ? <Badge variant="outline">running now…</Badge> : null}
+              {isStackBusy(stack.id) ? <Badge variant="outline">{text.runningNow}</Badge> : null}
             </CardTitle>
             <CardDescription>
               {stack.last_run_at ? (
                 <>
-                  {ACTION_LABELS[stack.last_action ?? ""] ?? stack.last_action} by {stack.last_run_by} ·{" "}
-                  <time dateTime={stack.last_run_at} title={formatDate(stack.last_run_at)}>
-                    {timeAgo(stack.last_run_at)}
-                  </time>
-                  {changedSinceRun ? " · the stack was edited since" : null}
+                  {rich(text.lastRunBy, {
+                    action: operations[stack.last_action ?? ""] ?? stack.last_action,
+                    user: stack.last_run_by,
+                    time: (
+                      <time dateTime={stack.last_run_at} title={formatDate(stack.last_run_at)}>
+                        {timeAgo(stack.last_run_at)}
+                      </time>
+                    ),
+                  })}
+                  {changedSinceRun ? text.editedSince : null}
                 </>
               ) : (
-                "This stack hasn't been deployed from Gantry yet."
+                text.neverDeployed
               )}
             </CardDescription>
           </CardHeader>
@@ -220,8 +223,8 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
         {isAdmin && git ? (
           <Card>
             <CardHeader>
-              <CardTitle>Webhook</CardTitle>
-              <CardDescription>Redeploy automatically when you push to {git.ref}.</CardDescription>
+              <CardTitle>{text.webhook}</CardTitle>
+              <CardDescription>{format(text.webhookDescription, { ref: git.ref })}</CardDescription>
             </CardHeader>
             <CardContent>
               <WebhookPanel stackId={stack.id} webhookId={git.webhookId} gitRef={git.ref} />
@@ -232,8 +235,8 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
         {isManager ? (
           <Card>
             <CardHeader>
-              <CardTitle>Configuration</CardTitle>
-              <CardDescription>Saving doesn&apos;t touch running containers until you deploy.</CardDescription>
+              <CardTitle>{text.configuration}</CardTitle>
+              <CardDescription>{text.configurationDescription}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-5">
               <StackEditor
@@ -243,13 +246,13 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
               {git ? (
                 <div className="grid gap-2">
                   <span className="text-sm font-medium">
-                    {git.composePath} <span className="font-normal text-muted-foreground">(from the repository, read-only)</span>
+                    {git.composePath} <span className="font-normal text-muted-foreground">{text.fromRepository}</span>
                   </span>
                   <pre
                     data-testid="git-compose"
                     className="max-h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed"
                   >
-                    {stack.compose || "Not fetched yet."}
+                    {stack.compose || text.notFetched}
                   </pre>
                 </div>
               ) : null}
@@ -258,10 +261,8 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
         ) : (
           <Card>
             <CardHeader>
-              <CardTitle>Configuration</CardTitle>
-              <CardDescription>
-                The compose file and environment values may hold secrets; only administrators can view them.
-              </CardDescription>
+              <CardTitle>{text.configuration}</CardTitle>
+              <CardDescription>{text.secretsHidden}</CardDescription>
             </CardHeader>
             <CardContent className="text-sm">
               <EnvKeys env={stack.env} />
@@ -273,13 +274,15 @@ export default async function StackPage({ params }: PageProps<"/stacks/[id]">) {
   )
 }
 
-function GitCard({ stackId, git, isAdmin }: { stackId: number; git: GitStackInfo; isAdmin: boolean }) {
+async function GitCard({ stackId, git, isAdmin }: { stackId: number; git: GitStackInfo; isAdmin: boolean }) {
+  const { t, format, timeAgo, formatDate } = await getI18n()
+  const text = t.stacks.detail
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2">
           <GitBranchIcon className="size-4" />
-          Git repository
+          {text.gitRepository}
         </CardTitle>
         <CardDescription className="break-all">
           <Mono>{git.url}</Mono> · <Mono>{git.ref}</Mono> · <Mono>{git.composePath}</Mono>
@@ -304,7 +307,7 @@ function GitCard({ stackId, git, isAdmin }: { stackId: number; git: GitStackInfo
           <GitCommitHorizontalIcon className="size-4 text-muted-foreground" />
           {git.commit ? (
             <>
-              <span className="text-muted-foreground">Deployed</span>
+              <span className="text-muted-foreground">{text.deployed}</span>
               <Mono className="font-medium">{shortSha(git.commit.sha)}</Mono>
               <span className="min-w-0 truncate font-medium">{git.commit.subject}</span>
               <span className="text-muted-foreground">
@@ -320,15 +323,19 @@ function GitCard({ stackId, git, isAdmin }: { stackId: number; git: GitStackInfo
               </span>
             </>
           ) : (
-            <span className="text-muted-foreground">No commit deployed yet.</span>
+            <span className="text-muted-foreground">{text.noCommit}</span>
           )}
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
-          <span>Credentials: {git.hasCredentials ? "stored (encrypted)" : "none (public repository)"}</span>
-          <span>Webhook: {git.webhookId ? "enabled" : "off"}</span>
           <span>
-            Polling: {git.pollMinutes > 0 ? `every ${git.pollMinutes} min` : "off"}
-            {git.pollMinutes > 0 && git.lastCheckedAt ? ` (last checked ${timeAgo(git.lastCheckedAt)})` : null}
+            {format(text.credentials, { value: git.hasCredentials ? text.credentialsStored : text.credentialsNone })}
+          </span>
+          <span>{format(text.webhookStatus, { value: git.webhookId ? text.webhookEnabled : text.webhookOff })}</span>
+          <span>
+            {format(text.polling, {
+              value: git.pollMinutes > 0 ? format(text.pollingEvery, { minutes: git.pollMinutes }) : text.pollingOff,
+            })}
+            {git.pollMinutes > 0 && git.lastCheckedAt ? format(text.lastChecked, { time: timeAgo(git.lastCheckedAt) }) : null}
           </span>
         </div>
       </CardContent>
@@ -336,9 +343,10 @@ function GitCard({ stackId, git, isAdmin }: { stackId: number; git: GitStackInfo
   )
 }
 
-function EnvKeys({ env }: { env: string }) {
+async function EnvKeys({ env }: { env: string }) {
+  const { t } = await getI18n()
   const { entries } = parseDotenv(env)
-  if (entries.length === 0) return <p className="text-muted-foreground">No environment variables.</p>
+  if (entries.length === 0) return <p className="text-muted-foreground">{t.stacks.detail.noEnvironmentVariables}</p>
   return (
     <div className="grid gap-1 font-mono text-xs">
       {entries.map((e, i) => (
@@ -351,12 +359,13 @@ function EnvKeys({ env }: { env: string }) {
   )
 }
 
-function BackLink({ inline }: { inline?: boolean }) {
+async function BackLink({ inline }: { inline?: boolean }) {
+  const { t } = await getI18n()
   const link = (
     <Button asChild variant="link" size="sm" className="h-auto w-fit p-0 text-muted-foreground">
       <Link href="/stacks">
         <ArrowLeftIcon data-icon="inline-start" />
-        Stacks
+        {t.nav.pages.stacks}
       </Link>
     </Button>
   )

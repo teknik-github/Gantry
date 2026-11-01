@@ -3,6 +3,7 @@
 import * as React from "react"
 import { usePathname, useRouter } from "next/navigation"
 
+import { useI18n } from "@/lib/i18n/client"
 import { eventAffectsPath, type LiveEvent } from "@/lib/live"
 import { cn } from "@/lib/utils"
 
@@ -206,29 +207,17 @@ export function LiveUpdates({ environmentId }: { environmentId: number | null })
   return null
 }
 
-const LABELS: Record<LiveStatus, string> = {
-  idle: "",
-  connecting: "Connecting",
-  connected: "Live",
-  reconnecting: "Reconnecting",
-}
-
-const TITLES: Record<LiveStatus, string> = {
-  idle: "",
-  connecting: "Connecting to live updates…",
-  connected: "Pages update automatically when the environment changes",
-  reconnecting: "Live updates interrupted; reconnecting…",
-}
-
 /** Small connection badge for the site header. */
 export function LiveIndicator({ className }: { className?: string }) {
   const status = useLiveStatus()
+  const { t } = useI18n()
   if (status === "idle") return null
+  const live = t.nav.live
   return (
     <span
       data-testid="live-indicator"
       data-status={status}
-      title={TITLES[status]}
+      title={live[`${status}Title`]}
       role="status"
       className={cn("flex items-center gap-1.5 text-xs text-muted-foreground", className)}
     >
@@ -245,7 +234,7 @@ export function LiveIndicator({ className }: { className?: string }) {
           )}
         />
       </span>
-      <span className="hidden sm:inline">{LABELS[status]}</span>
+      <span className="hidden sm:inline">{live[status]}</span>
     </span>
   )
 }

@@ -1,17 +1,40 @@
-export function formatBytes(bytes: number, digits = 1) {
+import { DEFAULT_LOCALE, INTL_LOCALES, type Locale } from "@/lib/i18n/config"
+
+export function formatBytes(bytes: number, digits = 1, locale: Locale = DEFAULT_LOCALE) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
   const units = ["B", "KB", "MB", "GB", "TB"]
   const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
-  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : digits)} ${units[i]}`
+  const value = bytes / 1024 ** i
+  const fraction = i === 0 ? 0 : digits
+  // English keeps the plain "1.5 GB" form; other languages get their decimal separator.
+  const text =
+    locale === "en"
+      ? value.toFixed(fraction)
+      : new Intl.NumberFormat(INTL_LOCALES[locale].numbers, {
+          minimumFractionDigits: fraction,
+          maximumFractionDigits: fraction,
+          useGrouping: false,
+        }).format(value)
+  return `${text} ${units[i]}`
 }
 
 export function shortId(id: string) {
   return id.replace(/^sha256:/, "").slice(0, 12)
 }
 
-const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" })
+const relativeFormats = new Map<Locale, Intl.RelativeTimeFormat>()
 
-export function timeAgo(date: Date | number | string) {
+function relative(locale: Locale) {
+  let rtf = relativeFormats.get(locale)
+  if (!rtf) {
+    rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" })
+    relativeFormats.set(locale, rtf)
+  }
+  return rtf
+}
+
+export function timeAgo(date: Date | number | string, locale: Locale = DEFAULT_LOCALE) {
+  const rtf = relative(locale)
   const d = typeof date === "number" ? new Date(date * 1000) : new Date(date)
   const seconds = Math.round((d.getTime() - Date.now()) / 1000)
   const abs = Math.abs(seconds)
@@ -23,6 +46,6 @@ export function timeAgo(date: Date | number | string) {
   return rtf.format(Math.round(seconds / (86400 * 365)), "year")
 }
 
-export function formatDate(date: string) {
-  return new Date(date).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })
+export function formatDate(date: Date | string | number, locale: Locale = DEFAULT_LOCALE) {
+  return new Date(date).toLocaleString(INTL_LOCALES[locale].dates, { dateStyle: "medium", timeStyle: "short" })
 }

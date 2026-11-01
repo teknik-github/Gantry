@@ -7,14 +7,18 @@ import { TemplateEditor } from "@/components/gantry/template-editor"
 import { PageBody } from "@/components/gantry/page-body"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { getI18n } from "@/lib/i18n/server"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { getCustomTemplate } from "@/lib/server/templates"
 import { customTemplateId } from "@/lib/templates"
 
-export const metadata: Metadata = { title: "Edit template" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.templates.editor.editTitle }
+}
 
 export default async function EditTemplatePage({ params }: PageProps<"/templates/[key]/edit">) {
   await requireAdmin()
+  const { t } = await getI18n()
   const { key } = await params
   const id = customTemplateId(key)
   // Built-in templates can't be edited; save a stack deployed from one as a template instead.
@@ -30,7 +34,7 @@ export default async function EditTemplatePage({ params }: PageProps<"/templates
             {template.title}
           </Link>
         </Button>
-        <h2 className="text-xl font-semibold tracking-tight">Edit template</h2>
+        <h2 className="text-xl font-semibold tracking-tight">{t.templates.editor.editTitle}</h2>
       </div>
       <div className="px-4 lg:px-6">
         <Card>

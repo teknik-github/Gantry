@@ -18,6 +18,7 @@ import {
   verifySecondFactor,
 } from "@/lib/server/auth/two-factor"
 import { getDb } from "@/lib/server/db"
+import { getI18n } from "@/lib/i18n/server"
 import { checkRateLimit, clearFailures, recordFailure } from "@/lib/server/rate-limit"
 import { LOGIN_WINDOW_MS, TWO_FACTOR_LIMIT } from "@/lib/server/login-limits"
 import { invalidateSessions, sessionVersion } from "@/lib/server/users"
@@ -35,43 +36,46 @@ async function rotateSessions(user: { id: number; role: "admin" | "user" }) {
 
 /** Checks the current password; wrong guesses count against a per-user limit. */
 async function checkPassword(userId: number, password: string) {
+  const { t, format } = await getI18n()
   const key = `reauth:${userId}`
   const wait = checkRateLimit(key, TWO_FACTOR_LIMIT)
-  if (wait > 0) throw new UserError(`Too many attempts. Try again in ${wait}s.`)
+  if (wait > 0) throw new UserError(format(t.auth.errors.tooManyAttempts, { seconds: wait }))
   const db = await getDb()
   const row = await db.selectFrom("users").select("password_hash").where("id", "=", userId).executeTakeFirstOrThrow()
   let ok: boolean
   try {
     ok = await verifyPassword(password, row.password_hash)
   } catch (err) {
-    if (err instanceof PasswordBusyError) throw new UserError(err.message)
+    if (err instanceof PasswordBusyError) throw new UserError(t.auth.errors.passwordBusy)
     throw err
   }
   if (!ok) {
     recordFailure(key, LOGIN_WINDOW_MS)
-    throw new UserError("Current password is incorrect")
+    throw new UserError(t.account.password.incorrect)
   }
   clearFailures(key)
 }
 
 /** Checks a TOTP or recovery code; failures are limited like the login's second step. */
 async function checkCode(userId: number, code: string) {
+  const { t, format } = await getI18n()
   const key = `2fa:${userId}`
   const wait = checkRateLimit(key, TWO_FACTOR_LIMIT)
-  if (wait > 0) throw new UserError(`Too many attempts. Try again in ${wait}s.`)
+  if (wait > 0) throw new UserError(format(t.auth.errors.tooManyAttempts, { seconds: wait }))
   const check = await verifySecondFactor(await getDb(), userId, code)
   if (!check.ok) {
     recordFailure(key, LOGIN_WINDOW_MS)
-    throw new UserError("Invalid code")
+    throw new UserError(t.auth.errors.invalidCode)
   }
   clearFailures(key)
   return check
 }
 
 export async function changePassword(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { t } = await getI18n()
   const parsed = z
-    .object({ current: z.string().min(1, "Enter your current password"), password: passwordSchema, confirm: z.string() })
-    .refine((d) => d.password === d.confirm, { path: ["confirm"], message: "Passwords do not match" })
+    .object({ current: z.string().min(1, t.account.password.enterCurrent), password: passwordSchema, confirm: z.string() })
+    .refine((d) => d.password === d.confirm, { path: ["confirm"], message: t.auth.errors.passwordsMismatch })
     .safeParse(Object.fromEntries(formData))
   if (!parsed.success) return fieldErrors(parsed.error)
 
@@ -85,7 +89,7 @@ export async function changePassword(_prev: ActionState, formData: FormData): Pr
       .execute()
     // Anyone who knew the old password is signed out; this browser stays in.
     await rotateSessions(user)
-    return "Password changed. Your other sessions were signed out."
+    return t.account.password.changedSignedOut
   })
 }
 
@@ -100,8 +104,9 @@ export type EnrolmentState = ActionState & {
 
 /** Step 1: password → a new secret as otpauth:// URI and QR code. 2FA stays off until a code is confirmed. */
 export async function startTwoFactor(_prev: EnrolmentState, formData: FormData): Promise<EnrolmentState> {
+  const { t } = await getI18n()
   const password = String(formData.get("password") ?? "")
-  if (!password) return { error: "Enter your password", fieldErrors: { password: ["Enter your password"] } }
+  if (!password) return { error: t.account.twoFactor.enterPassword, fieldErrors: { password: [t.account.twoFactor.enterPassword] } }
   const auth = await authorize("user")
   if ("error" in auth) return auth
   const { user } = auth
@@ -112,7 +117,7 @@ export async function startTwoFactor(_prev: EnrolmentState, formData: FormData):
     throw err
   }
   const secret = await beginEnrolment(await getDb(), user.id)
-  if (!secret) return { error: "Two-factor authentication is already on" }
+  if (!secret) return { error: t.account.twoFactor.alreadyOn }
   const uri = otpauthUri(secret, user.username)
   return { ok: true, secret, uri, qrSvg: renderSVG(uri, { border: 2 }) }
 }
@@ -121,51 +126,54 @@ export type RecoveryCodesState = ActionState & { recoveryCodes?: string[] }
 
 /** Step 2: a code from the app turns 2FA on; the recovery codes are returned once. */
 export async function confirmTwoFactor(_prev: RecoveryCodesState, formData: FormData): Promise<RecoveryCodesState> {
+  const { t, format } = await getI18n()
   const code = String(formData.get("code") ?? "").trim().slice(0, 32)
   let recoveryCodes: string[] | undefined
   const res = await runAction("user", "account.2fa_enable", "self", async ({ user }) => {
     const key = `2fa-enrol:${user.id}`
     const wait = checkRateLimit(key, TWO_FACTOR_LIMIT)
-    if (wait > 0) throw new UserError(`Too many attempts. Try again in ${wait}s.`)
+    if (wait > 0) throw new UserError(format(t.auth.errors.tooManyAttempts, { seconds: wait }))
     const codes = await confirmEnrolment(await getDb(), user.id, code)
     if (!codes) {
       recordFailure(key, LOGIN_WINDOW_MS)
-      throw new UserError("That code doesn't match. Check the time on your device and enter the current code.")
+      throw new UserError(t.account.twoFactor.noMatch)
     }
     clearFailures(key)
     recoveryCodes = codes
     await rotateSessions(user)
-    return "Two-factor authentication is on"
+    return t.account.twoFactor.enabled
   })
-  return res.ok ? { ...res, recoveryCodes } : { ...res, fieldErrors: { code: [res.error ?? "Invalid code"] } }
+  return res.ok ? { ...res, recoveryCodes } : { ...res, fieldErrors: { code: [res.error ?? t.auth.errors.invalidCode] } }
 }
 
 /** Turns 2FA off: needs the password and a current (or recovery) code. */
 export async function disableTwoFactorAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { t } = await getI18n()
   const password = String(formData.get("password") ?? "")
   const code = String(formData.get("code") ?? "").trim().slice(0, 32)
-  if (!password || !code) return { error: "Enter your password and a code" }
+  if (!password || !code) return { error: t.account.twoFactor.enterPasswordAndCode }
   return runAction("user", "account.2fa_disable", "self", async ({ user }) => {
     await checkPassword(user.id, password)
     await checkCode(user.id, code)
     await disableTwoFactor(await getDb(), user.id)
     await rotateSessions(user)
-    return "Two-factor authentication is off"
+    return t.account.twoFactor.disabled
   })
 }
 
 /** New recovery codes (password + code); the old ones stop working. */
 export async function regenerateRecoveryCodesAction(_prev: RecoveryCodesState, formData: FormData): Promise<RecoveryCodesState> {
+  const { t } = await getI18n()
   const password = String(formData.get("password") ?? "")
   const code = String(formData.get("code") ?? "").trim().slice(0, 32)
-  if (!password || !code) return { error: "Enter your password and a code" }
+  if (!password || !code) return { error: t.account.twoFactor.enterPasswordAndCode }
   let recoveryCodes: string[] | undefined
   const res = await runAction("user", "account.2fa_recovery_codes", "self", async ({ user }) => {
     await checkPassword(user.id, password)
     await checkCode(user.id, code)
     recoveryCodes = (await regenerateRecoveryCodes(await getDb(), user.id)) ?? undefined
-    if (!recoveryCodes) throw new UserError("Two-factor authentication is off")
-    return "New recovery codes created"
+    if (!recoveryCodes) throw new UserError(t.account.twoFactor.disabled)
+    return t.account.twoFactor.codesCreated
   })
   return { ...res, recoveryCodes }
 }
@@ -179,15 +187,16 @@ export type TokenState = ActionState & { token?: string }
 
 /** Creates a personal API token; the value is returned once and only its hash is kept. */
 export async function createToken(_prev: TokenState, formData: FormData): Promise<TokenState> {
+  const { t, format } = await getI18n()
   const values = { name: String(formData.get("name") ?? "").slice(0, 64), expires: String(formData.get("expires") ?? "90") }
   const parsed = z
     .object({
       name: z
         .string()
         .trim()
-        .min(1, "Name is required")
-        .max(64, "At most 64 characters")
-        .regex(/^[\p{L}\p{N} _.:@()-]+$/u, "Letters, numbers, spaces and _.:@()-"),
+        .min(1, t.account.tokens.nameRequired)
+        .max(64, t.account.tokens.nameTooLong)
+        .regex(/^[\p{L}\p{N} _.:@()-]+$/u, t.account.tokens.nameChars),
       expires: z.enum(Object.keys(EXPIRY_DAYS) as [TokenExpiry, ...TokenExpiry[]]),
     })
     .safeParse(values)
@@ -198,22 +207,23 @@ export async function createToken(_prev: TokenState, formData: FormData): Promis
   const res = await runAction("user", "account.token_create", name, async ({ user }) => {
     const db = await getDb()
     if ((await listApiTokens(db, user.id)).length >= MAX_TOKENS_PER_USER) {
-      throw new UserError(`At most ${MAX_TOKENS_PER_USER} tokens; revoke one first`)
+      throw new UserError(format(t.account.tokens.tooMany, { max: MAX_TOKENS_PER_USER }))
     }
     const days = EXPIRY_DAYS[expires]
     token = await createApiToken(db, user.id, name, days ? new Date(Date.now() + days * 86_400_000) : null)
-    return `Token ${name} created`
+    return format(t.account.tokens.created, { name })
   })
   return { ...res, token, values }
 }
 
 export async function revokeToken(id: number): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const parsed = z.number().int().positive().safeParse(id)
-  if (!parsed.success) return { error: "Invalid token" }
+  if (!parsed.success) return { error: t.account.tokens.invalid }
   return runAction("user", "account.token_revoke", `#${parsed.data}`, async ({ user }) => {
     const name = await revokeApiToken(await getDb(), user.id, parsed.data)
-    if (!name) throw new UserError("Token not found")
-    return `Token ${name} revoked`
+    if (!name) throw new UserError(t.account.tokens.notFound)
+    return format(t.account.tokens.revoked, { name })
   })
 }
 
@@ -228,7 +238,7 @@ export async function linkSso(): Promise<ActionState> {
     url = await beginOidc({ next: "/account", linkUid: auth.user.id })
   } catch (err) {
     console.error(`[gantry] single sign-on unavailable: ${(err as Error).message}`)
-    return { error: "Single sign-on is unavailable. Check the server logs." }
+    return { error: (await getI18n()).t.account.sso.unavailable }
   }
   redirect(url)
 }

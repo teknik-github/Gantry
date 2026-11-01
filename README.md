@@ -1038,6 +1038,18 @@ image pull secrets).
 - A background sampler records CPU, memory and running containers per
   environment for the dashboard's 1 h / 24 h / 7 d views.
 
+### Languages and phones
+
+The interface is available in English and Bahasa Indonesia. Pick the language
+in the user menu (Language), on the Account page or on the sign-in screen; it
+is remembered per browser and the server renders pages in it. English is the
+default. [docs/i18n.md](docs/i18n.md) explains how the dictionaries work and
+how to add a language.
+
+Gantry also works on phones: the sidebar becomes a sheet, tables scroll
+sideways with their row actions pinned to the right, and dialogs fit the
+screen.
+
 ## Security model
 
 - `proxy.ts` sits in front of everything. Every `/api/*` route needs a valid

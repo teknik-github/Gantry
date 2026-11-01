@@ -3,30 +3,34 @@ import type { Metadata } from "next"
 import { AlertsTable, ChannelsTable, ResourceThresholds } from "@/components/gantry/notifications-ui"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
-import { timeAgo } from "@/lib/format"
 import { channelFields, channelTarget, CHANNEL_TYPES } from "@/lib/notifications"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { listChannels, recentAlerts } from "@/lib/server/notifications"
 import { getThresholds } from "@/lib/server/thresholds"
+import { getI18n } from "@/lib/i18n/server"
 
-export const metadata: Metadata = { title: "Notifications" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.notifications }
+}
 
 export default async function NotificationsPage() {
   await requireAdmin()
   const [channels, alerts, thresholds] = await Promise.all([listChannels(), recentAlerts(), getThresholds()])
+  const { t, timeAgo } = await getI18n()
+  const typeLabels: Partial<Record<string, string>> = t.notifications.typeLabels
 
   return (
     <PageBody>
       <PageHeader
-        title="Notifications"
-        description="Where Gantry sends alerts: crashed, out-of-memory, unhealthy or restarting containers, unreachable environments, image updates and auto-update results."
+        title={t.nav.pages.notifications}
+        description={t.notifications.description}
       />
       <ChannelsTable
         data={channels.map((c) => ({
           id: c.id,
           name: c.name,
           type: c.type,
-          typeLabel: CHANNEL_TYPES[c.type].label,
+          typeLabel: typeLabels[c.type] ?? CHANNEL_TYPES[c.type].label,
           target: channelTarget(c.type, c.config),
           events: c.events,
           enabled: c.enabled,
@@ -39,7 +43,7 @@ export default async function NotificationsPage() {
         }))}
       />
       <ResourceThresholds thresholds={thresholds} />
-      <PageHeader title="Recent alerts" description="The last 100 alerts (kept for 30 days), whether or not a channel received them." />
+      <PageHeader title={t.notifications.alerts.title} description={t.notifications.alerts.description} />
       <AlertsTable
         data={alerts.map((a) => ({
           id: a.id,

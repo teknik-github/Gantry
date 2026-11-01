@@ -61,6 +61,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useI18n } from "@/lib/i18n/client"
+import { cn } from "@/lib/utils"
+
+// On narrow screens the table scrolls sideways inside its card; the row
+// actions column stays pinned to the right edge so it is always reachable.
+const STICKY_ACTIONS = "max-md:sticky max-md:right-0 max-md:z-[1] max-md:shadow-[-6px_0_6px_-6px_var(--border)]"
 
 // Features shared by every Gantry table (v9 tree-shakes the rest).
 export const features = tableFeatures({
@@ -122,11 +128,12 @@ export function DataTable<T extends RowData>({
   columns,
   getRowId,
   searchText,
-  searchPlaceholder = "Search…",
+  searchPlaceholder,
   toolbar,
-  emptyMessage = "No results.",
+  emptyMessage,
   pageSize: initialPageSize = 10,
   selection,
+  columnLabels,
 }: {
   data: T[]
   columns: Columns<T>
@@ -138,7 +145,11 @@ export function DataTable<T extends RowData>({
   emptyMessage?: string
   pageSize?: number
   selection?: TableSelection<T>
+  /** Translated names for the Columns menu, by column id (English shows the ids). */
+  columnLabels?: Record<string, string>
 }) {
+  const i18n = useI18n()
+  const text = i18n.t.common.table
   const [query, setQuery] = React.useState("")
   const [columnVisibility, setColumnVisibility] = React.useState<ColumnVisibilityState>({})
   const [sorting, setSorting] = React.useState<SortingState>([])
@@ -176,7 +187,7 @@ export function DataTable<T extends RowData>({
           id: "select",
           header: () => (
             <Checkbox
-              aria-label="Select all"
+              aria-label={text.selectAll}
               className="align-middle"
               disabled={!selectable.length}
               checked={allChecked ? true : selected.length ? "indeterminate" : false}
@@ -186,7 +197,7 @@ export function DataTable<T extends RowData>({
           cell: ({ row }) =>
             canSelect(row.original) ? (
               <Checkbox
-                aria-label={`Select ${selection.rowLabel(row.original)}`}
+                aria-label={i18n.format(text.selectRow, { name: selection.rowLabel(row.original) })}
                 className="align-middle"
                 checked={checked.has(row.id)}
                 onCheckedChange={(v) => toggle([row.id], v === true)}
@@ -215,7 +226,7 @@ export function DataTable<T extends RowData>({
     <div className="flex w-full flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 lg:px-6">
         {searchText ? (
-          <div className="relative w-full max-w-xs">
+          <div className="relative w-full sm:max-w-xs">
             <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
@@ -223,20 +234,20 @@ export function DataTable<T extends RowData>({
                 setQuery(e.target.value)
                 table.setPageIndex(0)
               }}
-              placeholder={searchPlaceholder}
+              placeholder={searchPlaceholder ?? text.searchPlaceholder}
               className="h-8 pl-8"
-              aria-label="Search"
+              aria-label={text.search}
             />
           </div>
         ) : (
           <div />
         )}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
                 <Columns3Icon data-icon="inline-start" />
-                <span className="hidden lg:inline">Columns</span>
+                <span className="max-lg:sr-only">{text.columns}</span>
                 <ChevronDownIcon data-icon="inline-end" />
               </Button>
             </DropdownMenuTrigger>
@@ -251,7 +262,8 @@ export function DataTable<T extends RowData>({
                     checked={column.getIsVisible()}
                     onCheckedChange={(value) => column.toggleVisibility(!!value)}
                   >
-                    {column.id}
+                    {/* English keeps showing the column ids, as it always did. */}
+                    {(i18n.locale !== "en" && columnLabels?.[column.id]) || column.id}
                   </DropdownMenuCheckboxItem>
                 ))}
             </DropdownMenuContent>
@@ -264,22 +276,29 @@ export function DataTable<T extends RowData>({
           data-testid="bulk-bar"
           className="mx-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 lg:mx-6"
         >
-          <span className="mr-1 text-sm font-medium tabular-nums">{selected.length} selected</span>
+          <span className="mr-1 text-sm font-medium tabular-nums">
+            {i18n.format(text.selected, { count: selected.length })}
+          </span>
           {selection.actions(selected, clear)}
           <Button size="sm" variant="ghost" className="ml-auto" onClick={clear}>
             <XIcon data-icon="inline-start" />
-            Clear
+            {i18n.t.common.actions.clear}
           </Button>
         </div>
       ) : null}
       <div className="relative flex flex-col gap-4 overflow-auto px-4 lg:px-6">
         <div className="overflow-hidden rounded-lg border">
-          <Table>
+          {/* Phones: room for the columns; the table scrolls sideways inside its card. */}
+          <Table className="max-md:min-w-[40rem]">
             <TableHeader className="sticky top-0 z-10 bg-muted">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id} colSpan={header.colSpan} className={header.column.id === "select" ? "w-8" : undefined}>
+                    <TableHead
+                      key={header.id}
+                      colSpan={header.colSpan}
+                      className={cn(header.column.id === "select" && "w-8", header.column.id === "actions" && STICKY_ACTIONS, "bg-muted")}
+                    >
                       {header.isPlaceholder ? null : <FlexRender header={header} />}
                     </TableHead>
                   ))}
@@ -291,7 +310,7 @@ export function DataTable<T extends RowData>({
                 table.getRowModel().rows.map((row) => (
                   <TableRow key={row.id} data-state={checked.has(row.id) ? "selected" : undefined}>
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
+                      <TableCell key={cell.id} className={cell.column.id === "actions" ? cn(STICKY_ACTIONS, "bg-background") : undefined}>
                         <FlexRender cell={cell} />
                       </TableCell>
                     ))}
@@ -303,21 +322,23 @@ export function DataTable<T extends RowData>({
                     colSpan={table.getVisibleLeafColumns().length}
                     className="h-24 text-center text-muted-foreground"
                   >
-                    {emptyMessage}
+                    {emptyMessage ?? text.noResults}
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
         </div>
-        <div className="flex items-center justify-between px-4">
+        <div className="flex items-center justify-between px-0 sm:px-4">
           <div className="hidden flex-1 text-sm text-muted-foreground lg:flex">
-            {rows.length} item(s){rows.length !== data.length ? ` of ${data.length}` : ""}
+            {rows.length !== data.length
+              ? i18n.format(text.itemsOf, { count: rows.length, total: data.length })
+              : i18n.format(text.items, { count: rows.length })}
           </div>
           <div className="flex w-full items-center gap-8 lg:w-fit">
             <div className="hidden items-center gap-2 lg:flex">
               <Label htmlFor="rows-per-page" className="text-sm font-medium">
-                Rows per page
+                {text.rowsPerPage}
               </Label>
               <Select
                 value={`${table.state.pagination.pageSize}`}
@@ -338,7 +359,10 @@ export function DataTable<T extends RowData>({
               </Select>
             </div>
             <div className="flex w-fit items-center justify-center text-sm font-medium">
-              Page {table.state.pagination.pageIndex + 1} of {Math.max(1, table.getPageCount())}
+              {i18n.format(text.page, {
+                page: table.state.pagination.pageIndex + 1,
+                pages: Math.max(1, table.getPageCount()),
+              })}
             </div>
             <div className="ml-auto flex items-center gap-2 lg:ml-0">
               <Button
@@ -347,7 +371,7 @@ export function DataTable<T extends RowData>({
                 onClick={() => table.setPageIndex(0)}
                 disabled={!table.getCanPreviousPage()}
               >
-                <span className="sr-only">Go to first page</span>
+                <span className="sr-only">{text.firstPage}</span>
                 <ChevronsLeftIcon />
               </Button>
               <Button
@@ -357,7 +381,7 @@ export function DataTable<T extends RowData>({
                 onClick={() => table.previousPage()}
                 disabled={!table.getCanPreviousPage()}
               >
-                <span className="sr-only">Go to previous page</span>
+                <span className="sr-only">{text.previousPage}</span>
                 <ChevronLeftIcon />
               </Button>
               <Button
@@ -367,7 +391,7 @@ export function DataTable<T extends RowData>({
                 onClick={() => table.nextPage()}
                 disabled={!table.getCanNextPage()}
               >
-                <span className="sr-only">Go to next page</span>
+                <span className="sr-only">{text.nextPage}</span>
                 <ChevronRightIcon />
               </Button>
               <Button
@@ -377,7 +401,7 @@ export function DataTable<T extends RowData>({
                 onClick={() => table.setPageIndex(table.getPageCount() - 1)}
                 disabled={!table.getCanNextPage()}
               >
-                <span className="sr-only">Go to last page</span>
+                <span className="sr-only">{text.lastPage}</span>
                 <ChevronsRightIcon />
               </Button>
             </div>

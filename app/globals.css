@@ -151,3 +151,86 @@
     @apply font-sans;
   }
 }
+
+/*
+ * Touch screens and phone-sized windows: bigger hit areas for buttons, menu
+ * items and form controls (at least 36-40px), without changing the dense
+ * desktop layout. Buttons are matched by data-variant + data-size: a trigger
+ * wrapping a Button (asChild) replaces its data-slot.
+ */
+@media (pointer: coarse) {
+  [data-variant][data-size] {
+    min-height: 2.25rem;
+  }
+  [data-variant][data-size="default"],
+  [data-variant][data-size="lg"],
+  [data-slot="input"],
+  [data-slot="select-trigger"] {
+    min-height: 2.5rem;
+  }
+  [data-variant][data-size^="icon"] {
+    min-width: 2.25rem;
+  }
+  [data-variant][data-size="icon"],
+  [data-variant][data-size="icon-lg"] {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+  [data-slot="dropdown-menu-item"],
+  [data-slot="dropdown-menu-sub-trigger"],
+  [data-slot="dropdown-menu-checkbox-item"],
+  [data-slot="dropdown-menu-radio-item"],
+  [data-slot="select-item"] {
+    min-height: 2.5rem;
+  }
+  [data-slot="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  [data-slot="tabs-trigger"] {
+    min-height: 2.25rem;
+  }
+}
+
+/* The same for narrow windows (a comma-separated query list is cut down to its first query by the CSS minifier). */
+@media (max-width: 767px) {
+  [data-variant][data-size] {
+    min-height: 2.25rem;
+  }
+  [data-variant][data-size="default"],
+  [data-variant][data-size="lg"],
+  [data-slot="input"],
+  [data-slot="select-trigger"] {
+    min-height: 2.5rem;
+  }
+  [data-variant][data-size^="icon"] {
+    min-width: 2.25rem;
+  }
+  [data-variant][data-size="icon"],
+  [data-variant][data-size="icon-lg"] {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+  [data-slot="dropdown-menu-item"],
+  [data-slot="dropdown-menu-sub-trigger"],
+  [data-slot="dropdown-menu-checkbox-item"],
+  [data-slot="dropdown-menu-radio-item"],
+  [data-slot="select-item"] {
+    min-height: 2.5rem;
+  }
+  [data-slot="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  [data-slot="tabs-trigger"] {
+    min-height: 2.25rem;
+  }
+}
+
+/* Notched phones (viewport-fit=cover in app/layout.tsx): keep content out of the side insets. */
+@supports (padding: env(safe-area-inset-left)) {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}

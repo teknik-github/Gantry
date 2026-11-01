@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { useI18n } from "@/lib/i18n/client"
 import type { ContainerAction } from "@/lib/server/docker/api"
 
 export function ContainerActions({
@@ -38,12 +39,16 @@ export function ContainerActions({
   recreate?: RecreateInfo
 }) {
   const router = useRouter()
+  const { t, format } = useI18n()
   const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
   const running = state === "running"
   const paused = state === "paused"
-  const act = (action: ContainerAction, label: string) =>
-    run(() => containerAction(id, action, environmentId), `${name}: ${label}`)
+  const act = (action: ContainerAction) =>
+    run(
+      () => containerAction(id, action, environmentId),
+      format(t.containers.actionDone, { name, action: t.containers.done[action] })
+    )
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -56,9 +61,9 @@ export function ContainerActions({
       ) : null}
       {can.manage ? (
         <ConfirmAction
-          title={`Remove ${name}?`}
-          description="The container will be stopped and deleted. This cannot be undone."
-          confirmLabel="Remove"
+          title={format(t.containers.removeTitle, { name })}
+          description={t.containers.removeDescriptionForce}
+          confirmLabel={t.common.actions.remove}
           onConfirm={async () => {
             const res = await removeContainer(id, { force: true }, environmentId)
             if (res.ok) router.push("/containers")
@@ -67,7 +72,7 @@ export function ContainerActions({
         >
           <Button size="sm" variant="destructive" disabled={pending}>
             <Trash2Icon data-icon="inline-start" />
-            Remove
+            {t.common.actions.remove}
           </Button>
         </ConfirmAction>
       ) : null}
@@ -84,42 +89,43 @@ function OperateButtons({
   running: boolean
   paused: boolean
   pending: boolean
-  act: (action: ContainerAction, label: string) => void
+  act: (action: ContainerAction) => void
 }) {
+  const { t } = useI18n()
   return (
     <>
       {!running && !paused ? (
-        <Button size="sm" disabled={pending} onClick={() => act("start", "started")}>
+        <Button size="sm" disabled={pending} onClick={() => act("start")}>
           <PlayIcon data-icon="inline-start" />
-          Start
+          {t.common.actions.start}
         </Button>
       ) : null}
       {running ? (
-        <Button size="sm" variant="outline" disabled={pending} onClick={() => act("stop", "stopped")}>
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => act("stop")}>
           <SquareIcon data-icon="inline-start" />
-          Stop
+          {t.common.actions.stop}
         </Button>
       ) : null}
-      <Button size="sm" variant="outline" disabled={pending} onClick={() => act("restart", "restarted")}>
+      <Button size="sm" variant="outline" disabled={pending} onClick={() => act("restart")}>
         <RotateCwIcon data-icon="inline-start" />
-        Restart
+        {t.common.actions.restart}
       </Button>
       {running ? (
-        <Button size="sm" variant="outline" disabled={pending} onClick={() => act("pause", "paused")}>
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => act("pause")}>
           <PauseIcon data-icon="inline-start" />
-          Pause
+          {t.containers.actions.pause}
         </Button>
       ) : null}
       {paused ? (
-        <Button size="sm" variant="outline" disabled={pending} onClick={() => act("unpause", "resumed")}>
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => act("unpause")}>
           <PlayIcon data-icon="inline-start" />
-          Resume
+          {t.containers.actions.resume}
         </Button>
       ) : null}
       {running ? (
-        <Button size="sm" variant="outline" disabled={pending} onClick={() => act("kill", "killed")}>
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => act("kill")}>
           <ZapIcon data-icon="inline-start" />
-          Kill
+          {t.containers.actions.kill}
         </Button>
       ) : null}
     </>
@@ -128,6 +134,8 @@ function OperateButtons({
 
 export function LogViewer({ id }: { id: string }) {
   const router = useRouter()
+  const { t, format } = useI18n()
+  const text = t.containers.logs
   const [logs, setLogs] = React.useState<string>("")
   const [error, setError] = React.useState<string | null>(null)
   const [tail, setTail] = React.useState("500")
@@ -144,7 +152,7 @@ export function LogViewer({ id }: { id: string }) {
         if (cancelled) return
         if (res.status === 401) return router.replace("/login")
         if (!res.ok) {
-          setError((await res.json()).error ?? "Failed to load logs")
+          setError((await res.json()).error ?? text.loadFailed)
         } else {
           const text = await res.text()
           if (cancelled) return
@@ -152,7 +160,7 @@ export function LogViewer({ id }: { id: string }) {
           setLogs(text)
         }
       } catch {
-        if (!cancelled) setError("Failed to load logs")
+        if (!cancelled) setError(text.loadFailed)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -164,26 +172,26 @@ export function LogViewer({ id }: { id: string }) {
       cancelled = true
       clearInterval(timer)
     }
-  }, [id, tail, follow, refreshKey, router])
+  }, [id, tail, follow, refreshKey, router, text.loadFailed])
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Logs</CardTitle>
-        <CardDescription>stdout and stderr, with timestamps</CardDescription>
+        <CardTitle>{text.title}</CardTitle>
+        <CardDescription>{text.description}</CardDescription>
         <CardAction className="flex flex-wrap items-center gap-3">
           <Label className="font-normal">
             <Switch checked={follow} onCheckedChange={setFollow} />
-            Auto-refresh
+            {text.autoRefresh}
           </Label>
           <Select value={tail} onValueChange={setTail}>
-            <SelectTrigger size="sm" className="w-40" aria-label="Lines">
+            <SelectTrigger size="sm" className="w-40" aria-label={text.lines}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {["100", "500", "1000", "5000"].map((n) => (
                 <SelectItem key={n} value={n}>
-                  Last {n} lines
+                  {format(text.lastLines, { count: n })}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -196,7 +204,7 @@ export function LogViewer({ id }: { id: string }) {
               setRefreshKey((k) => k + 1)
             }}
             disabled={loading}
-            aria-label="Refresh logs"
+            aria-label={text.refresh}
           >
             <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
           </Button>

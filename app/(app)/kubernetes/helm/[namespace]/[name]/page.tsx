@@ -11,15 +11,18 @@ import { Mono, PageHeader } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import type { I18n } from "@/lib/i18n"
+import { getI18n } from "@/lib/i18n/server"
 import { namespaceSchema, objectNameSchema } from "@/lib/kubernetes/names"
 import { tryKube } from "@/lib/server/kubernetes"
 import { getRelease, type HelmRevisionRow } from "@/lib/server/kubernetes/helm"
-import { helmVersion, HELM_MISSING } from "@/lib/server/kubernetes/helm-cli"
+import { helmVersion } from "@/lib/server/kubernetes/helm-cli"
 import { listHelmRepos } from "@/lib/server/kubernetes/helm-repos"
 
 export async function generateMetadata({ params }: PageProps<"/kubernetes/helm/[namespace]/[name]">): Promise<Metadata> {
   const { name } = await params
-  return { title: `Helm release ${decodeURIComponent(name)}` }
+  const { t, format } = await getI18n()
+  return { title: format(t.kubernetes.helm.title, { name: decodeURIComponent(name) }) }
 }
 
 function Block({ title, description, text, testId }: { title: string; description?: string; text: string; testId: string }) {
@@ -41,24 +44,25 @@ function Block({ title, description, text, testId }: { title: string; descriptio
   )
 }
 
-function History({ rows, current }: { rows: HelmRevisionRow[]; current: number }) {
+function History({ rows, current, t }: { rows: HelmRevisionRow[]; current: number; t: I18n["t"] }) {
+  const k = t.kubernetes.helm
   return (
     <Card className="min-w-0">
       <CardHeader>
-        <CardTitle>History</CardTitle>
-        <CardDescription>Revisions of this release (helm history).</CardDescription>
+        <CardTitle>{k.history}</CardTitle>
+        <CardDescription>{k.historyDescription}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="overflow-hidden rounded-lg border" data-testid="helm-history">
           <Table>
             <TableHeader className="bg-muted">
               <TableRow>
-                <TableHead>Revision</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Chart</TableHead>
-                <TableHead>App version</TableHead>
-                <TableHead>Updated</TableHead>
-                <TableHead>Description</TableHead>
+                <TableHead>{k.revision}</TableHead>
+                <TableHead>{t.common.fields.status}</TableHead>
+                <TableHead>{k.chart}</TableHead>
+                <TableHead>{k.appVersion}</TableHead>
+                <TableHead>{t.common.fields.updated}</TableHead>
+                <TableHead>{t.common.fields.description}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -66,7 +70,7 @@ function History({ rows, current }: { rows: HelmRevisionRow[]; current: number }
                 <TableRow key={h.revision}>
                   <TableCell className="tabular-nums">
                     {h.revision}
-                    {h.revision === current ? " (current)" : ""}
+                    {h.revision === current ? k.current : ""}
                   </TableCell>
                   <TableCell>
                     <KubeStatus status={h.status} />
@@ -99,11 +103,13 @@ export default async function HelmReleasePage({ params }: PageProps<"/kubernetes
   const { namespace: rawNs, name: rawName } = await params
   const namespace = decodeURIComponent(rawNs)
   const name = decodeURIComponent(rawName)
+  const { t, format, rich } = await getI18n()
+  const k = t.kubernetes.helm
   const back = (
     <Button variant="outline" size="sm" asChild>
       <Link href="/kubernetes/helm">
         <ArrowLeftIcon data-icon="inline-start" />
-        Helm releases
+        {t.nav.pages.helm}
       </Link>
     </Button>
   )
@@ -120,8 +126,8 @@ export default async function HelmReleasePage({ params }: PageProps<"/kubernetes
   if (!namespaceSchema.safeParse(namespace).success || !objectNameSchema.safeParse(name).success) {
     return (
       <PageBody>
-        <PageHeader title="Helm release" actions={back} />
-        <KubeUnavailable message="Invalid release name" />
+        <PageHeader title={k.helmRelease} actions={back} />
+        <KubeUnavailable message={k.invalidName} />
       </PageBody>
     )
   }
@@ -130,8 +136,8 @@ export default async function HelmReleasePage({ params }: PageProps<"/kubernetes
   if (result.error !== undefined || !result.data) {
     return (
       <PageBody>
-        <PageHeader title={name} description={`Helm release in ${namespace}`} actions={back} />
-        <KubeUnavailable message={result.error ?? `Helm release ${name} not found in ${namespace}`} />
+        <PageHeader title={name} description={format(k.releaseIn, { namespace })} actions={back} />
+        <KubeUnavailable message={result.error ?? format(k.notFound, { name, namespace })} />
       </PageBody>
     )
   }
@@ -146,14 +152,12 @@ export default async function HelmReleasePage({ params }: PageProps<"/kubernetes
         title={name}
         description={
           <span className="flex flex-wrap items-center gap-2">
-            Helm release in {namespace} · <KubeStatus status={r.status} />
+            {rich(k.releaseInStatus, { namespace, status: <KubeStatus status={r.status} /> })}
             <Mono>
               {r.chart}-{r.chartVersion}
             </Mono>
             {r.appVersion ? <span>app {r.appVersion}</span> : null}
-            <span>
-              revision {r.revision}, updated <Age at={r.updated} />
-            </span>
+            <span>{rich(k.revisionUpdated, { revision: r.revision, age: <Age at={r.updated} /> })}</span>
           </span>
         }
         actions={
@@ -165,17 +169,15 @@ export default async function HelmReleasePage({ params }: PageProps<"/kubernetes
       />
       {r.description ? <p className="px-4 text-sm text-muted-foreground lg:px-6">{r.description}</p> : null}
       <div className="px-4 lg:px-6">
-        <History rows={r.history} current={r.revision} />
+        <History rows={r.history} current={r.revision} t={t} />
       </div>
-      {canManage && !helm ? <KubeUnavailable message={`${HELM_MISSING} Upgrade and rollback are unavailable.`} /> : null}
+      {canManage && !helm ? <KubeUnavailable message={format(k.missingNoUpgrade, { message: k.missing })} /> : null}
       {canManage && helm ? (
         <div className="grid gap-4 px-4 lg:px-6 @5xl/main:grid-cols-2">
           <Card className="min-w-0">
             <CardHeader>
-              <CardTitle>Upgrade</CardTitle>
-              <CardDescription>
-                helm upgrade to another chart version and/or new values. Pick where the chart comes from.
-              </CardDescription>
+              <CardTitle>{k.upgrade}</CardTitle>
+              <CardDescription>{k.upgradeDescription}</CardDescription>
             </CardHeader>
             <CardContent>
               <HelmUpgradeForm
@@ -190,8 +192,8 @@ export default async function HelmReleasePage({ params }: PageProps<"/kubernetes
           </Card>
           <Card className="min-w-0 self-start">
             <CardHeader>
-              <CardTitle>Roll back</CardTitle>
-              <CardDescription>helm rollback to an earlier revision.</CardDescription>
+              <CardTitle>{k.rollBack}</CardTitle>
+              <CardDescription>{k.rollBackDescription}</CardDescription>
             </CardHeader>
             <CardContent>
               <HelmRollbackForm
@@ -209,18 +211,16 @@ export default async function HelmReleasePage({ params }: PageProps<"/kubernetes
       {isAdmin ? (
         <div className="grid gap-4 px-4 lg:px-6 @5xl/main:grid-cols-2">
           <Block
-            title="Values"
-            description="User-supplied values (helm get values). They may contain secrets."
-            text={r.values || "# No values were set; the chart's defaults are used."}
+            title={k.values}
+            description={k.valuesDescription}
+            text={r.values || k.noValues}
             testId="helm-values"
           />
-          <Block title="Manifest" description="What the release created (helm get manifest)." text={r.manifest} testId="helm-manifest" />
-          {r.notes ? <Block title="Notes" text={r.notes} testId="helm-notes" /> : null}
+          <Block title={k.manifest} description={k.manifestDescription} text={r.manifest} testId="helm-manifest" />
+          {r.notes ? <Block title={k.notes} text={r.notes} testId="helm-notes" /> : null}
         </div>
       ) : (
-        <p className="px-4 text-sm text-muted-foreground lg:px-6">
-          Values and manifests can contain secrets and are shown to administrators only.
-        </p>
+        <p className="px-4 text-sm text-muted-foreground lg:px-6">{k.adminsOnly}</p>
       )}
     </PageBody>
   )

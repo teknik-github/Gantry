@@ -29,7 +29,7 @@ import {
   PackageIcon,
 } from "lucide-react"
 
-import { NavMain } from "@/components/nav-main"
+import { NavMain, type NavItem } from "@/components/nav-main"
 import {
   Sidebar,
   SidebarContent,
@@ -37,38 +37,38 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar"
 
-const navDocker = [
-  { title: "Dashboard", url: "/dashboard", icon: <LayoutDashboardIcon /> },
-  { title: "Containers", url: "/containers", icon: <BoxIcon /> },
-  { title: "Images", url: "/images", icon: <LayersIcon /> },
-  { title: "Volumes", url: "/volumes", icon: <HardDriveIcon /> },
-  { title: "Networks", url: "/networks", icon: <NetworkIcon /> },
-  { title: "Stacks", url: "/stacks", icon: <LayersPlusIcon /> },
-  { title: "Templates", url: "/templates", icon: <LayoutTemplateIcon /> },
-  { title: "Topology", url: "/topology", icon: <WaypointsIcon /> },
+const navDocker: NavItem[] = [
+  { page: "dashboard", url: "/dashboard", icon: <LayoutDashboardIcon /> },
+  { page: "containers", url: "/containers", icon: <BoxIcon /> },
+  { page: "images", url: "/images", icon: <LayersIcon /> },
+  { page: "volumes", url: "/volumes", icon: <HardDriveIcon /> },
+  { page: "networks", url: "/networks", icon: <NetworkIcon /> },
+  { page: "stacks", url: "/stacks", icon: <LayersPlusIcon /> },
+  { page: "templates", url: "/templates", icon: <LayoutTemplateIcon /> },
+  { page: "topology", url: "/topology", icon: <WaypointsIcon /> },
 ]
 
-const navKubernetes = [
-  { title: "Overview", url: "/kubernetes", icon: <ShipWheelIcon />, exact: true },
-  { title: "Workloads", url: "/kubernetes/workloads", icon: <ContainerIcon /> },
-  { title: "Pods", url: "/kubernetes/pods", icon: <CuboidIcon /> },
-  { title: "Services", url: "/kubernetes/services", icon: <WorkflowIcon /> },
-  { title: "Namespaces", url: "/kubernetes/namespaces", icon: <FolderTreeIcon /> },
-  { title: "ConfigMaps & Secrets", url: "/kubernetes/config", icon: <FileCogIcon /> },
-  { title: "Events", url: "/kubernetes/events", icon: <TriangleAlertIcon /> },
-  { title: "Helm releases", url: "/kubernetes/helm", icon: <PackageIcon /> },
-  { title: "Apply manifest", url: "/kubernetes/apply", icon: <FileUpIcon /> },
+const navKubernetes: NavItem[] = [
+  { page: "overview", url: "/kubernetes", icon: <ShipWheelIcon />, exact: true },
+  { page: "workloads", url: "/kubernetes/workloads", icon: <ContainerIcon /> },
+  { page: "pods", url: "/kubernetes/pods", icon: <CuboidIcon /> },
+  { page: "services", url: "/kubernetes/services", icon: <WorkflowIcon /> },
+  { page: "namespaces", url: "/kubernetes/namespaces", icon: <FolderTreeIcon /> },
+  { page: "config", url: "/kubernetes/config", icon: <FileCogIcon /> },
+  { page: "events", url: "/kubernetes/events", icon: <TriangleAlertIcon /> },
+  { page: "helm", url: "/kubernetes/helm", icon: <PackageIcon /> },
+  { page: "apply", url: "/kubernetes/apply", icon: <FileUpIcon /> },
 ]
 
-const navAdmin = [
-  { title: "Environments", url: "/environments", icon: <ServerIcon /> },
-  { title: "Registries", url: "/registries", icon: <KeyRoundIcon /> },
-  { title: "Notifications", url: "/notifications", icon: <BellIcon /> },
-  { title: "Auto-update", url: "/auto-update", icon: <RefreshCwIcon /> },
-  { title: "Proxy", url: "/proxy", icon: <GlobeIcon /> },
-  { title: "Users", url: "/users", icon: <UsersIcon /> },
-  { title: "Activity", url: "/activity", icon: <HistoryIcon /> },
-  { title: "Backups", url: "/backups", icon: <ArchiveIcon /> },
+const navAdmin: NavItem[] = [
+  { page: "environments", url: "/environments", icon: <ServerIcon /> },
+  { page: "registries", url: "/registries", icon: <KeyRoundIcon /> },
+  { page: "notifications", url: "/notifications", icon: <BellIcon /> },
+  { page: "autoUpdate", url: "/auto-update", icon: <RefreshCwIcon /> },
+  { page: "proxy", url: "/proxy", icon: <GlobeIcon /> },
+  { page: "users", url: "/users", icon: <UsersIcon /> },
+  { page: "activity", url: "/activity", icon: <HistoryIcon /> },
+  { page: "backups", url: "/backups", icon: <ArchiveIcon /> },
 ]
 
 export function AppSidebar({
@@ -97,20 +97,20 @@ export function AppSidebar({
 }
 
 export function DockerNav() {
-  return <NavMain items={navDocker} label="Docker" />
+  return <NavMain items={navDocker} group="docker" />
 }
 
 export function KubernetesNav() {
-  return <NavMain items={navKubernetes} label="Kubernetes" />
+  return <NavMain items={navKubernetes} group="kubernetes" />
 }
 
 export function AdminNav() {
-  return <NavMain items={navAdmin} label="Administration" />
+  return <NavMain items={navAdmin} group="administration" />
 }
 
 // Environment-level settings a manager (not administrator) of the current Docker environment may change.
 const navManager = navAdmin.filter((i) => i.url === "/auto-update" || i.url === "/proxy")
 
 export function ManagerNav() {
-  return <NavMain items={navManager} label="Environment" />
+  return <NavMain items={navManager} group="environment" />
 }

@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 import { AutoUpdateContainers, AutoUpdateResults, AutoUpdateSchedule } from "@/components/gantry/auto-update-ui"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
-import { timeAgo } from "@/lib/format"
+import { getI18n } from "@/lib/i18n/server"
 import { requirePermission } from "@/lib/server/action"
 import {
   AUTO_UPDATE_LABEL,
@@ -18,7 +18,9 @@ import { getCurrentEnvironment, getDocker } from "@/lib/server/environments"
 import { updatesFor } from "@/lib/server/image-updates"
 import { tryDocker } from "@/lib/server/views"
 
-export const metadata: Metadata = { title: "Auto-update" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.autoUpdate }
+}
 
 export default async function AutoUpdatePage() {
   // Managers turn auto-update on per container in their environment; the
@@ -36,12 +38,13 @@ export default async function AutoUpdatePage() {
     return { containers, ...(await updatesFor(api, env.id, containers)) }
   })
 
+  const { t, format, timeAgo } = await getI18n()
   const now = new Date()
   return (
     <PageBody>
       <PageHeader
-        title="Auto-update"
-        description={`Once a day, running containers with auto-update on are updated when their image tag has a newer image (pull & recreate, rolled back on failure). Containers can also opt in with the label ${AUTO_UPDATE_LABEL}=true.`}
+        title={t.nav.pages.autoUpdate}
+        description={format(t.autoUpdate.description, { label: AUTO_UPDATE_LABEL })}
       />
       {isAdmin ? (
         <AutoUpdateSchedule
@@ -59,7 +62,10 @@ export default async function AutoUpdatePage() {
           results={lastRun.results.map((r, i) => ({ id: String(i), ...r, message: r.message ?? "" }))}
         />
       ) : null}
-      <PageHeader title={`Containers on ${env?.name ?? "this environment"}`} description="Turn auto-update on per container. Stopped containers are skipped." />
+      <PageHeader
+        title={format(t.autoUpdate.containersOn, { name: env?.name ?? t.autoUpdate.thisEnvironment })}
+        description={t.autoUpdate.containersDescription}
+      />
       {result.error !== undefined ? (
         <DockerUnavailable message={result.error} />
       ) : (

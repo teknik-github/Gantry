@@ -4,18 +4,22 @@ import { KubeUnavailable, loadKubePage, NamespaceFilter } from "@/components/gan
 import { WorkloadsTable } from "@/components/gantry/kubernetes/tables"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
+import { getI18n } from "@/lib/i18n/server"
 import { WORKLOAD_KINDS } from "@/lib/kubernetes/names"
 import { toWorkloadRows } from "@/lib/kubernetes/rows"
 import { tryKube } from "@/lib/server/kubernetes"
 
-export const metadata: Metadata = { title: "Workloads" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.workloads }
+}
 
 export default async function WorkloadsPage() {
+  const { t } = await getI18n()
   const { page, blocked } = await loadKubePage()
   const header = (
     <PageHeader
-      title="Workloads"
-      description="Deployments, stateful sets and daemon sets."
+      title={t.nav.pages.workloads}
+      description={t.kubernetes.workloads.description}
       actions={page ? <NamespaceFilter page={page} /> : null}
     />
   )

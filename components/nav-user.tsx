@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useTheme } from "next-themes"
 
 import { logout, logoutEverywhere } from "@/app/(auth)/actions"
+import { LanguageMenu } from "@/components/i18n/language-switcher"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -29,9 +30,13 @@ import {
   SunIcon,
 } from "lucide-react"
 
+import { useI18n } from "@/lib/i18n/client"
+
 export function NavUser({ user }: { user: { username: string; role: string } }) {
-  const { isMobile } = useSidebar()
+  const { isMobile, setOpenMobile } = useSidebar()
   const { resolvedTheme, setTheme } = useTheme()
+  const { t } = useI18n()
+  const roleLabel = user.role === "admin" ? t.nav.user.roleAdmin : user.role === "user" ? t.nav.user.roleUser : user.role
   const initials = user.username.slice(0, 2).toUpperCase()
 
   const identity = (
@@ -41,7 +46,7 @@ export function NavUser({ user }: { user: { username: string; role: string } }) 
       </Avatar>
       <div className="grid flex-1 text-left text-sm leading-tight">
         <span className="truncate font-medium">{user.username}</span>
-        <span className="truncate text-xs text-muted-foreground capitalize">{user.role}</span>
+        <span className="truncate text-xs text-muted-foreground">{roleLabel}</span>
       </div>
     </>
   )
@@ -71,26 +76,27 @@ export function NavUser({ user }: { user: { username: string; role: string } }) 
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                <Link href="/account">
+                <Link href="/account" onClick={() => isMobile && setOpenMobile(false)}>
                   <CircleUserRoundIcon />
-                  Account
+                  {t.nav.user.account}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
               >
                 {resolvedTheme === "dark" ? <SunIcon /> : <MoonIcon />}
-                {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
+                {resolvedTheme === "dark" ? t.nav.user.lightMode : t.nav.user.darkMode}
               </DropdownMenuItem>
+              <LanguageMenu />
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => logout()}>
               <LogOutIcon />
-              Log out
+              {t.nav.user.logOut}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => logoutEverywhere()}>
               <MonitorOffIcon />
-              Sign out everywhere
+              {t.nav.user.signOutEverywhere}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

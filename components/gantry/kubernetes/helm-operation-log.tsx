@@ -5,6 +5,7 @@ import { CircleCheckIcon, CircleXIcon, LoaderCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import type { HelmOperationEvent, HelmOperationInfo } from "@/lib/server/kubernetes/helm-operations"
+import { useI18n } from "@/lib/i18n/client"
 import { cn } from "@/lib/utils"
 
 /** Kept in the browser; older output scrolls away. */
@@ -24,6 +25,8 @@ export function HelmOperationLog({
   operation: HelmOperationInfo
   onDone?: (ok: boolean, message: string) => void
 }) {
+  const { t, format } = useI18n()
+  const k = t.kubernetes.helm
   const [output, setOutput] = React.useState("")
   const [status, setStatus] = React.useState<Status>("running")
   const [message, setMessage] = React.useState("")
@@ -54,7 +57,7 @@ export function HelmOperationLog({
         })
         if (!res.ok || !res.body) {
           const body = (await res.json().catch(() => null)) as { error?: string } | null
-          finish(false, body?.error ?? `Could not follow the operation (${res.status})`)
+          finish(false, body?.error ?? format(k.followFailedStatus, { status: res.status }))
           return
         }
         const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -75,14 +78,14 @@ export function HelmOperationLog({
             } else finish(event.ok, event.message)
           }
         }
-        if (!finished) finish(false, "The connection to the server was lost; the operation may still be running. Reload the page to see the release.")
+        if (!finished) finish(false, k.connectionLost)
       } catch (err) {
         if (abort.signal.aborted) return
-        finish(false, `Could not follow the operation: ${(err as Error).message}`)
+        finish(false, format(k.followFailed, { message: (err as Error).message }))
       }
     })()
     return () => abort.abort()
-  }, [operation.id])
+  }, [operation.id, k, format])
 
   React.useEffect(() => {
     const el = preRef.current
@@ -100,7 +103,7 @@ export function HelmOperationLog({
           <CircleXIcon className="size-4 text-destructive" />
         )}
         <span className={cn(status === "failed" && "text-destructive")}>
-          {status === "running" ? `helm ${operation.kind} ${operation.release} is running…` : message}
+          {status === "running" ? format(k.running, { kind: operation.kind, release: operation.release }) : message}
         </span>
       </div>
       <pre

@@ -22,16 +22,8 @@ import { useRunAction } from "@/components/gantry/use-action"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { useI18n } from "@/lib/i18n/client"
 import type { StackOperation } from "@/lib/server/stacks/compose"
-
-const PENDING_LABELS: Record<StackOperation, string> = {
-  deploy: "Deploying…",
-  redeploy: "Pulling & redeploying…",
-  start: "Starting…",
-  stop: "Stopping…",
-  restart: "Restarting…",
-  down: "Taking down…",
-}
 
 export function StackActions({
   id,
@@ -50,6 +42,9 @@ export function StackActions({
   /** Templates are global: administrators only. */
   canSaveTemplate: boolean
 }) {
+  const i18n = useI18n()
+  const { t } = i18n
+  const text = t.stacks.actions
   const router = useRouter()
   const environmentId = useEnvironmentId()
   const [pending, run] = useRunAction()
@@ -71,16 +66,16 @@ export function StackActions({
     <div className="flex flex-wrap items-center gap-2">
       {busy && current ? (
         <span className="text-sm text-muted-foreground">
-          {current === "force" ? "Pulling & redeploying…" : PENDING_LABELS[current]}
+          {current === "force" ? text.pending.redeploy : text.pending[current]}
         </span>
       ) : null}
       <Button size="sm" disabled={busy} onClick={() => act("deploy")}>
         <RocketIcon data-icon="inline-start" />
-        Deploy
+        {t.common.actions.deploy}
       </Button>
       <Button size="sm" variant="outline" disabled={busy} onClick={() => act("redeploy")}>
         <CloudDownloadIcon data-icon="inline-start" />
-        Pull &amp; redeploy
+        {text.pullRedeploy}
       </Button>
       {git ? (
         <Button
@@ -88,28 +83,28 @@ export function StackActions({
           variant="outline"
           disabled={busy}
           onClick={forceRedeploy}
-          title="Pull and redeploy even if the commit and .env didn't change"
+          title={text.forceRedeployTitle}
         >
           <GitPullRequestArrowIcon data-icon="inline-start" />
-          Force redeploy
+          {text.forceRedeploy}
         </Button>
       ) : null}
       {total > 0 && running < total ? (
         <Button size="sm" variant="outline" disabled={busy} onClick={() => act("start")}>
           <PlayIcon data-icon="inline-start" />
-          Start
+          {t.common.actions.start}
         </Button>
       ) : null}
       {running > 0 ? (
         <Button size="sm" variant="outline" disabled={busy} onClick={() => act("stop")}>
           <SquareIcon data-icon="inline-start" />
-          Stop
+          {t.common.actions.stop}
         </Button>
       ) : null}
       {total > 0 ? (
         <Button size="sm" variant="outline" disabled={busy} onClick={() => act("restart")}>
           <RotateCwIcon data-icon="inline-start" />
-          Restart
+          {t.common.actions.restart}
         </Button>
       ) : null}
       {canSaveTemplate ? (
@@ -126,32 +121,32 @@ export function StackActions({
           }
         >
           <LayoutTemplateIcon data-icon="inline-start" />
-          Save as template
+          {text.saveAsTemplate}
         </Button>
       ) : null}
       {total > 0 ? (
         <ConfirmAction
-          title={`Take ${name} down?`}
-          description="Stops and removes the stack's containers and networks (docker compose down). The stack stays in Gantry and can be deployed again."
-          confirmLabel="Down"
+          title={i18n.format(text.downTitle, { name })}
+          description={text.downDescription}
+          confirmLabel={text.down}
           onConfirm={() => stackOperation(id, "down", { removeVolumes: downVolumes }, environmentId)}
           extra={
             <Label className="font-normal">
               <Checkbox checked={downVolumes} onCheckedChange={(v) => setDownVolumes(v === true)} />
-              Also remove the stack&apos;s volumes (deletes their data)
+              {text.removeVolumes}
             </Label>
           }
         >
           <Button size="sm" variant="outline" disabled={busy}>
             <PowerOffIcon data-icon="inline-start" />
-            Down
+            {text.down}
           </Button>
         </ConfirmAction>
       ) : null}
       <ConfirmAction
-        title={`Delete stack ${name}?`}
-        description="Runs docker compose down, then removes the stack and its files from Gantry. This cannot be undone."
-        confirmLabel="Delete"
+        title={i18n.format(text.deleteTitle, { name })}
+        description={text.deleteDescription}
+        confirmLabel={t.common.actions.delete}
         onConfirm={async () => {
           const res = await deleteStack(id, { removeVolumes: deleteVolumes }, environmentId)
           if (res.ok) router.push("/stacks")
@@ -160,13 +155,13 @@ export function StackActions({
         extra={
           <Label className="font-normal">
             <Checkbox checked={deleteVolumes} onCheckedChange={(v) => setDeleteVolumes(v === true)} />
-            Also remove the stack&apos;s volumes (deletes their data)
+            {text.removeVolumes}
           </Label>
         }
       >
         <Button size="sm" variant="destructive" disabled={busy}>
           <Trash2Icon data-icon="inline-start" />
-          Delete
+          {t.common.actions.delete}
         </Button>
       </ConfirmAction>
     </div>

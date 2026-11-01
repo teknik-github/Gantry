@@ -29,6 +29,7 @@ import {
   TWO_FACTOR_LIMIT,
 } from "@/lib/server/login-limits"
 import { config } from "@/lib/server/config"
+import { getI18n } from "@/lib/i18n/server"
 import { safeNext } from "@/lib/safe-redirect"
 import { clearSetupToken, verifySetupToken } from "@/lib/server/setup-token"
 import { invalidateSessions } from "@/lib/server/users"
@@ -52,11 +53,12 @@ async function auditFailure(action: string, target: string, count: number, limit
 }
 
 export async function login(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const values = { username: String(formData.get("username") ?? "").slice(0, 64) }
   const parsed = z
     .object({ username: z.string().trim().min(1).max(64), password: z.string().min(1).max(256) })
     .safeParse({ username: formData.get("username"), password: formData.get("password") })
-  if (!parsed.success) return { error: "Enter your username and password", values }
+  if (!parsed.success) return { error: t.auth.errors.enterCredentials, values }
 
   const { username, password } = parsed.data
   const db = await getDb()
@@ -71,26 +73,26 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
   const deviceId = device && user && device.uid === user.id ? device.id : null
   const limits = loginRateKeys(username, clientAddress(await headers(), config.trustProxy), deviceId)
   const wait = Math.max(...limits.map((l) => checkRateLimit(l.key, l.limit)))
-  if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.`, values }
+  if (wait > 0) return { error: format(t.auth.errors.tooManyAttempts, { seconds: wait }), values }
 
   let valid: boolean
   try {
     valid = await verifyPassword(password, user?.password_hash ?? (await getDummyHash()))
   } catch (err) {
-    if (err instanceof PasswordBusyError) return { error: err.message, values }
+    if (err instanceof PasswordBusyError) return { error: t.auth.errors.passwordBusy, values }
     throw err
   }
   if (!user || !valid) {
     const counts = limits.map((l) => recordFailure(l.key, LOGIN_WINDOW_MS))
     await auditFailure("auth.login_failed", auditedLoginName(username, Boolean(user)), counts[0], limits[0].limit)
-    return { error: "Invalid username or password", values }
+    return { error: t.auth.errors.invalidCredentials, values }
   }
 
   for (const l of limits) clearFailures(l.key)
   const next = safeNext(formData.get("next"))
   if (!passwordLoginAllowed(user.role)) {
     await audit({ id: user.id, username: user.username }, "auth.login_refused", "password sign-in is limited to administrators")
-    return { error: "Sign in with SSO. Password sign-in is reserved for administrators.", values }
+    return { error: t.auth.errors.ssoOnly, values }
   }
 
   if (Number(user.totp_enabled) === 1) {
@@ -106,16 +108,17 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
 
 /** Second login step: a TOTP code or a recovery code for the user whose password was just accepted. */
 export async function verifyLoginCode(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { t, format } = await getI18n()
   const jar = await cookies()
   const pending = await verifyPending2fa(jar.get(PENDING_2FA_COOKIE)?.value)
-  if (!pending) return { error: "This sign-in has expired. Start again with your password." }
+  if (!pending) return { error: t.auth.errors.pendingExpired }
 
   const code = String(formData.get("code") ?? "").trim().slice(0, 32)
-  if (!code) return { error: "Enter a code", fieldErrors: { code: ["Enter a code"] } }
+  if (!code) return { error: t.auth.errors.enterCode, fieldErrors: { code: [t.auth.errors.enterCode] } }
 
   const key = `2fa:${pending.uid}`
   const wait = checkRateLimit(key, TWO_FACTOR_LIMIT)
-  if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.` }
+  if (wait > 0) return { error: format(t.auth.errors.tooManyAttempts, { seconds: wait }) }
 
   const db = await getDb()
   const user = await db.selectFrom("users").select(["id", "username", "role"]).where("id", "=", pending.uid).executeTakeFirst()
@@ -123,7 +126,7 @@ export async function verifyLoginCode(_prev: ActionState, formData: FormData): P
   if (!user || !check.ok) {
     const count = recordFailure(key, LOGIN_WINDOW_MS)
     await auditFailure("auth.2fa_failed", user?.username ?? "(deleted user)", count, TWO_FACTOR_LIMIT)
-    return { error: "Invalid code", fieldErrors: { code: ["Invalid code"] } }
+    return { error: t.auth.errors.invalidCode, fieldErrors: { code: [t.auth.errors.invalidCode] } }
   }
 
   clearFailures(key)
@@ -142,6 +145,7 @@ export async function cancelTwoFactor() {
 }
 
 export async function setupAdmin(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { t, format } = await getI18n()
   // Echo the token too, so a password typo doesn't mean digging it out again.
   const values = {
     username: String(formData.get("username") ?? "").slice(0, 64),
@@ -149,7 +153,7 @@ export async function setupAdmin(_prev: ActionState, formData: FormData): Promis
   }
   const parsed = z
     .object({ username: usernameSchema, password: passwordSchema, confirm: z.string() })
-    .refine((d) => d.password === d.confirm, { path: ["confirm"], message: "Passwords do not match" })
+    .refine((d) => d.password === d.confirm, { path: ["confirm"], message: t.auth.errors.passwordsMismatch })
     .safeParse({
       username: formData.get("username"),
       password: formData.get("password"),
@@ -159,7 +163,7 @@ export async function setupAdmin(_prev: ActionState, formData: FormData): Promis
 
   // The first account can only be created while no user exists, and only by
   // someone who can read the server log / data directory (the setup token).
-  if (await hasAnyUser()) return { error: "Gantry is already set up. Please sign in." }
+  if (await hasAnyUser()) return { error: t.auth.errors.alreadySetUp }
   // The token is checked before the limit: it has far too much entropy to be
   // guessed, so the limit only slows down noise and never locks out the
   // person who has the real token.
@@ -167,8 +171,8 @@ export async function setupAdmin(_prev: ActionState, formData: FormData): Promis
     const count = recordFailure("setup", LOGIN_WINDOW_MS)
     await auditFailure("auth.setup_failed", "invalid setup token", count, SETUP_LIMIT)
     const wait = checkRateLimit("setup", SETUP_LIMIT)
-    if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.`, values }
-    return { error: "Invalid setup token", fieldErrors: { token: ["Invalid setup token"] }, values }
+    if (wait > 0) return { error: format(t.auth.errors.tooManyAttempts, { seconds: wait }), values }
+    return { error: t.auth.errors.invalidSetupToken, fieldErrors: { token: [t.auth.errors.invalidSetupToken] }, values }
   }
 
   const db = await getDb()

@@ -6,32 +6,32 @@ import { TemplatesGallery } from "@/components/gantry/templates-gallery"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader, WrongEnvironmentKind } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
+import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getPermissions } from "@/lib/server/environments"
 import { listTemplates } from "@/lib/server/templates"
 import { validateCompose } from "@/lib/stacks"
 
-export const metadata: Metadata = { title: "Templates" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.nav.pages.templates }
+}
 
 export default async function TemplatesPage() {
   const user = await requireUser()
+  const { t: messages } = await getI18n()
   const [templates, env, can] = await Promise.all([listTemplates(), getCurrentEnvironment(), getPermissions()])
 
   return (
     <PageBody>
       <PageHeader
-        title="Templates"
-        description={
-          can.manage
-            ? "Ready-made compose stacks. Pick one, fill in a few values and it is deployed as a stack you can edit later."
-            : "Ready-made compose stacks. Deploying one needs the manager role in this environment."
-        }
+        title={messages.nav.pages.templates}
+        description={can.manage ? messages.templates.list.descriptionManage : messages.templates.list.descriptionView}
         actions={
           user.role === "admin" ? (
             <Button size="sm" asChild>
               <Link href="/templates/new">
                 <PlusIcon data-icon="inline-start" />
-                New template
+                {messages.templates.list.newTemplate}
               </Link>
             </Button>
           ) : null

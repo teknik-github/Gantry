@@ -54,6 +54,8 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ENVIRONMENT_ROLES, ROLE_LABELS, type EnvironmentRole } from "@/lib/permissions"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 import type { ActionState } from "@/lib/validation"
 import { cn } from "@/lib/utils"
 
@@ -809,22 +811,23 @@ type EnvironmentOption = { id: number; name: string }
 
 const userHelper = columnHelperFor<UserRow>()
 
-function userColumns(environments: EnvironmentOption[]) {
+function userColumns(environments: EnvironmentOption[], i18n: I18n) {
+  const { t, format } = i18n
   const names = new Map(environments.map((e) => [e.id, e.name]))
   return userHelper.columns([
     userHelper.accessor("username", {
-      header: ({ column }) => <SortHeader column={column} title="Username" />,
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.username} />,
       cell: ({ row }) => (
         <div className="flex items-center gap-2 font-medium">
           {row.original.username}
-          {row.original.self ? <Badge variant="secondary">you</Badge> : null}
+          {row.original.self ? <Badge variant="secondary">{t.users.you}</Badge> : null}
           {row.original.twoFactor ? (
-            <Badge variant="outline" className="text-muted-foreground" title="Two-factor authentication is on">
+            <Badge variant="outline" className="text-muted-foreground" title={t.users.twoFactorOn}>
               2FA
             </Badge>
           ) : null}
           {row.original.sso ? (
-            <Badge variant="outline" className="text-muted-foreground" title="Linked to single sign-on">
+            <Badge variant="outline" className="text-muted-foreground" title={t.users.ssoLinked}>
               SSO
             </Badge>
           ) : null}
@@ -833,18 +836,18 @@ function userColumns(environments: EnvironmentOption[]) {
       enableHiding: false,
     }),
     userHelper.accessor("role", {
-      header: ({ column }) => <SortHeader column={column} title="Role" />,
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.role} />,
       cell: ({ row }) => <RoleSelect row={row.original} />,
     }),
     userHelper.display({
       id: "environments",
-      header: "Environments",
+      header: t.users.columns.environments,
       cell: ({ row }) => {
         const testId = `user-envs-${row.original.username}`
         if (row.original.role === "admin") {
           return (
             <span className="text-muted-foreground" data-testid={testId}>
-              All
+              {t.users.all}
             </span>
           )
         }
@@ -860,13 +863,13 @@ function userColumns(environments: EnvironmentOption[]) {
           </div>
         ) : (
           <span className="text-muted-foreground" data-testid={testId}>
-            None
+            {t.users.none}
           </span>
         )
       },
     }),
     userHelper.accessor("createdLabel", {
-      header: "Created",
+      header: t.common.fields.created,
       cell: ({ row }) => <span className="text-muted-foreground">{row.original.createdLabel}</span>,
     }),
     userHelper.display({
@@ -880,34 +883,34 @@ function userColumns(environments: EnvironmentOption[]) {
                   variant="ghost"
                   size="icon"
                   className="size-8 text-muted-foreground"
-                  aria-label={`Environment access for ${row.original.username}`}
+                  aria-label={format(t.users.accessLabel, { username: row.original.username })}
                 >
                   <ServerIcon />
                 </Button>
               }
-              title={`Environments for ${row.original.username}`}
-              description="Which environments this user can use, and what they may do there."
+              title={format(t.users.accessTitle, { username: row.original.username })}
+              description={t.users.accessDescription}
               action={setUserAccess}
               id={row.original.id}
               fieldName="env"
               options={environments.map((e) => ({ id: e.id, label: e.name }))}
               selected={row.original.grants}
-              emptyMessage="There are no environments yet."
+              emptyMessage={t.users.noEnvironments}
             />
           ) : null}
           <ResetPasswordDialog row={row.original} />
           {row.original.twoFactor ? (
             <ConfirmAction
-              title={`Reset two-factor authentication of ${row.original.username}?`}
-              description="Their authenticator and recovery codes stop working and they are signed out everywhere. They can sign in with their password alone and set it up again."
-              confirmLabel="Reset"
+              title={format(t.users.resetTwoFactorTitle, { username: row.original.username })}
+              description={t.users.resetTwoFactorDescription}
+              confirmLabel={t.users.reset}
               onConfirm={() => resetTwoFactor(row.original.id)}
             >
               <Button
                 variant="ghost"
                 size="icon"
                 className="size-8 text-muted-foreground"
-                aria-label={`Reset two-factor for ${row.original.username}`}
+                aria-label={format(t.users.resetTwoFactorLabel, { username: row.original.username })}
               >
                 <ShieldOffIcon />
               </Button>
@@ -915,12 +918,12 @@ function userColumns(environments: EnvironmentOption[]) {
           ) : null}
           {!row.original.self ? (
             <ConfirmAction
-              title={`Delete user ${row.original.username}?`}
-              description="They will be signed out and can no longer log in."
-              confirmLabel="Delete"
+              title={format(t.users.deleteTitle, { username: row.original.username })}
+              description={t.users.deleteDescription}
+              confirmLabel={t.common.actions.delete}
               onConfirm={() => deleteUser(row.original.id)}
             >
-              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Delete user">
+              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={t.users.deleteLabel}>
                 <Trash2Icon />
               </Button>
             </ConfirmAction>
@@ -934,39 +937,41 @@ function userColumns(environments: EnvironmentOption[]) {
 
 function RoleSelect({ row }: { row: UserRow }) {
   const [pending, run] = useRunAction()
+  const { t } = useI18n()
   return (
     <Select
       value={row.role}
       disabled={pending}
       onValueChange={(role) => run(() => setUserRole(row.id, role as UserRow["role"]))}
     >
-      <SelectTrigger size="sm" className="w-36" aria-label="Role">
+      <SelectTrigger size="sm" className="w-36" aria-label={t.common.fields.role}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="admin">Administrator</SelectItem>
-        <SelectItem value="user">Standard user</SelectItem>
+        <SelectItem value="admin">{t.common.roles.admin}</SelectItem>
+        <SelectItem value="user">{t.common.roles.user}</SelectItem>
       </SelectContent>
     </Select>
   )
 }
 
 function ResetPasswordDialog({ row }: { row: UserRow }) {
+  const { t, format } = useI18n()
   return (
     <FormDialog
       trigger={
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Reset password">
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={t.users.resetPassword}>
           <KeyRoundIcon />
         </Button>
       }
-      title={`Set password for ${row.username}`}
-      submitLabel="Set password"
+      title={format(t.users.setPasswordTitle, { username: row.username })}
+      submitLabel={t.users.setPassword}
       action={resetPassword}
     >
       {(errors) => (
         <Field data-invalid={errors.password ? true : undefined}>
           <input type="hidden" name="id" value={row.id} />
-          <FieldLabel htmlFor={`pw-${row.id}`}>New password</FieldLabel>
+          <FieldLabel htmlFor={`pw-${row.id}`}>{t.users.newPassword}</FieldLabel>
           <Input id={`pw-${row.id}`} name="password" type="password" autoComplete="new-password" required autoFocus />
           <FieldError>{errors.password?.[0]}</FieldError>
         </Field>
@@ -976,49 +981,52 @@ function ResetPasswordDialog({ row }: { row: UserRow }) {
 }
 
 export function UsersTable({ data, environments }: { data: UserRow[]; environments: EnvironmentOption[] }) {
-  const columns = React.useMemo(() => userColumns(environments), [environments])
+  const i18n = useI18n()
+  const { t } = i18n
+  const columns = React.useMemo(() => userColumns(environments, i18n), [environments, i18n])
   return (
     <DataTable
       data={data}
       columns={columns}
       getRowId={(r) => String(r.id)}
       searchText={(r) => r.username}
-      searchPlaceholder="Search users…"
-      emptyMessage="No users."
+      searchPlaceholder={t.users.searchPlaceholder}
+      emptyMessage={t.users.empty}
+      columnLabels={t.users.columns}
       toolbar={
         <FormDialog
           trigger={
             <Button size="sm">
               <PlusIcon data-icon="inline-start" />
-              <span className="hidden lg:inline">Add user</span>
+              <span className="max-lg:sr-only">{t.users.add}</span>
             </Button>
           }
-          title="Add user"
-          description="New standard users can't use any environment until you give them access. Promoting a user to administrator drops their environment grants."
-          submitLabel="Create"
+          title={t.users.add}
+          description={t.users.addDescription}
+          submitLabel={t.common.actions.create}
           action={createUser}
         >
           {(errors) => (
             <>
               <Field data-invalid={errors.username ? true : undefined}>
-                <FieldLabel htmlFor="u-username">Username</FieldLabel>
+                <FieldLabel htmlFor="u-username">{t.common.fields.username}</FieldLabel>
                 <Input id="u-username" name="username" autoComplete="off" required autoFocus />
                 <FieldError>{errors.username?.[0]}</FieldError>
               </Field>
               <Field data-invalid={errors.password ? true : undefined}>
-                <FieldLabel htmlFor="u-password">Password</FieldLabel>
+                <FieldLabel htmlFor="u-password">{t.common.fields.password}</FieldLabel>
                 <Input id="u-password" name="password" type="password" autoComplete="new-password" required />
                 <FieldError>{errors.password?.[0]}</FieldError>
               </Field>
               <Field>
-                <FieldLabel htmlFor="u-role">Role</FieldLabel>
+                <FieldLabel htmlFor="u-role">{t.common.fields.role}</FieldLabel>
                 <Select name="role" defaultValue="user">
                   <SelectTrigger id="u-role" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="user">Standard user</SelectItem>
-                    <SelectItem value="admin">Administrator</SelectItem>
+                    <SelectItem value="user">{t.common.roles.user}</SelectItem>
+                    <SelectItem value="admin">{t.common.roles.admin}</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
@@ -1043,38 +1051,43 @@ export type ActivityRow = {
 
 const actHelper = columnHelperFor<ActivityRow>()
 
-const activityColumns = actHelper.columns([
-  actHelper.accessor("at", {
-    header: ({ column }) => <SortHeader column={column} title="Time" />,
-    cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{row.original.atLabel}</span>,
-  }),
-  actHelper.accessor("username", {
-    header: ({ column }) => <SortHeader column={column} title="User" />,
-    cell: ({ row }) => <span className="font-medium">{row.original.username}</span>,
-  }),
-  actHelper.accessor("action", {
-    header: ({ column }) => <SortHeader column={column} title="Action" />,
-    cell: ({ row }) => (
-      <Badge variant="outline" className={cn(row.original.action.endsWith("failed") && "text-destructive")}>
-        {row.original.action}
-      </Badge>
-    ),
-  }),
-  actHelper.accessor("target", {
-    header: "Target",
-    cell: ({ row }) => <Mono className="block max-w-96 truncate">{row.original.target}</Mono>,
-  }),
-])
+function activityColumns(t: I18n["t"]) {
+  return actHelper.columns([
+    actHelper.accessor("at", {
+      header: ({ column }) => <SortHeader column={column} title={t.activity.columns.at} />,
+      cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{row.original.atLabel}</span>,
+    }),
+    actHelper.accessor("username", {
+      header: ({ column }) => <SortHeader column={column} title={t.activity.columns.username} />,
+      cell: ({ row }) => <span className="font-medium">{row.original.username}</span>,
+    }),
+    actHelper.accessor("action", {
+      header: ({ column }) => <SortHeader column={column} title={t.activity.columns.action} />,
+      cell: ({ row }) => (
+        <Badge variant="outline" className={cn(row.original.action.endsWith("failed") && "text-destructive")}>
+          {row.original.action}
+        </Badge>
+      ),
+    }),
+    actHelper.accessor("target", {
+      header: t.activity.columns.target,
+      cell: ({ row }) => <Mono className="block max-w-96 truncate">{row.original.target}</Mono>,
+    }),
+  ])
+}
 
 export function ActivityTable({ data }: { data: ActivityRow[] }) {
+  const { t } = useI18n()
+  const columns = React.useMemo(() => activityColumns(t), [t])
   return (
     <DataTable
       data={data}
-      columns={activityColumns}
+      columns={columns}
       getRowId={(r) => String(r.id)}
       searchText={(r) => `${r.username} ${r.action} ${r.target}`}
-      searchPlaceholder="Filter activity…"
-      emptyMessage="No activity yet."
+      searchPlaceholder={t.activity.searchPlaceholder}
+      emptyMessage={t.activity.empty}
+      columnLabels={t.activity.columns}
       pageSize={50}
     />
   )

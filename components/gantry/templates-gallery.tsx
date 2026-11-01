@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useI18n } from "@/lib/i18n/client"
 import { cn } from "@/lib/utils"
 
 export type TemplateCard = {
@@ -44,6 +45,8 @@ function initials(title: string) {
 }
 
 export function TemplatesGallery({ templates }: { templates: TemplateCard[] }) {
+  const i18n = useI18n()
+  const text = i18n.t.templates.gallery
   const [query, setQuery] = React.useState("")
   const [filter, setFilter] = React.useState(ALL)
   const categories = [...new Set(templates.filter((t) => t.source === "builtin").map((t) => t.category))]
@@ -63,9 +66,9 @@ export function TemplatesGallery({ templates }: { templates: TemplateCard[] }) {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search templates…"
+            placeholder={text.searchPlaceholder}
             className="h-8 pl-8"
-            aria-label="Search templates"
+            aria-label={text.search}
           />
         </div>
         <ToggleGroup
@@ -75,10 +78,10 @@ export function TemplatesGallery({ templates }: { templates: TemplateCard[] }) {
           value={filter}
           onValueChange={(v) => setFilter(v || ALL)}
           className="flex-wrap"
-          aria-label="Category"
+          aria-label={text.category}
         >
-          <ToggleGroupItem value={ALL}>All</ToggleGroupItem>
-          {hasCustom ? <ToggleGroupItem value={CUSTOM}>Custom</ToggleGroupItem> : null}
+          <ToggleGroupItem value={ALL}>{text.all}</ToggleGroupItem>
+          {hasCustom ? <ToggleGroupItem value={CUSTOM}>{text.custom}</ToggleGroupItem> : null}
           {categories.map((c) => (
             <ToggleGroupItem key={c} value={c}>
               {c}
@@ -94,7 +97,7 @@ export function TemplatesGallery({ templates }: { templates: TemplateCard[] }) {
               key={t.key}
               href={`/templates/${t.key}`}
               className="rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-              aria-label={`Template ${t.title}`}
+              aria-label={i18n.format(text.templateLabel, { title: t.title })}
             >
               <Card className="h-full transition-colors hover:bg-muted/40">
                 <CardHeader className="flex flex-row items-start gap-3">
@@ -110,15 +113,13 @@ export function TemplatesGallery({ templates }: { templates: TemplateCard[] }) {
                   <div className="flex min-w-0 flex-col gap-1.5">
                     <CardTitle className="flex flex-wrap items-center gap-2">
                       {t.title}
-                      {t.source === "custom" ? <Badge variant="secondary">custom</Badge> : null}
+                      {t.source === "custom" ? <Badge variant="secondary">{text.customBadge}</Badge> : null}
                     </CardTitle>
-                    <CardDescription className="line-clamp-2">{t.description || "No description"}</CardDescription>
+                    <CardDescription className="line-clamp-2">{t.description || text.noDescription}</CardDescription>
                     <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
                       <span>{t.category}</span>
                       <span aria-hidden>·</span>
-                      <span>
-                        {t.services.length} service{t.services.length === 1 ? "" : "s"}
-                      </span>
+                      <span>{i18n.plural(text.services, t.services.length)}</span>
                     </div>
                   </div>
                 </CardHeader>
@@ -127,7 +128,7 @@ export function TemplatesGallery({ templates }: { templates: TemplateCard[] }) {
           ))}
         </div>
       ) : (
-        <p className="py-12 text-center text-sm text-muted-foreground">No templates match.</p>
+        <p className="py-12 text-center text-sm text-muted-foreground">{text.noMatch}</p>
       )}
     </div>
   )

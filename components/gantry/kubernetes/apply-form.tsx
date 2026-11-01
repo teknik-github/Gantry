@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { useI18n } from "@/lib/i18n/client"
 import { cn } from "@/lib/utils"
 
 export const EXAMPLE_MANIFEST = `apiVersion: apps/v1
@@ -64,6 +65,8 @@ export function ApplyForm({
   namespaces: string[]
   defaultNamespace: string
 }) {
+  const { t, rich } = useI18n()
+  const k = t.kubernetes.apply
   const uid = React.useId()
   const [state, formAction, pending] = useActionState<ApplyState, FormData>(applyManifest, {})
   // React resets the form after the action (Radix controls follow): the
@@ -93,7 +96,7 @@ export function ApplyForm({
         <input type="hidden" name="environment" value={environmentId} />
         <FieldGroup>
           <Field data-invalid={errs.namespace ? true : undefined} className="max-w-sm">
-            <FieldLabel htmlFor={`${uid}-namespace`}>Namespace</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-namespace`}>{t.kubernetes.common.namespace}</FieldLabel>
             <Select key={namespace} name="namespace" defaultValue={namespace}>
               <SelectTrigger id={`${uid}-namespace`} className="w-full">
                 <SelectValue />
@@ -106,15 +109,12 @@ export function ApplyForm({
                 ))}
               </SelectContent>
             </Select>
-            <FieldDescription>
-              For objects without <Mono>metadata.namespace</Mono>. Cluster-wide objects (Namespace, ClusterRole, ...)
-              ignore it.
-            </FieldDescription>
+            <FieldDescription>{rich(k.namespaceHelp, { field: <Mono>metadata.namespace</Mono> })}</FieldDescription>
             <FieldError>{errs.namespace?.[0]}</FieldError>
           </Field>
 
           <Field data-invalid={errs.manifest ? true : undefined}>
-            <FieldLabel htmlFor={`${uid}-manifest`}>Manifest</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-manifest`}>{k.manifest}</FieldLabel>
             <Textarea
               id={`${uid}-manifest`}
               name="manifest"
@@ -128,8 +128,11 @@ export function ApplyForm({
               aria-invalid={errs.manifest ? true : undefined}
             />
             <FieldDescription>
-              YAML, several objects separated by <Mono>---</Mono>. Applied in order with server-side apply (field
-              manager <Mono>gantry</Mono>), like <Mono>kubectl apply --server-side</Mono>.
+              {rich(k.manifestHelp, {
+                separator: <Mono>---</Mono>,
+                manager: <Mono>gantry</Mono>,
+                command: <Mono>kubectl apply --server-side</Mono>,
+              })}
             </FieldDescription>
             <FieldError>{errs.manifest?.[0]}</FieldError>
           </Field>
@@ -143,7 +146,7 @@ export function ApplyForm({
               onCheckedChange={setDryRun}
             />
             <FieldLabel htmlFor={`${uid}-dry-run`} className="font-normal">
-              Dry run (validate on the server, change nothing)
+              {k.dryRunLabel}
             </FieldLabel>
           </Field>
           <Field orientation="horizontal">
@@ -154,7 +157,7 @@ export function ApplyForm({
               defaultChecked={values.force === "on"}
             />
             <FieldLabel htmlFor={`${uid}-force`} className="font-normal">
-              Force conflicts (take over fields owned by other managers, e.g. kubectl)
+              {k.forceLabel}
             </FieldLabel>
           </Field>
 
@@ -163,7 +166,7 @@ export function ApplyForm({
           <Field orientation="horizontal">
             <Button type="submit" disabled={pending}>
               <FileUpIcon data-icon="inline-start" />
-              {pending ? "Applying…" : dryRun ? "Dry run" : "Apply"}
+              {pending ? k.applying : dryRun ? k.dryRun : t.common.actions.apply}
             </Button>
           </Field>
         </FieldGroup>
@@ -175,14 +178,15 @@ export function ApplyForm({
 }
 
 function ApplyResults({ results }: { results: NonNullable<ApplyState["results"]> }) {
+  const { t } = useI18n()
   return (
     <div className="overflow-hidden rounded-lg border" data-testid="apply-results">
       <Table>
         <TableHeader className="bg-muted">
           <TableRow>
-            <TableHead>Object</TableHead>
-            <TableHead>Namespace</TableHead>
-            <TableHead>Result</TableHead>
+            <TableHead>{t.kubernetes.apply.object}</TableHead>
+            <TableHead>{t.kubernetes.common.namespace}</TableHead>
+            <TableHead>{t.kubernetes.apply.result}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

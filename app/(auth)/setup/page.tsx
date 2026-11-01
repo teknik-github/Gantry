@@ -6,8 +6,11 @@ import type { Metadata } from "next"
 import { SetupForm } from "@/components/setup-form"
 import { Skeleton } from "@/components/ui/skeleton"
 import { hasAnyUser } from "@/lib/server/auth/dal"
+import { getI18n } from "@/lib/i18n/server"
 
-export const metadata: Metadata = { title: "Setup" }
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getI18n()).t.auth.titles.setup }
+}
 
 export default function SetupPage({ searchParams }: PageProps<"/setup">) {
   return (

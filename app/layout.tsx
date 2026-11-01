@@ -1,9 +1,10 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { LOCALE_COOKIE, LOCALES } from "@/lib/i18n/config"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -21,6 +22,20 @@ export const metadata: Metadata = {
   description: "Container management for Docker",
 }
 
+// cover: use the whole screen of notched phones; the safe-area insets are
+// padded where content would end up under them (globals.css, sidebar, header).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+}
+
+// The root layout stays static (Cache Components), so <html lang> can't come
+// from the language cookie on the server. This runs before the first paint
+// and sets it from the cookie; pages themselves are rendered in that language
+// by the server (components/i18n/locale-scope.tsx).
+const setLangScript = `(function(){try{var m=document.cookie.match(/(?:^|; )${LOCALE_COOKIE}=([^;]*)/);var l=m&&decodeURIComponent(m[1]);if(${JSON.stringify(LOCALES)}.indexOf(l)>=0)document.documentElement.lang=l}catch(e){}})()`
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
@@ -28,6 +43,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: setLangScript }} />
+      </head>
       <body className="flex min-h-full flex-col">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <TooltipProvider>{children}</TooltipProvider>
