@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 
-import { EnvironmentsTable, type EnvironmentRow } from "@/components/gantry/admin-tables"
+import { EnvironmentsTable, type EnvironmentRow } from "@/components/gantry/environments-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
 import { getI18n } from "@/lib/i18n/server"

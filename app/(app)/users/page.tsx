@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 
-import { UsersTable } from "@/components/gantry/admin-tables"
+import { UsersTable } from "@/components/gantry/users-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
 import { requireAdmin } from "@/lib/server/auth/dal"
