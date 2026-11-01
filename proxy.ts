@@ -117,6 +117,8 @@ export const config = {
     // proxy buffers the request body in memory and cuts it at 10 MB, so those
     // handlers check the session and same-origin themselves
     // (app/api/uploads/files/route.ts, app/api/images/build/upload/route.ts).
-    "/((?!_next/static|_next/image|api/uploads/|api/images/build/upload$|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt)$).*)",
+    // Agents (/api/agent/*) have no session either; their handlers check the
+    // agent key or session (app/api/agent/connect/route.ts).
+    "/((?!_next/static|_next/image|api/uploads/|api/images/build/upload$|api/agent/|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt)$).*)",
   ],
 }

@@ -3,7 +3,7 @@ import type { Generated, Insertable, Selectable } from "kysely"
 import type { EnvironmentRole } from "@/lib/permissions"
 
 export type Role = "admin" | "user"
-export type EnvironmentType = "socket" | "tcp" | "kubernetes"
+export type EnvironmentType = "socket" | "tcp" | "agent" | "kubernetes"
 /** Environment types that talk to a Docker Engine. */
 export type DockerEnvironmentType = Exclude<EnvironmentType, "kubernetes">
 
@@ -30,7 +30,7 @@ export interface EnvironmentsTable {
   id: Generated<number>
   name: string
   type: EnvironmentType
-  /** Socket path for "socket", host:port for "tcp", API server URL for "kubernetes" */
+  /** Socket path for "socket", host:port for "tcp", agent://<id> for "agent", API server URL for "kubernetes" */
   url: string
   created_at: string
   /** TLS material for "tcp", encrypted at rest (see lib/server/crypto.ts). Null = plain HTTP. */
@@ -46,6 +46,13 @@ export interface EnvironmentsTable {
   kube_namespace: string | null
   /** "kubernetes" only: 1 = don't verify the API server's certificate. */
   kube_insecure: Generated<number>
+  /** "agent" only: SHA-256 (hex) of the enrollment key; the key itself is shown once. */
+  agent_key_hash: string | null
+  agent_key_created_at: string | null
+  /** "agent" only: when the agent was last connected (ISO). */
+  agent_seen_at: string | null
+  /** "agent" only: JSON AgentInfo the agent last reported (lib/server/agent/info.ts). */
+  agent_info: string | null
 }
 
 /** Environments a standard user may see and use, with their role there. Admins can use all of them. */

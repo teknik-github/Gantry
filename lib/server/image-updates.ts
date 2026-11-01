@@ -12,7 +12,7 @@ import {
 import { getDb } from "@/lib/server/db"
 import type { ContainerSummary, DockerApi } from "@/lib/server/docker/api"
 import { docker } from "@/lib/server/docker/api"
-import { environmentTarget } from "@/lib/server/environment-target"
+import { environmentTarget, isDockerEnvironment } from "@/lib/server/environment-target"
 import { skipIfBusy } from "@/lib/server/metrics-sampler"
 import type { Environment } from "@/lib/server/db/schema"
 import { notify } from "@/lib/server/notifications"
@@ -231,7 +231,7 @@ async function announceUpdates(
 async function checkAllEnvironments(maxAgeMs: number) {
   const db = await getDb()
   // Docker environments only (Kubernetes ones have no images to check here).
-  const envs = (await db.selectFrom("environments").selectAll().execute()).filter((e) => e.type === "socket" || e.type === "tcp")
+  const envs = (await db.selectFrom("environments").selectAll().execute()).filter(isDockerEnvironment)
   for (const env of envs) {
     try {
       const api = docker(environmentTarget(env), { credentials: credentialsForImage })

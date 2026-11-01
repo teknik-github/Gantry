@@ -3,6 +3,7 @@ import "server-only"
 import { readFileSync } from "node:fs"
 import os from "node:os"
 
+import { agentContainerIds } from "@/lib/server/agent/state"
 import { parseSelfIds, type SelfIds } from "@/lib/server/docker/recreate"
 
 let cached: SelfIds | undefined
@@ -18,7 +19,9 @@ function read(path: string) {
 /**
  * Ids of the container Gantry runs in (empty when it runs on the host). The
  * Docker image sets HOSTNAME=0.0.0.0 for Next.js, so the kernel hostname is
- * used as well: by default it is the container id prefix.
+ * used as well: by default it is the container id prefix. Also the
+ * containers of connected agents: stopping or recreating one through itself
+ * would cut its own tunnel halfway.
  */
 export function selfContainerIds(): SelfIds {
   cached ??= parseSelfIds({
@@ -26,5 +29,6 @@ export function selfContainerIds(): SelfIds {
     mountinfo: read("/proc/self/mountinfo"),
     hostnames: [os.hostname(), process.env.HOSTNAME],
   })
-  return cached
+  const agents = agentContainerIds()
+  return agents.length ? { ids: [...cached.ids, ...agents], hostnames: cached.hostnames } : cached
 }

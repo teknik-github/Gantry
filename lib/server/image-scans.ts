@@ -18,7 +18,7 @@ import { getDb } from "@/lib/server/db"
 import type { Environment, ImageScan } from "@/lib/server/db/schema"
 import { docker } from "@/lib/server/docker/api"
 import { DockerError } from "@/lib/server/docker/client"
-import { environmentTarget } from "@/lib/server/environment-target"
+import { environmentTarget, isDockerEnvironment } from "@/lib/server/environment-target"
 import { containerReferences } from "@/lib/server/image-updates"
 import { notify } from "@/lib/server/notifications"
 import { credentialsForImage } from "@/lib/server/registries"
@@ -355,7 +355,7 @@ export async function imagesInUse(env: Environment): Promise<Job[]> {
 /** Queues a scan of every image in use on every Docker environment. */
 export async function scanImagesInUse(trigger: ImageScanRun["trigger"]): Promise<ImageScanRun> {
   const db = await getDb()
-  const envs = (await db.selectFrom("environments").selectAll().execute()).filter((e) => e.type === "socket" || e.type === "tcp")
+  const envs = (await db.selectFrom("environments").selectAll().execute()).filter(isDockerEnvironment)
   let queued = 0
   const errors: string[] = []
   for (const env of envs) {
@@ -372,7 +372,7 @@ export async function scanImagesInUse(trigger: ImageScanRun["trigger"]): Promise
 
 async function sweepAll() {
   const db = await getDb()
-  const envs = (await db.selectFrom("environments").selectAll().execute()).filter((e) => e.type === "socket" || e.type === "tcp")
+  const envs = (await db.selectFrom("environments").selectAll().execute()).filter(isDockerEnvironment)
   for (const env of envs) {
     try {
       const removed = await sweepScanners(environmentTarget(env))

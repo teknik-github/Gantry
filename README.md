@@ -42,8 +42,10 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
   through a built-in Caddy proxy or the proxy you already run
 - **Bulk actions**: tick several containers, images, volumes or networks and
   start/stop/restart/pause/resume/kill or remove them at once
-- Multiple Docker environments: local socket or TCP, optionally with mutual TLS;
-  standard users only see the environments they were given
+- Multiple Docker environments: local socket or TCP, optionally with mutual TLS,
+  or a **remote host agent** that connects out to Gantry (hosts behind NAT or
+  a firewall, no exposed Docker API); standard users only see the
+  environments they were given
 - **Kubernetes environments**: connect a cluster with a service account token
   or a kubeconfig; overview (nodes, namespaces, pods by phase), workloads
   (scale, rollout restart, delete), pods (status, followed logs, console,
@@ -137,6 +139,14 @@ afterwards; they are skipped when Docker isn't reachable. Useful switches:
 - `E2E_BASE_URL=http://host:port` targets a running, not-yet-set-up Gantry instead
 - `E2E_PORT` changes the port (default 3100)
 
+The agent suite (`tests/e2e/agent.spec.ts`) runs the agent as a
+`gantry-test-a-agent` container with `--network host` and the host's Docker
+socket, connecting to the test server on 127.0.0.1. It doesn't build the
+Gantry image: it bind-mounts `agent/` into the stock `node:24-alpine` image and
+runs the script with `node` (what the image's `agent` command does). It also
+prints the tunnel's list latency and 50 MB download throughput next to the
+local socket's.
+
 The Git stack suite serves a private repository from the test process with
 `git http-backend` over plain http on 127.0.0.1. The test server is started
 with `GANTRY_TEST_ALLOW_HTTP_GIT=1`, which lets Gantry accept `http://` Git
@@ -225,7 +235,11 @@ against the same throwaway cluster.
 | `GANTRY_BUILD_MAX_CONTEXT_MB` | `512` | Largest build context (uploaded archive or Git context) an image build accepts |
 | `GANTRY_BUILD_TIMEOUT_MINUTES` | `60` | An image build (clone, build and push) is stopped after this long |
 | `GANTRY_BUILD_CONCURRENCY` | `2` | Image builds running at once; more are refused until one finishes |
-| `GANTRY_URL` | | Public URL of Gantry (e.g. `https://gantry.example.com`); the OIDC callback is `$GANTRY_URL/auth/oidc/callback` |
+| `GANTRY_URL` | | Public URL of Gantry (e.g. `https://gantry.example.com`); the OIDC callback is `$GANTRY_URL/auth/oidc/callback`, and agents are told to connect here |
+| `GANTRY_AGENT_IMAGE` | `gantry:latest` | Image named in the agent's `docker run` command |
+| `GANTRY_AGENT_MAX_STREAMS` | `64` | Tunneled Docker connections per agent at once (4–1024) |
+| `GANTRY_AGENT_QUEUE_SECONDS` | `30` | How long a Docker connection waits for a free tunnel stream when all are in use |
+| `GANTRY_AGENT_HEARTBEAT_SECONDS` | `10` | Ping interval of agent connections; silent ones are dropped after 3.5 intervals |
 | `OIDC_ISSUER` | | OpenID provider (issuer URL); single sign-on is off unless this and `OIDC_CLIENT_ID` are set |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | Client registered at the provider (confidential client; the secret is optional for public clients, PKCE is always used) |
 | `OIDC_REDIRECT_URL` | `$GANTRY_URL/auth/oidc/callback` | Callback URL, if it differs |
@@ -684,6 +698,99 @@ its services (pick the service and port, a domain and the TLS mode).
   Promoting a user to administrator drops their grants, so a later demotion
   starts from no access.
 
+### Remote hosts: the Gantry agent
+
+For a Docker host behind NAT or a firewall, or one where you'd rather not
+expose the Docker API or set up TLS: run a small agent container on it. The
+agent connects **out** to Gantry, and Gantry manages the host through that
+connection. Nothing listens on the remote host.
+
+**Setup.** On **Environments**, click **Add agent** and give it a name. Gantry
+creates the environment and shows an enrollment key, **once**, with a
+ready-to-copy command (the key is stored only as a SHA-256 hash):
+
+```bash
+docker run -d --name gantry-agent --restart unless-stopped --user root \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e GANTRY_URL=https://gantry.example.com \
+  -e GANTRY_AGENT_KEY=gak_7_… \
+  gantry:latest agent
+```
+
+The agent is a dependency-free Node.js script in the Gantry image
+(`agent/gantry-agent.mjs`); `agent` as the command runs it instead of Gantry.
+`--user root` lets it open the Docker socket (alternatively
+`--group-add $(stat -c %g /var/run/docker.sock)`). The dialog waits until the
+agent connects. The environment then shows connected/last seen, the agent
+version, the host's name and Docker version and the address it connects from
+(`X-Forwarded-For` behind a proxy). The key icon on its row **rotates the
+key**: the old key stops working and the connected agent is dropped at once;
+run the agent again with the new key. Deleting the environment drops it too.
+Set `GANTRY_URL` for Gantry so the command names the address agents should
+use; otherwise it is the one your browser used.
+
+Agent settings: `GANTRY_URL`, `GANTRY_AGENT_KEY`, `GANTRY_AGENT_CA` (PEM text,
+or a file path, of a CA to trust for Gantry's certificate),
+`GANTRY_AGENT_INSECURE=1` (allow plain `http://` to a non-loopback address),
+`DOCKER_SOCKET` (default `/var/run/docker.sock`), `GANTRY_AGENT_DEBUG=1` (log
+every tunneled connection). The agent logs connects, disconnects with the
+reason, refused keys and its reconnect delay; `docker logs gantry-agent`.
+
+**Serve Gantry over HTTPS** when agents connect across networks: the key and
+all Docker traffic (which is root on that host) go through this connection.
+The agent refuses `http://` except to a loopback address unless
+`GANTRY_AGENT_INSECURE=1` is set, and verifies Gantry's certificate (system
+CAs, or `GANTRY_AGENT_CA`).
+
+**How it works.** Plain HTTP, no WebSockets (Next.js route handlers can't
+upgrade connections), through any reverse proxy that streams responses:
+
+- The agent holds one long `GET /api/agent/connect` (authenticated with the
+  key). Its response body is a stream of frames from Gantry. Frames are
+  binary: type, stream id, length, then the payload. Types are HELLO, OPEN,
+  DATA, END, RESET, WINDOW, PING, PONG and GOAWAY (`lib/agent/protocol.ts`).
+- Frames to Gantry go in `POST /api/agent/upstream` batches (up to 1 MB, one
+  at a time, numbered; authenticated with a per-session secret from HELLO).
+- Each Docker connection Gantry makes is one tunneled stream. Per-stream
+  windows (1 MB) give flow control both ways, so a slow reader pauses the
+  writer instead of filling memory.
+- Gantry pings every 10 s. Either side drops a connection that stays silent
+  for 35 s, and the agent reconnects with exponential backoff and jitter
+  (slowly, every 5 minutes, once its key was refused).
+- In Gantry, every connected agent gets a Unix socket (`0600` in
+  `$DATA_DIR/agent-sockets`, `0700`) that leads into its tunnel. The Docker
+  API client connects there like to a local socket, so every feature works
+  unchanged: lists, inspect, logs, events, exec consoles, stats and metrics,
+  pulls with progress, file browser and archives, image build/push and Trivy
+  scans. `docker compose` (stacks) gets `DOCKER_HOST=unix://…` pointing at
+  that socket.
+
+**Limits and differences.**
+
+- **Single Gantry replica.** Tunnels live in the memory of the process the
+  agent connected to; run one Gantry instance (as usual with SQLite).
+- At most `GANTRY_AGENT_MAX_STREAMS` (64) tunneled connections per agent at
+  once; more wait for a free one (up to `GANTRY_AGENT_QUEUE_SECONDS`, 30 s)
+  and then fail with a clear error. Every open event stream, console and
+  `docker compose` run holds one or more.
+- As with TCP environments, a stack's relative bind mounts (`./data:/data`)
+  name paths on the Docker host, not files next to the compose file in
+  Gantry, and **Import** of stacks started outside Gantry only works for the
+  local socket.
+- A Trivy scan streams the image out of the host and back in through the
+  tunnel, so large images take longer over slow links.
+- Gantry refuses to stop, remove or recreate the agent's own container through
+  the agent (it would cut its own connection), like its own container.
+- Measured on this project's (heavily loaded, 4-CPU) test host, with the
+  agent and Gantry on the same machine, so this is the tunnel's overhead, not
+  a WAN. Listing 44 containers took about as long through the agent as over
+  the local socket (median 430 vs 420 ms through Gantry's API, dominated by
+  the daemon). A console echo round trip took about 110 ms. Downloading a
+  50 MB file from a container ran at 9–15 MB/s through the agent and
+  15–25 MB/s locally. Uploading a 50 MB archive into a container ran at about
+  20 MB/s through the agent and about 190 MB/s locally: uploads wait for
+  flow-control grants that come back through the agent's POSTs.
+
 ### Roles and permissions
 
 Global roles: **administrators** manage Gantry itself (users, environments,
@@ -990,6 +1097,17 @@ image pull secrets).
   TLS credentials.
 - A fresh instance can only be claimed with the setup token from the server
   log / data directory; it is deleted once the admin exists.
+- Agents (`/api/agent/*`) skip `proxy.ts` too: they have no session, and
+  their upstream bodies must not be buffered. The handlers authenticate
+  every request themselves: the connection by the environment's enrollment
+  key (SHA-256 hash, constant-time compare; refused when the environment was
+  deleted or the key rotated), upstream batches by a per-session secret,
+  their order and size. Failed enrollments are limited per environment
+  (20 per 5 minutes) and, with `TRUST_PROXY=true`, per client address (10),
+  and audited once per window. Frames are capped (64 KB of data, 4 KB
+  otherwise; batches 4 MB), tunneled connections per agent are limited, and
+  the protocol carries no address: the agent only ever connects to its own
+  Docker socket. Serve Gantry over HTTPS for agents across networks.
 - Access to the Docker socket is equivalent to root on the host, and a
   cluster-admin token to the whole cluster. Keep Gantry on a trusted network
   or behind HTTPS.

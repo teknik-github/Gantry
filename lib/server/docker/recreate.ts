@@ -465,7 +465,7 @@ export function isSelfContainer(c: Pick<RecreateInspect, "Id">, self: SelfIds | 
 /** Why this container can't be recreated, or null. */
 export function recreateBlocker(c: RecreateInspect, self?: SelfIds): string | null {
   if (isSelfContainer(c, self)) {
-    return "This is Gantry's own container. Recreating it would stop Gantry in the middle of the request; update it from the host instead (e.g. docker compose pull && docker compose up -d)."
+    return "This is Gantry's own container (or its agent's on this host). Recreating it would stop it in the middle of the request; update it from the host instead (e.g. docker compose pull && docker compose up -d)."
   }
   if (c.HostConfig.AutoRemove) {
     return "This container was started with --rm (auto-remove): stopping it would delete it, so it can't be recreated safely."

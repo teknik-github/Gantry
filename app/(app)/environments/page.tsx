@@ -3,6 +3,8 @@ import type { Metadata } from "next"
 import { EnvironmentsTable, type EnvironmentRow } from "@/components/gantry/admin-tables"
 import { PageBody } from "@/components/gantry/page-body"
 import { PageHeader } from "@/components/gantry/ui"
+import { agentStatus } from "@/lib/server/agent/hub"
+import { readStoredInfo } from "@/lib/server/agent/info"
 import { requireAdmin } from "@/lib/server/auth/dal"
 import { getDb } from "@/lib/server/db"
 import { docker } from "@/lib/server/docker/api"
@@ -38,6 +40,7 @@ export default async function EnvironmentsPage() {
         kubeInsecure: e.type === "kubernetes" && Boolean(e.kube_insecure),
         kubeNamespace: e.kube_namespace,
         current: e.id === current?.id,
+        agent: e.type === "agent" ? agentRow(e) : null,
         access: grants
           .filter((g) => g.environment_id === e.id)
           .map((g) => ({ id: g.user_id, username: g.username, role: g.role })),
@@ -60,9 +63,27 @@ export default async function EnvironmentsPage() {
     <PageBody>
       <PageHeader
         title="Environments"
-        description="Docker hosts and Kubernetes clusters managed by Gantry. Administrators can use all of them; standard users only those they were given access to, as viewer, operator or manager."
+        description="Docker hosts (local socket, TCP, or an agent that connects out to Gantry) and Kubernetes clusters managed by Gantry. Administrators can use all of them; standard users only those they were given access to, as viewer, operator or manager."
       />
       <EnvironmentsTable data={rows} users={users.map(({ id, username }) => ({ id, username }))} />
     </PageBody>
   )
+}
+
+/** Agent environments: the live session (this process) or what the agent last reported. */
+function agentRow(e: Awaited<ReturnType<typeof listEnvironments>>[number]): NonNullable<EnvironmentRow["agent"]> {
+  const live = agentStatus(e.id)
+  const stored = readStoredInfo(e.agent_info)
+  const info = live.info ?? stored
+  return {
+    connected: live.connected,
+    since: live.connectedAt,
+    lastSeen: e.agent_seen_at,
+    version: info?.version ?? null,
+    hostname: info?.hostname ?? null,
+    dockerVersion: info?.dockerVersion || null,
+    remoteAddress: live.connected ? live.remoteAddress : (stored?.remoteAddress ?? null),
+    rttMs: live.rttMs,
+    keyCreatedAt: e.agent_key_created_at,
+  }
 }

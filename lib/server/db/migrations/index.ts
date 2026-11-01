@@ -18,6 +18,7 @@ import { mysqlColumns } from "@/lib/server/db/migrations/014_mysql_columns"
 import { imageScans } from "@/lib/server/db/migrations/015_image_scans"
 import { imageBuilds } from "@/lib/server/db/migrations/016_image_builds"
 import { helmRepositories } from "@/lib/server/db/migrations/018_helm_repositories"
+import { environmentAgents } from "@/lib/server/db/migrations/019_environment_agents"
 
 // One file per migration, written with Kysely's schema builder only so the
 // same migrations run on SQLite and MySQL. Never edit a migration that has
@@ -40,6 +41,7 @@ const migrations: Record<string, Migration> = {
   "015_image_scans": imageScans,
   "016_image_builds": imageBuilds,
   "018_helm_repositories": helmRepositories,
+  "019_environment_agents": environmentAgents,
 }
 
 export const migrationProvider: MigrationProvider = {
