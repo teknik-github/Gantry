@@ -381,6 +381,69 @@ export const EMPTY_BUILD_FORM: BuildFormValues = {
   push: false,
 }
 
+/** What the build form sends besides its text fields. */
+export type BuildFormState = {
+  kind: SourceKind
+  files: EditorFile[]
+  noCache: boolean
+  pull: boolean
+  push: boolean
+  /** The chosen archive (upload source). */
+  archive: (Blob & { name: string }) | null
+  environmentId: number | undefined
+}
+
+/**
+ * The request the build form sends: JSON to /api/images/build (editor and
+ * Git sources), or the archive itself to /api/images/build/upload with the
+ * rest in a header. `field` reads a text field of the form by key (see
+ * BuildFormValues). Fails when no valid archive is chosen, or when the
+ * header would be too long.
+ */
+export function buildFormRequest(
+  form: BuildFormState,
+  field: (key: string) => string
+): { ok: true; url: string; init: RequestInit } | { ok: false; error: "archive" | "optionsTooLong" } {
+  const options = {
+    tags: field("tags"),
+    buildArgs: field("buildArgs"),
+    labels: field("labels"),
+    target: field("target"),
+    noCache: form.noCache,
+    pull: form.pull,
+    push: form.push,
+  }
+  const { environmentId } = form
+  if (form.kind === "upload") {
+    const { archive } = form
+    if (!archive || !isArchiveName(archive.name)) return { ok: false, error: "archive" }
+    const header = encodeURIComponent(JSON.stringify({ environmentId, filename: archive.name, dockerfile: field("uploadDockerfile"), options }))
+    if (header.length > MAX_OPTIONS_HEADER) return { ok: false, error: "optionsTooLong" }
+    return {
+      ok: true,
+      url: "/api/images/build/upload",
+      init: { method: "POST", body: archive, headers: { "Content-Type": "application/octet-stream", [BUILD_OPTIONS_HEADER]: header } },
+    }
+  }
+  const source =
+    form.kind === "editor"
+      ? { kind: "editor", dockerfile: field("dockerfile"), files: form.files }
+      : {
+          kind: "git",
+          url: field("url"),
+          ref: field("ref"),
+          context: field("context"),
+          dockerfile: field("gitDockerfile"),
+          username: field("username"),
+          token: field("token"),
+        }
+  return {
+    ok: true,
+    url: "/api/images/build",
+    init: { method: "POST", body: JSON.stringify({ environmentId, source, options }), headers: { "Content-Type": "application/json" } },
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Docker's JSON stream
 

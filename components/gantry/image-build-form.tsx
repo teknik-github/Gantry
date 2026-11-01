@@ -15,12 +15,11 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  BUILD_OPTIONS_HEADER,
+  buildFormRequest,
   DEFAULT_DOCKERFILE,
-  isArchiveName,
   MAX_EXTRA_FILES,
-  MAX_OPTIONS_HEADER,
   type BuildFormValues,
+  type EditorFile,
   type FieldErrors,
   type SourceKind,
 } from "@/lib/image-build"
@@ -29,6 +28,20 @@ import { useI18n } from "@/lib/i18n/client"
 const monoArea = "font-mono text-xs leading-relaxed md:text-xs"
 
 const subscribeNothing = () => () => {}
+
+/** Ids and error state of the form's fields, shared by its sections. */
+type FieldKit = {
+  /** The element id of a field (also how submit reads it). */
+  id: (name: string) => string
+  /** The first error of a field. */
+  err: (key: string) => string | undefined
+  /** aria-invalid / data-invalid of a field. */
+  invalid: (key: string) => true | undefined
+  /** A build is running: everything is disabled. */
+  busy: boolean
+}
+
+type Toggles = { noCache: boolean; pull: boolean; push: boolean }
 
 /**
  * Build form (/images/build): the source (Dockerfile editor, uploaded
@@ -67,8 +80,6 @@ export function ImageBuildForm({ initial, rebuildOf }: { initial: BuildFormValue
   const outputRef = React.useRef<HTMLDivElement>(null)
 
   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) => setValues((v) => ({ ...v, [key]: value }))
-  const err = (key: string) => errors[key]?.[0]
-  const invalid = (key: string) => (errors[key] ? true : undefined)
 
   const done = state.done
   React.useEffect(() => {
@@ -86,49 +97,12 @@ export function ImageBuildForm({ initial, rebuildOf }: { initial: BuildFormValue
       const el = form.elements.namedItem(id(key))
       return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : ""
     }
-    const options = {
-      tags: field("tags"),
-      buildArgs: field("buildArgs"),
-      labels: field("labels"),
-      target: field("target"),
-      noCache: values.noCache,
-      pull: values.pull,
-      push: values.push,
-    }
-    let request: [string, RequestInit]
-    if (values.kind === "upload") {
-      if (!archive) return setErrors({ archive: [text.chooseArchive] })
-      if (!isArchiveName(archive.name)) return setErrors({ archive: [text.chooseArchive] })
-      const header = encodeURIComponent(
-        JSON.stringify({ environmentId, filename: archive.name, dockerfile: field("uploadDockerfile"), options })
-      )
-      if (header.length > MAX_OPTIONS_HEADER) {
-        return setFormError(text.optionsTooLong)
-      }
-      request = [
-        "/api/images/build/upload",
-        { method: "POST", body: archive, headers: { "Content-Type": "application/octet-stream", [BUILD_OPTIONS_HEADER]: header } },
-      ]
-    } else {
-      const source =
-        values.kind === "editor"
-          ? { kind: "editor", dockerfile: field("dockerfile"), files: values.files }
-          : {
-              kind: "git",
-              url: field("url"),
-              ref: field("ref"),
-              context: field("context"),
-              dockerfile: field("gitDockerfile"),
-              username: field("username"),
-              token: field("token"),
-            }
-      request = [
-        "/api/images/build",
-        { method: "POST", body: JSON.stringify({ environmentId, source, options }), headers: { "Content-Type": "application/json" } },
-      ]
+    const request = buildFormRequest({ ...values, archive, environmentId }, field)
+    if (!request.ok) {
+      return request.error === "archive" ? setErrors({ archive: [text.chooseArchive] }) : setFormError(text.optionsTooLong)
     }
     outputRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-    const failure = await start(...request)
+    const failure = await start(request.url, request.init)
     if (failure) {
       setErrors(failure.fieldErrors ?? {})
       setFormError(failure.fieldErrors ? null : failure.error)
@@ -136,6 +110,12 @@ export function ImageBuildForm({ initial, rebuildOf }: { initial: BuildFormValue
   }
 
   const busy = state.running
+  const kit: FieldKit = {
+    id,
+    err: (key) => errors[key]?.[0],
+    invalid: (key) => (errors[key] ? true : undefined),
+    busy,
+  }
 
   return (
     <div className="grid gap-4 px-4 lg:px-6">
@@ -163,145 +143,13 @@ export function ImageBuildForm({ initial, rebuildOf }: { initial: BuildFormValue
               </TabsList>
 
               <TabsContent value="editor" forceMount className="pt-3 data-[state=inactive]:hidden">
-                <FieldGroup>
-                  <Field data-invalid={invalid("dockerfile")}>
-                    <FieldLabel htmlFor={id("dockerfile")}>{text.dockerfile}</FieldLabel>
-                    <Textarea
-                      id={id("dockerfile")}
-                      defaultValue={initial.dockerfile}
-                      className={`max-h-[60vh] min-h-56 ${monoArea}`}
-                      spellCheck={false}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      wrap="off"
-                      disabled={busy}
-                      aria-invalid={invalid("dockerfile")}
-                    />
-                    <FieldError>{err("dockerfile")}</FieldError>
-                  </Field>
-                  <ExtraFiles
-                    files={values.files}
-                    onChange={(files) => set("files", files)}
-                    disabled={busy}
-                    error={err("files")}
-                    idPrefix={id("file")}
-                  />
-                </FieldGroup>
+                <EditorSourceFields kit={kit} initial={initial} files={values.files} onFilesChange={(files) => set("files", files)} />
               </TabsContent>
-
               <TabsContent value="upload" forceMount className="pt-3 data-[state=inactive]:hidden">
-                <FieldGroup>
-                  <Field data-invalid={invalid("archive")}>
-                    <FieldLabel htmlFor={id("archive")}>{text.archive}</FieldLabel>
-                    <Input
-                      id={id("archive")}
-                      type="file"
-                      accept=".tar,.tar.gz,.tgz,application/x-tar,application/gzip"
-                      onChange={(e) => setArchive(e.target.files?.[0] ?? null)}
-                      disabled={busy}
-                      aria-invalid={invalid("archive")}
-                    />
-                    <FieldDescription>
-                      {i18n.rich(text.archiveHelp, { command: <code>docker build</code> })}
-                    </FieldDescription>
-                    <FieldError>{err("archive")}</FieldError>
-                  </Field>
-                  <Field data-invalid={invalid("uploadDockerfile")} className="max-w-md">
-                    <FieldLabel htmlFor={id("uploadDockerfile")}>{text.dockerfilePath}</FieldLabel>
-                    <Input
-                      id={id("uploadDockerfile")}
-                      defaultValue={initial.uploadDockerfile}
-                      placeholder={DEFAULT_DOCKERFILE}
-                      spellCheck={false}
-                      disabled={busy}
-                      aria-invalid={invalid("uploadDockerfile")}
-                    />
-                    <FieldDescription>{text.insideArchive}</FieldDescription>
-                    <FieldError>{err("uploadDockerfile")}</FieldError>
-                  </Field>
-                </FieldGroup>
+                <UploadSourceFields kit={kit} initial={initial} onArchiveChange={setArchive} />
               </TabsContent>
-
               <TabsContent value="git" forceMount className="pt-3 data-[state=inactive]:hidden">
-                <FieldGroup>
-                  <Field data-invalid={invalid("url")}>
-                    <FieldLabel htmlFor={id("url")}>{text.repositoryUrl}</FieldLabel>
-                    <Input
-                      id={id("url")}
-                      defaultValue={initial.url}
-                      placeholder="https://github.com/owner/repo.git"
-                      spellCheck={false}
-                      autoComplete="off"
-                      disabled={busy}
-                      aria-invalid={invalid("url")}
-                    />
-                    <FieldError>{err("url")}</FieldError>
-                  </Field>
-                  <div className="grid gap-4 @3xl/main:grid-cols-3">
-                    <Field data-invalid={invalid("ref")}>
-                      <FieldLabel htmlFor={id("ref")}>{text.ref}</FieldLabel>
-                      <Input
-                        id={id("ref")}
-                        defaultValue={initial.ref}
-                        placeholder="main"
-                        spellCheck={false}
-                        disabled={busy}
-                        aria-invalid={invalid("ref")}
-                      />
-                      <FieldError>{err("ref")}</FieldError>
-                    </Field>
-                    <Field data-invalid={invalid("context")}>
-                      <FieldLabel htmlFor={id("context")}>{text.contextDirectory}</FieldLabel>
-                      <Input
-                        id={id("context")}
-                        defaultValue={initial.context}
-                        placeholder={text.repositoryRoot}
-                        spellCheck={false}
-                        disabled={busy}
-                        aria-invalid={invalid("context")}
-                      />
-                      <FieldError>{err("context")}</FieldError>
-                    </Field>
-                    <Field data-invalid={invalid("gitDockerfile")}>
-                      <FieldLabel htmlFor={id("gitDockerfile")}>{text.dockerfilePath}</FieldLabel>
-                      <Input
-                        id={id("gitDockerfile")}
-                        defaultValue={initial.gitDockerfile}
-                        placeholder={DEFAULT_DOCKERFILE}
-                        spellCheck={false}
-                        disabled={busy}
-                        aria-invalid={invalid("gitDockerfile")}
-                      />
-                      <FieldDescription>{text.relativeToContext}</FieldDescription>
-                      <FieldError>{err("gitDockerfile")}</FieldError>
-                    </Field>
-                  </div>
-                  <div className="grid gap-4 @3xl/main:grid-cols-2">
-                    <Field data-invalid={invalid("username")}>
-                      <FieldLabel htmlFor={id("username")}>{text.username}</FieldLabel>
-                      <Input
-                        id={id("username")}
-                                                autoComplete="off"
-                        spellCheck={false}
-                        disabled={busy}
-                        aria-invalid={invalid("username")}
-                      />
-                      <FieldError>{err("username")}</FieldError>
-                    </Field>
-                    <Field data-invalid={invalid("token")}>
-                      <FieldLabel htmlFor={id("token")}>{text.accessToken}</FieldLabel>
-                      <Input
-                        id={id("token")}
-                        type="password"
-                                                autoComplete="new-password"
-                        disabled={busy}
-                        aria-invalid={invalid("token")}
-                      />
-                      <FieldError>{err("token")}</FieldError>
-                    </Field>
-                  </div>
-                  <FieldDescription>{text.gitLoginHelp}</FieldDescription>
-                </FieldGroup>
+                <GitSourceFields kit={kit} initial={initial} />
               </TabsContent>
             </Tabs>
           </CardContent>
@@ -313,81 +161,7 @@ export function ImageBuildForm({ initial, rebuildOf }: { initial: BuildFormValue
           </CardHeader>
           <CardContent>
             <FieldGroup>
-              <Field data-invalid={invalid("tags")}>
-                <FieldLabel htmlFor={id("tags")}>{text.tags}</FieldLabel>
-                <Textarea
-                  id={id("tags")}
-                  defaultValue={initial.tags}
-                  placeholder={"my-app:1.0\nregistry.example.com/team/my-app:1.0"}
-                  className={`min-h-16 ${monoArea}`}
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  disabled={busy}
-                  aria-invalid={invalid("tags")}
-                />
-                <FieldDescription>{text.tagsHelp}</FieldDescription>
-                <FieldError>{err("tags")}</FieldError>
-              </Field>
-              <div className="grid gap-4 @3xl/main:grid-cols-2">
-                <Field data-invalid={invalid("buildArgs")}>
-                  <FieldLabel htmlFor={id("buildArgs")}>{text.buildArgs}</FieldLabel>
-                  <Textarea
-                    id={id("buildArgs")}
-                    defaultValue={initial.buildArgs}
-                    placeholder="VERSION=1.0"
-                    className={`min-h-20 ${monoArea}`}
-                    spellCheck={false}
-                    autoCapitalize="off"
-                    wrap="off"
-                    disabled={busy}
-                    aria-invalid={invalid("buildArgs")}
-                  />
-                  <FieldDescription>{text.buildArgsHelp}</FieldDescription>
-                  <FieldError>{err("buildArgs")}</FieldError>
-                </Field>
-                <Field data-invalid={invalid("labels")}>
-                  <FieldLabel htmlFor={id("labels")}>{text.labels}</FieldLabel>
-                  <Textarea
-                    id={id("labels")}
-                    defaultValue={initial.labels}
-                    placeholder="org.opencontainers.image.source=https://…"
-                    className={`min-h-20 ${monoArea}`}
-                    spellCheck={false}
-                    autoCapitalize="off"
-                    wrap="off"
-                    disabled={busy}
-                    aria-invalid={invalid("labels")}
-                  />
-                  <FieldDescription>{text.labelsHelp}</FieldDescription>
-                  <FieldError>{err("labels")}</FieldError>
-                </Field>
-              </div>
-              <Field data-invalid={invalid("target")} className="max-w-sm">
-                <FieldLabel htmlFor={id("target")}>{text.target}</FieldLabel>
-                <Input
-                  id={id("target")}
-                  defaultValue={initial.target}
-                  placeholder={text.lastStage}
-                  spellCheck={false}
-                  disabled={busy}
-                  aria-invalid={invalid("target")}
-                />
-                <FieldError>{err("target")}</FieldError>
-              </Field>
-              <div className="flex flex-wrap gap-x-6 gap-y-3">
-                <Label className="font-normal">
-                  <Checkbox checked={values.noCache} onCheckedChange={(v) => set("noCache", v === true)} disabled={busy} />
-                  {text.noCache}
-                </Label>
-                <Label className="font-normal">
-                  <Checkbox checked={values.pull} onCheckedChange={(v) => set("pull", v === true)} disabled={busy} />
-                  {text.pull}
-                </Label>
-                <Label className="font-normal">
-                  <Checkbox checked={values.push} onCheckedChange={(v) => set("push", v === true)} disabled={busy} />
-                  {text.push}
-                </Label>
-              </div>
+              <OptionFields kit={kit} initial={initial} toggles={values} onToggle={set} />
               {formError ? <FieldError>{formError}</FieldError> : null}
               {Object.keys(errors).length ? <FieldError>{t.common.errors.fixFields}</FieldError> : null}
               <Field orientation="horizontal">
@@ -430,6 +204,261 @@ export function ImageBuildForm({ initial, rebuildOf }: { initial: BuildFormValue
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+/** Editor tab: the Dockerfile and extra files next to it. */
+function EditorSourceFields({
+  kit: { id, err, invalid, busy },
+  initial,
+  files,
+  onFilesChange,
+}: {
+  kit: FieldKit
+  initial: BuildFormValues
+  files: EditorFile[]
+  onFilesChange: (files: EditorFile[]) => void
+}) {
+  const text = useI18n().t.images.build
+  return (
+    <FieldGroup>
+      <Field data-invalid={invalid("dockerfile")}>
+        <FieldLabel htmlFor={id("dockerfile")}>{text.dockerfile}</FieldLabel>
+        <Textarea
+          id={id("dockerfile")}
+          defaultValue={initial.dockerfile}
+          className={`max-h-[60vh] min-h-56 ${monoArea}`}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          wrap="off"
+          disabled={busy}
+          aria-invalid={invalid("dockerfile")}
+        />
+        <FieldError>{err("dockerfile")}</FieldError>
+      </Field>
+      <ExtraFiles files={files} onChange={onFilesChange} disabled={busy} error={err("files")} idPrefix={id("file")} />
+    </FieldGroup>
+  )
+}
+
+/** Upload tab: the archive (state, sent as the body) and the Dockerfile in it. */
+function UploadSourceFields({
+  kit: { id, err, invalid, busy },
+  initial,
+  onArchiveChange,
+}: {
+  kit: FieldKit
+  initial: BuildFormValues
+  onArchiveChange: (file: File | null) => void
+}) {
+  const i18n = useI18n()
+  const text = i18n.t.images.build
+  return (
+    <FieldGroup>
+      <Field data-invalid={invalid("archive")}>
+        <FieldLabel htmlFor={id("archive")}>{text.archive}</FieldLabel>
+        <Input
+          id={id("archive")}
+          type="file"
+          accept=".tar,.tar.gz,.tgz,application/x-tar,application/gzip"
+          onChange={(e) => onArchiveChange(e.target.files?.[0] ?? null)}
+          disabled={busy}
+          aria-invalid={invalid("archive")}
+        />
+        <FieldDescription>
+          {i18n.rich(text.archiveHelp, { command: <code>docker build</code> })}
+        </FieldDescription>
+        <FieldError>{err("archive")}</FieldError>
+      </Field>
+      <Field data-invalid={invalid("uploadDockerfile")} className="max-w-md">
+        <FieldLabel htmlFor={id("uploadDockerfile")}>{text.dockerfilePath}</FieldLabel>
+        <Input
+          id={id("uploadDockerfile")}
+          defaultValue={initial.uploadDockerfile}
+          placeholder={DEFAULT_DOCKERFILE}
+          spellCheck={false}
+          disabled={busy}
+          aria-invalid={invalid("uploadDockerfile")}
+        />
+        <FieldDescription>{text.insideArchive}</FieldDescription>
+        <FieldError>{err("uploadDockerfile")}</FieldError>
+      </Field>
+    </FieldGroup>
+  )
+}
+
+/** Git tab: repository, ref, context, Dockerfile and an optional login (never prefilled). */
+function GitSourceFields({ kit: { id, err, invalid, busy }, initial }: { kit: FieldKit; initial: BuildFormValues }) {
+  const text = useI18n().t.images.build
+  return (
+    <FieldGroup>
+      <Field data-invalid={invalid("url")}>
+        <FieldLabel htmlFor={id("url")}>{text.repositoryUrl}</FieldLabel>
+        <Input
+          id={id("url")}
+          defaultValue={initial.url}
+          placeholder="https://github.com/owner/repo.git"
+          spellCheck={false}
+          autoComplete="off"
+          disabled={busy}
+          aria-invalid={invalid("url")}
+        />
+        <FieldError>{err("url")}</FieldError>
+      </Field>
+      <div className="grid gap-4 @3xl/main:grid-cols-3">
+        <Field data-invalid={invalid("ref")}>
+          <FieldLabel htmlFor={id("ref")}>{text.ref}</FieldLabel>
+          <Input
+            id={id("ref")}
+            defaultValue={initial.ref}
+            placeholder="main"
+            spellCheck={false}
+            disabled={busy}
+            aria-invalid={invalid("ref")}
+          />
+          <FieldError>{err("ref")}</FieldError>
+        </Field>
+        <Field data-invalid={invalid("context")}>
+          <FieldLabel htmlFor={id("context")}>{text.contextDirectory}</FieldLabel>
+          <Input
+            id={id("context")}
+            defaultValue={initial.context}
+            placeholder={text.repositoryRoot}
+            spellCheck={false}
+            disabled={busy}
+            aria-invalid={invalid("context")}
+          />
+          <FieldError>{err("context")}</FieldError>
+        </Field>
+        <Field data-invalid={invalid("gitDockerfile")}>
+          <FieldLabel htmlFor={id("gitDockerfile")}>{text.dockerfilePath}</FieldLabel>
+          <Input
+            id={id("gitDockerfile")}
+            defaultValue={initial.gitDockerfile}
+            placeholder={DEFAULT_DOCKERFILE}
+            spellCheck={false}
+            disabled={busy}
+            aria-invalid={invalid("gitDockerfile")}
+          />
+          <FieldDescription>{text.relativeToContext}</FieldDescription>
+          <FieldError>{err("gitDockerfile")}</FieldError>
+        </Field>
+      </div>
+      <div className="grid gap-4 @3xl/main:grid-cols-2">
+        <Field data-invalid={invalid("username")}>
+          <FieldLabel htmlFor={id("username")}>{text.username}</FieldLabel>
+          <Input id={id("username")} autoComplete="off" spellCheck={false} disabled={busy} aria-invalid={invalid("username")} />
+          <FieldError>{err("username")}</FieldError>
+        </Field>
+        <Field data-invalid={invalid("token")}>
+          <FieldLabel htmlFor={id("token")}>{text.accessToken}</FieldLabel>
+          <Input
+            id={id("token")}
+            type="password"
+            autoComplete="new-password"
+            disabled={busy}
+            aria-invalid={invalid("token")}
+          />
+          <FieldError>{err("token")}</FieldError>
+        </Field>
+      </div>
+      <FieldDescription>{text.gitLoginHelp}</FieldDescription>
+    </FieldGroup>
+  )
+}
+
+/** Tags, build arguments, labels, target stage and the three checkboxes. */
+function OptionFields({
+  kit: { id, err, invalid, busy },
+  initial,
+  toggles,
+  onToggle,
+}: {
+  kit: FieldKit
+  initial: BuildFormValues
+  toggles: Toggles
+  onToggle: (key: keyof Toggles, value: boolean) => void
+}) {
+  const text = useI18n().t.images.build
+  return (
+    <>
+      <Field data-invalid={invalid("tags")}>
+        <FieldLabel htmlFor={id("tags")}>{text.tags}</FieldLabel>
+        <Textarea
+          id={id("tags")}
+          defaultValue={initial.tags}
+          placeholder={"my-app:1.0\nregistry.example.com/team/my-app:1.0"}
+          className={`min-h-16 ${monoArea}`}
+          spellCheck={false}
+          autoCapitalize="off"
+          disabled={busy}
+          aria-invalid={invalid("tags")}
+        />
+        <FieldDescription>{text.tagsHelp}</FieldDescription>
+        <FieldError>{err("tags")}</FieldError>
+      </Field>
+      <div className="grid gap-4 @3xl/main:grid-cols-2">
+        <Field data-invalid={invalid("buildArgs")}>
+          <FieldLabel htmlFor={id("buildArgs")}>{text.buildArgs}</FieldLabel>
+          <Textarea
+            id={id("buildArgs")}
+            defaultValue={initial.buildArgs}
+            placeholder="VERSION=1.0"
+            className={`min-h-20 ${monoArea}`}
+            spellCheck={false}
+            autoCapitalize="off"
+            wrap="off"
+            disabled={busy}
+            aria-invalid={invalid("buildArgs")}
+          />
+          <FieldDescription>{text.buildArgsHelp}</FieldDescription>
+          <FieldError>{err("buildArgs")}</FieldError>
+        </Field>
+        <Field data-invalid={invalid("labels")}>
+          <FieldLabel htmlFor={id("labels")}>{text.labels}</FieldLabel>
+          <Textarea
+            id={id("labels")}
+            defaultValue={initial.labels}
+            placeholder="org.opencontainers.image.source=https://…"
+            className={`min-h-20 ${monoArea}`}
+            spellCheck={false}
+            autoCapitalize="off"
+            wrap="off"
+            disabled={busy}
+            aria-invalid={invalid("labels")}
+          />
+          <FieldDescription>{text.labelsHelp}</FieldDescription>
+          <FieldError>{err("labels")}</FieldError>
+        </Field>
+      </div>
+      <Field data-invalid={invalid("target")} className="max-w-sm">
+        <FieldLabel htmlFor={id("target")}>{text.target}</FieldLabel>
+        <Input
+          id={id("target")}
+          defaultValue={initial.target}
+          placeholder={text.lastStage}
+          spellCheck={false}
+          disabled={busy}
+          aria-invalid={invalid("target")}
+        />
+        <FieldError>{err("target")}</FieldError>
+      </Field>
+      <div className="flex flex-wrap gap-x-6 gap-y-3">
+        <Label className="font-normal">
+          <Checkbox checked={toggles.noCache} onCheckedChange={(v) => onToggle("noCache", v === true)} disabled={busy} />
+          {text.noCache}
+        </Label>
+        <Label className="font-normal">
+          <Checkbox checked={toggles.pull} onCheckedChange={(v) => onToggle("pull", v === true)} disabled={busy} />
+          {text.pull}
+        </Label>
+        <Label className="font-normal">
+          <Checkbox checked={toggles.push} onCheckedChange={(v) => onToggle("push", v === true)} disabled={busy} />
+          {text.push}
+        </Label>
+      </div>
+    </>
   )
 }
 
