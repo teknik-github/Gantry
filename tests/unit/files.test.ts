@@ -17,7 +17,7 @@ import {
 import { FrameDemuxer } from "@/lib/server/docker/stream"
 import { listCommand, parseStatOutput, STAT_FORMAT } from "@/lib/server/files/exec-list"
 import { DirectoryCollector, parseNumeric, parsePax, TarError, TarReader, type TarEntry } from "@/lib/server/files/tar-read"
-import { directoryTar, fileTarLength, fileTarStream, tarHeader, TAR_END } from "@/lib/server/files/tar-write"
+import { directoryTar, fileTarLength, fileTarStream, tarHeader, TAR_END } from "@/lib/server/tar"
 
 describe("paths", () => {
   it("normalizes to absolute paths", () => {

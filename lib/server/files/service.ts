@@ -11,7 +11,7 @@ import { filesConfig } from "@/lib/server/files/config"
 import { LIST_ENV, listCommand, NOT_A_DIRECTORY, parseStatOutput } from "@/lib/server/files/exec-list"
 import { acquireHelper, VOLUME_MOUNT, withHelper, type Helper } from "@/lib/server/files/helper"
 import { DirectoryCollector, TarReader, type TarEntry } from "@/lib/server/files/tar-read"
-import { directoryTar, fileTarLength, fileTarStream, tarHeader } from "@/lib/server/files/tar-write"
+import { directoryTar, fileTarLength, fileTarStream, tarHeader } from "@/lib/server/tar"
 
 /**
  * File operations for the file browser, on a container's filesystem or a

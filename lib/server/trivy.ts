@@ -14,6 +14,7 @@ import {
   type DockerTarget,
 } from "@/lib/server/docker/client"
 import { credentialsForImage } from "@/lib/server/registries"
+import { directoryTar } from "@/lib/server/tar"
 
 /**
  * Runs Trivy (https://trivy.dev) as a short-lived container on the Docker
@@ -178,32 +179,6 @@ function pullFailure(reference: string, message: string) {
     `Couldn't pull the scanner image ${reference}: ${message}. ` +
     "On a host without access to Docker Hub, push it to a registry it can reach and set TRIVY_IMAGE"
   ).slice(0, 1000)
-}
-
-/** A tar archive of empty directories (for PUT /archive, which needs its target to exist). */
-export function directoryTar(names: string[]): Buffer {
-  const blocks: Buffer[] = []
-  for (const name of names) {
-    if (!/^[A-Za-z0-9._/-]{1,99}$/.test(name) || !name.endsWith("/") || name.split("/").includes("..")) throw new Error(`Unsupported directory name: ${name}`)
-    const header = Buffer.alloc(512, 0)
-    const octal = (value: number, length: number) => value.toString(8).padStart(length - 1, "0") + "\0"
-    header.write(name, 0, "utf8")
-    header.write(octal(0o755, 8), 100, "ascii")
-    header.write(octal(0, 8), 108, "ascii")
-    header.write(octal(0, 8), 116, "ascii")
-    header.write(octal(0, 12), 124, "ascii")
-    header.write(octal(Math.floor(Date.now() / 1000), 12), 136, "ascii")
-    header.write("        ", 148, "ascii")
-    header.write("5", 156, "ascii") // directory
-    header.write("ustar\0", 257, "ascii")
-    header.write("00", 263, "ascii")
-    let sum = 0
-    for (const b of header) sum += b
-    header.write(octal(sum, 7) + " ", 148, "ascii")
-    blocks.push(header)
-  }
-  blocks.push(Buffer.alloc(1024, 0))
-  return Buffer.concat(blocks)
 }
 
 /**
