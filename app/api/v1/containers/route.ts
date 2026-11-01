@@ -1,3 +1,4 @@
+import { containerName } from "@/lib/format"
 import { authorizeRequest } from "@/lib/server/api-auth"
 import { DockerError } from "@/lib/server/docker/client"
 import { getDocker } from "@/lib/server/environments"
@@ -37,7 +38,7 @@ export async function GET() {
       environment: { id: env.id, name: env.name },
       containers: containers.map((c) => ({
         id: c.Id,
-        name: c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12),
+        name: containerName(c),
         image: c.Image,
         state: c.State,
         status: c.Status,

@@ -1,5 +1,6 @@
 import "server-only"
 
+import { containerName } from "@/lib/format"
 import { cpuPercent, memoryUsage, type DockerApi } from "@/lib/server/docker/api"
 
 // Host-level resource usage of an environment: the math shared by the live
@@ -63,7 +64,7 @@ export async function sampleHost(
       const s = await api.containerStats(c.Id)
       return {
         id: c.Id,
-        name: c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12),
+        name: containerName(c),
         cpu: cpuPercent(s),
         memory: memoryUsage(s),
         memLimit: s.memory_stats.limit ?? 0,

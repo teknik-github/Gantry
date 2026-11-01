@@ -3,11 +3,11 @@ import type { Metadata } from "next"
 import { AutoUpdateContainers, AutoUpdateResults, AutoUpdateSchedule } from "@/components/gantry/auto-update-ui"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
+import { containerName } from "@/lib/format"
 import { getI18n } from "@/lib/i18n/server"
 import { requirePermission } from "@/lib/server/action"
 import {
   AUTO_UPDATE_LABEL,
-  containerNameOf,
   enrolledNames,
   enrolment,
   getAutoUpdateSettings,
@@ -74,7 +74,7 @@ export default async function AutoUpdatePage() {
             const update = result.data.updates.get(c.Id)
             return {
               id: c.Id,
-              name: containerNameOf(c),
+              name: containerName(c),
               image: result.data.refs.get(c.Id) ?? c.Image,
               state: c.State,
               enrolment: enrolment(c, names),

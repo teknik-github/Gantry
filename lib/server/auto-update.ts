@@ -1,5 +1,6 @@
 import "server-only"
 
+import { containerName } from "@/lib/format"
 import { SYSTEM_ACTOR, audit, type Actor } from "@/lib/server/audit"
 import { getDb } from "@/lib/server/db"
 import type { Environment } from "@/lib/server/db/schema"
@@ -85,13 +86,9 @@ export async function setEnrolled(environmentId: number, name: string, on: boole
   }
 }
 
-export function containerNameOf(c: Pick<ContainerSummary, "Id" | "Names">) {
-  return c.Names?.[0]?.replace(/^\//, "") || c.Id.slice(0, 12)
-}
-
 /** Why a container is enrolled: "rule" (chosen in Gantry), "label", or null. */
 export function enrolment(c: Pick<ContainerSummary, "Id" | "Names" | "Labels">, names: Set<string>) {
-  if (names.has(containerNameOf(c))) return "rule" as const
+  if (names.has(containerName(c))) return "rule" as const
   if (c.Labels?.[AUTO_UPDATE_LABEL] === "true") return "label" as const
   return null
 }
@@ -111,7 +108,7 @@ async function updateEnvironment(env: Environment, actor: Actor): Promise<AutoUp
   const results: AutoUpdateResult[] = []
   // One at a time: each update stops and replaces a running container.
   for (const c of containers) {
-    const base = { environment: env.name, container: containerNameOf(c), image: refs.get(c.Id) ?? c.Image }
+    const base = { environment: env.name, container: containerName(c), image: refs.get(c.Id) ?? c.Image }
     const u = updates.get(c.Id)
     if (!u || u.status === "unknown") {
       results.push({ ...base, status: "skipped", message: u?.reason ?? "Image tag can't be checked" })

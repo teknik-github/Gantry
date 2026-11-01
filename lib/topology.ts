@@ -2,6 +2,7 @@
 // what they are connected to. Pure and serializable so the server page can
 // build it and the client can filter and lay it out.
 
+import { containerName } from "@/lib/format"
 import type { ContainerSummary, Network, Volume } from "@/lib/server/docker/api"
 
 export const BUILTIN_NETWORKS = ["bridge", "host", "none"]
@@ -117,10 +118,6 @@ export const nodeId = {
   volume: (name: string) => `volume:${name}`,
   bind: (source: string) => `bind:${source}`,
   project: (name: string) => `project:${name}`,
-}
-
-export function containerName(c: Pick<ContainerSummary, "Names" | "Id">) {
-  return c.Names?.[0]?.replace(/^\//, "") || c.Id.slice(0, 12)
 }
 
 const ACTIVE_STATES = new Set(["running", "paused", "restarting", "removing"])

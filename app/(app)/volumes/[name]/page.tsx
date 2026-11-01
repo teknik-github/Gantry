@@ -8,6 +8,7 @@ import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, Mono, StateBadge } from "@/components/gantry/ui"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { containerName } from "@/lib/format"
 import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getDocker, getPermissions } from "@/lib/server/environments"
@@ -58,7 +59,7 @@ export default async function VolumePage({ params }: PageProps<"/volumes/[name]"
     .filter((c) => !c.Labels?.[HELPER_LABEL])
     .flatMap((c) => {
       const mount = c.Mounts?.find((m) => m.Type === "volume" && m.Name === name)
-      return mount ? [{ id: c.Id, name: c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12), state: c.State, target: mount.Destination, rw: mount.RW !== false }] : []
+      return mount ? [{ id: c.Id, name: containerName(c), state: c.State, target: mount.Destination, rw: mount.RW !== false }] : []
     })
   const running = usedBy.filter((c) => c.state === "running")
   const writeWarning = usedBy.length

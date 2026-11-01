@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { VolumesTable, type VolumeRow } from "@/components/gantry/volumes-table"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
+import { containerName } from "@/lib/format"
 import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getDocker, getPermissions } from "@/lib/server/environments"
@@ -36,7 +37,7 @@ export default async function VolumesPage() {
   for (const c of result.data.containers) {
     // The file browser's short-lived helpers (lib/server/files/helper.ts) don't count.
     if (c.Labels?.["gantry.helper"]) continue
-    const name = c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12)
+    const name = containerName(c)
     for (const m of c.Mounts ?? []) {
       if (m.Type === "volume" && m.Name) usedBy.set(m.Name, [...(usedBy.get(m.Name) ?? []), name])
     }

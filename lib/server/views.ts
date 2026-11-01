@@ -1,6 +1,6 @@
 import "server-only"
 
-import { timeAgo } from "@/lib/format"
+import { containerName, timeAgo } from "@/lib/format"
 import { DockerError } from "@/lib/server/docker/client"
 import type { ContainerSummary } from "@/lib/server/docker/api"
 import type { ContainerRow } from "@/components/gantry/containers-table"
@@ -18,7 +18,7 @@ export function toContainerRows(
     }
     return {
       id: c.Id,
-      name: c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12),
+      name: containerName(c),
       // The list shows an image id once the tag moved on; prefer the original reference.
       image: extra.refs?.get(c.Id) ?? c.Image,
       state: c.State,

@@ -22,6 +22,11 @@ export function shortId(id: string) {
   return id.replace(/^sha256:/, "").slice(0, 12)
 }
 
+/** A listed container's name without the leading slash, or its short id. */
+export function containerName(c: { Names?: string[] | null; Id: string }) {
+  return c.Names?.[0]?.replace(/^\//, "") || c.Id.slice(0, 12)
+}
+
 const relativeFormats = new Map<Locale, Intl.RelativeTimeFormat>()
 
 function relative(locale: Locale) {

@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { ProxyHostsTable, ProxySettingsCard } from "@/components/gantry/proxy-ui"
 import { PageBody } from "@/components/gantry/page-body"
 import { DockerUnavailable, PageHeader } from "@/components/gantry/ui"
+import { containerName } from "@/lib/format"
 import { getI18n } from "@/lib/i18n/server"
 import { externalSnippets } from "@/lib/proxy"
 import { requirePermission } from "@/lib/server/action"
@@ -36,7 +37,7 @@ export default async function ProxyPage() {
 
   const containers = (docker.data?.containers ?? [])
     .map((c) => ({
-      name: c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12),
+      name: containerName(c),
       state: c.State,
       ports: [...new Set(c.Ports.map((p) => p.PrivatePort))].sort((a, b) => a - b),
     }))

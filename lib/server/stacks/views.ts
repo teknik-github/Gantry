@@ -1,5 +1,6 @@
 import "server-only"
 
+import { containerName } from "@/lib/format"
 import type { ContainerSummary } from "@/lib/server/docker/api"
 import { CONFIG_FILES_LABEL, SERVICE_LABEL } from "@/lib/server/stacks"
 import { stackStatus } from "@/lib/stacks"
@@ -10,7 +11,7 @@ export function summarizeProject(containers: ContainerSummary[]) {
   const list: StackContainer[] = containers
     .map((c) => ({
       id: c.Id,
-      name: c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12),
+      name: containerName(c),
       service: c.Labels?.[SERVICE_LABEL] ?? "",
       state: c.State,
     }))

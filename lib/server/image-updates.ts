@@ -9,6 +9,7 @@ import {
   type ContainerUpdate,
   type LocalImage,
 } from "@/lib/image-updates"
+import { containerName } from "@/lib/format"
 import { getDb } from "@/lib/server/db"
 import type { ContainerSummary, DockerApi } from "@/lib/server/docker/api"
 import { docker } from "@/lib/server/docker/api"
@@ -209,7 +210,7 @@ async function announceUpdates(
   for (const c of containers) {
     const u = updates.get(c.Id)
     if (u?.status !== "update") continue
-    const name = c.Names?.[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12)
+    const name = containerName(c)
     const key = `${env.id}|${name}|${u.remoteDigest ?? u.reference}`
     if (announced.has(key)) continue
     announced.add(key)
