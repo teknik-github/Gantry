@@ -36,7 +36,7 @@ import {
   type HelmOperationInfo,
   type OperationContext,
 } from "@/lib/server/kubernetes/helm-operations"
-import { deleteHelmRepo, findHelmRepoByName, getHelmRepo, helmRepoForOciRef, insertHelmRepo } from "@/lib/server/kubernetes/helm-repos"
+import { deleteHelmRepo, findHelmRepoByName, helmRepoForOciRef, insertHelmRepo, listHelmRepos } from "@/lib/server/kubernetes/helm-repos"
 import { kubeTarget } from "@/lib/server/kubernetes/target"
 import type { ActionState } from "@/lib/validation"
 
@@ -82,7 +82,14 @@ export async function addHelmRepository(_prev: ActionState, formData: FormData):
 export async function removeHelmRepository(id: number): Promise<ActionState> {
   const { t, format } = await getI18n()
   if (!Number.isSafeInteger(id) || id < 1) return { error: t.kubernetes.actions.invalidRepository }
-  const repo = await getHelmRepo(id).catch(() => null)
+  // Not getHelmRepo(): it decrypts the credentials, and a repository whose
+  // credentials can't be decrypted must still be removable.
+  const repo = await listHelmRepos()
+    .then((repos) => repos.find((r) => r.id === id) ?? null)
+    .catch((err) => {
+      console.error("[gantry] could not look up Helm repository", id, err)
+      return null
+    })
   return runAction("admin", "kubernetes.helm.repo.remove", repo?.name ?? String(id), async () => {
     if (!repo) throw new UserError(t.kubernetes.actions.repoGone)
     await deleteHelmRepo(id)

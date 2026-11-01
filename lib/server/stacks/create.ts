@@ -101,6 +101,7 @@ export async function createGitStackInCurrentEnvironment(
       const check = validateCompose(compose)
       if (!check.ok) throw new ComposePathError(`${input.composePath}: ${check.error}`)
     } catch (err) {
+      // Best-effort cleanup; the original error is what the user needs to see.
       await removeStackDir(dir).catch(() => {})
       if (err instanceof ComposeFileError) throw new ComposePathError(err.message)
       if (err instanceof GitError) throw new UserError(err.message)

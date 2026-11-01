@@ -1,22 +1,17 @@
 import "server-only"
 
-import { DockerError } from "@/lib/server/docker/client"
 import { FilesError } from "@/lib/server/files/service"
+import { errorResponse as routeErrorResponse, json } from "@/lib/server/http"
 import { isCrossSite } from "@/lib/server/same-origin"
 
-const NO_STORE = { "Cache-Control": "no-store" }
-
-/** JSON error response for file browser routes; unexpected errors are logged, not shown. */
+/**
+ * JSON error response for file browser routes: FilesError with its status
+ * and code, Docker errors and unexpected ones like every route handler
+ * (lib/server/http.ts).
+ */
 export function errorResponse(err: unknown): Response {
-  if (err instanceof FilesError) {
-    return Response.json({ error: err.message, code: err.code }, { status: err.status, headers: NO_STORE })
-  }
-  if (err instanceof DockerError) {
-    const status = err.status >= 400 && err.status < 600 ? err.status : 502
-    return Response.json({ error: err.message }, { status, headers: NO_STORE })
-  }
-  console.error("[gantry] file browser request failed", err)
-  return Response.json({ error: "Something went wrong. Check the server logs." }, { status: 500, headers: NO_STORE })
+  if (err instanceof FilesError) return json(err.status, { error: err.message, code: err.code })
+  return routeErrorResponse(err, "file browser request")
 }
 
 /** attachment; filename="ascii" plus RFC 5987 filename* for anything else. */
@@ -27,7 +22,7 @@ export function contentDisposition(filename: string): string {
 
 /** Refuses cross-site browser requests (routes that proxy.ts doesn't screen). */
 export function crossSite(request: Request): Response | null {
-  return isCrossSite(request.headers) ? Response.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE }) : null
+  return isCrossSite(request.headers) ? json(403, { error: "Forbidden" }) : null
 }
 
 export function searchParamsObject(params: URLSearchParams) {

@@ -4,6 +4,7 @@ import type { Duplex } from "node:stream"
 
 import {
   connectionError,
+  dockerErrorMessage,
   dockerJson,
   dockerRaw,
   dockerRequest,
@@ -58,10 +59,7 @@ function hijack(target: DockerTarget, path: string, body: unknown): Promise<Dupl
       const chunks: Buffer[] = []
       res.on("data", (c: Buffer) => chunks.push(c))
       res.on("end", () => {
-        let message = Buffer.concat(chunks).toString("utf8").trim()
-        try {
-          message = JSON.parse(message).message ?? message
-        } catch {}
+        const message = dockerErrorMessage(Buffer.concat(chunks).toString("utf8"))
         reject(new DockerError(message || `Docker exec failed (${res.statusCode})`, res.statusCode ?? 502))
       })
     })

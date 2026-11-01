@@ -10,10 +10,9 @@ import {
 } from "@/lib/image-build"
 import { expectedEnvironment } from "@/lib/server/action"
 import { authorizeRequest } from "@/lib/server/api-auth"
+import { json } from "@/lib/server/http"
 import { dockerTargetFor, editorProvider, gitProvider, startBuild } from "@/lib/server/images/run"
 import { checkCredentials } from "@/lib/server/stacks/git"
-
-const json = (status: number, body: object) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } })
 
 /**
  * Builds an image on the current environment from a Dockerfile written in

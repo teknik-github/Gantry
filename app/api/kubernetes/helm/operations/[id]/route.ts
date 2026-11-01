@@ -28,7 +28,9 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/kubernet
         stop()
         try {
           controller.close()
-        } catch {}
+        } catch {
+          // Already closed: the client went away.
+        }
       }
       const send = (event: HelmOperationEvent) => {
         if (!open) return

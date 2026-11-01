@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server"
 
 import { DNS_LABEL_RE, namespaceSchema, objectNameSchema } from "@/lib/kubernetes/names"
 import { authorizeRequest } from "@/lib/server/api-auth"
-import { getKube, KubeError } from "@/lib/server/kubernetes"
+import { errorResponse } from "@/lib/server/http"
+import { getKube } from "@/lib/server/kubernetes"
 
 /** Followed log streams open on this server; each holds one API connection. */
 const MAX_FOLLOWERS = 64
@@ -11,12 +12,8 @@ const followers = (globalForLogs.__gantryLogFollowers ??= { count: 0 })
 
 const DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 
-function failure(err: unknown) {
-  if (!(err instanceof KubeError)) console.error("[gantry] pod logs failed", err)
-  // The cluster rejecting Gantry's token is not the browser's session expiring: no 401.
-  const status = err instanceof KubeError ? (err.status > 401 && err.status < 600 ? err.status : 502) : 500
-  return Response.json({ error: err instanceof KubeError ? err.message : "Could not load the logs" }, { status })
-}
+// The cluster rejecting Gantry's token is not the browser's session expiring: no 401 (see upstreamStatus).
+const failure = (err: unknown) => errorResponse(err, "pod logs")
 
 /**
  * Logs of a pod's container in the current Kubernetes environment.
@@ -105,7 +102,9 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/kubernet
         release()
         try {
           controller.close()
-        } catch {}
+        } catch {
+          // Already closed: the client went away.
+        }
       }
       res.on("data", (chunk: Buffer) => {
         if (open) controller.enqueue(new Uint8Array(chunk))

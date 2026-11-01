@@ -3,11 +3,10 @@ import type { NextRequest } from "next/server"
 import { BUILD_OPTIONS_HEADER as OPTIONS_HEADER, isArchiveName, MAX_OPTIONS_HEADER, parseBuildOptions, validateDockerfilePath, type FieldErrors } from "@/lib/image-build"
 import { expectedEnvironment } from "@/lib/server/action"
 import { authorizeRequest } from "@/lib/server/api-auth"
+import { json } from "@/lib/server/http"
 import { formatLimit } from "@/lib/server/images/context"
 import { buildLimits, dockerTargetFor, startBuild, uploadProvider } from "@/lib/server/images/run"
 import { isCrossSite } from "@/lib/server/same-origin"
-
-const json = (status: number, body: object) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } })
 
 /**
  * Builds from an uploaded context archive (.tar, .tar.gz). The body is the

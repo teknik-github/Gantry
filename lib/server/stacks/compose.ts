@@ -235,6 +235,7 @@ export async function runCompose(opts: {
     }
     return { code: 0, output: out.toString(), timedOut: false }
   } finally {
+    // Temporary files: best-effort cleanup (a leftover in the temp dir must not fail the command).
     if (certDir) await fs.rm(certDir, { recursive: true, force: true }).catch(() => {})
     if (configDir) await fs.rm(configDir, { recursive: true, force: true }).catch(() => {})
   }
@@ -266,6 +267,7 @@ export async function writeDockerConfig(creds: RegistryCredentials[], base: Node
       if (await fs.stat(plugins).then((st) => st.isDirectory(), () => false)) await fs.symlink(plugins, path.join(dir, "cli-plugins"))
     }
   } catch (err) {
+    // Best-effort cleanup; the original error is rethrown.
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
     throw err
   }
@@ -336,6 +338,7 @@ export async function writeCerts(tls: { ca: string; cert: string; key: string })
     await fs.writeFile(path.join(dir, "cert.pem"), tls.cert, { mode: 0o600 })
     await fs.writeFile(path.join(dir, "key.pem"), tls.key, { mode: 0o600 })
   } catch (err) {
+    // Best-effort cleanup; the original error is rethrown.
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
     throw err
   }

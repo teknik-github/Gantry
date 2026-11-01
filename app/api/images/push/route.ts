@@ -3,9 +3,8 @@ import type { NextRequest } from "next/server"
 import { parseImageReference } from "@/lib/image-build"
 import { expectedEnvironment } from "@/lib/server/action"
 import { authorizeRequest } from "@/lib/server/api-auth"
+import { json } from "@/lib/server/http"
 import { dockerTargetFor, startPush } from "@/lib/server/images/run"
-
-const json = (status: number, body: object) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } })
 
 /**
  * Pushes one tag of the current environment to its registry with the login

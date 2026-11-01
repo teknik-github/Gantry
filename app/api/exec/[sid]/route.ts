@@ -32,6 +32,7 @@ async function requireConsole(sid: string) {
   }
   const role = user.role === "admin" ? null : await environmentRoleFor(await getDb(), user.id, environmentId)
   if (!allows(user.role, role, "manage")) {
+    // Best effort: the console is refused either way, and idle sessions are reaped.
     await closeSession(sid, user.id).catch(() => {})
     return { error: Response.json({ error: "Forbidden" }, { status: 403 }) }
   }
