@@ -5,13 +5,32 @@
 // Everything is carried over plain HTTP(S):
 //   - downstream (Gantry -> agent): the response body of one long-lived
 //     GET /api/agent/connect, a stream of frames;
-//   - upstream (agent -> Gantry): POST /api/agent/upstream requests, one at a
-//     time, each body a batch of whole frames, numbered by X-Gantry-Agent-Seq.
+//   - upstream (agent -> Gantry): POST /api/agent/upstream requests, each
+//     body a batch of whole frames, numbered by X-Gantry-Agent-Seq. Gantry
+//     applies the batches strictly in that order.
 //
 // Frame: type (u8) | stream id (u32 BE) | payload length (u32 BE) | payload.
 // Stream 0 is the control channel (HELLO, PING/PONG, GOAWAY). Gantry opens
 // every tunneled stream (one per Docker connection); the agent only ever
 // connects them to its local Docker socket, so the protocol has no address.
+//
+// Optional features, negotiated without changing PROTOCOL_VERSION (the frames
+// and their meaning are unchanged, so old and new agents and Gantrys keep
+// working together; each feature is only used when both ends have it):
+//   - The agent offers `upstreamInflight` (AgentInfo). Gantry answers in
+//     HELLO with the number of upstream POSTs the agent may have in flight at
+//     once (they may arrive out of order; Gantry waits for the missing ones),
+//     and with `maxWindow`/`windowPool`. Without the offer (an agent before
+//     this) HELLO has none of these: one POST at a time, fixed windows.
+//   - Window growth: a receiver may grant more than it consumed, which every
+//     sender accepts (a WINDOW increment is just added). Receivers that got
+//     `maxWindow` in HELLO grow a busy stream's window, doubling it up to
+//     maxWindow, out of a pool of `windowPool` bytes per session and
+//     direction. So the bytes buffered per agent stay below
+//     maxStreams * window + windowPool in each direction.
+// An agent without these features (protocol 1 as first released) talking to
+// this Gantry, or this agent talking to such a Gantry, falls back to one POST
+// at a time and fixed 1 MiB windows.
 
 export const PROTOCOL_VERSION = 1
 
@@ -45,6 +64,12 @@ export const MAX_DATA = 64 * 1024
 export const MAX_CONTROL = 4 * 1024
 /** Bytes a receiver accepts per stream before it grants more with WINDOW. */
 export const INITIAL_WINDOW = 1024 * 1024
+/** Largest window a receiver grows a busy stream to (with window growth). */
+export const MAX_WINDOW = 8 * 1024 * 1024
+/** Window growth shared by the streams of one session, per direction. */
+export const WINDOW_POOL = 32 * 1024 * 1024
+/** Upstream POSTs an agent may have in flight at once (when it offers them). */
+export const MAX_UPSTREAM_INFLIGHT = 4
 /** Largest upstream POST body (the agent sends up to 1 MiB batches). */
 export const MAX_UPSTREAM_BODY = 4 * 1024 * 1024
 export const MAX_STREAM_ID = 0xffffffff
@@ -61,6 +86,11 @@ export type AgentHello = {
   window: number
   maxData: number
   heartbeatMs: number
+  /** Only when the agent offered upstreamInflight: POSTs it may have in flight at once. */
+  upstreamInflight?: number
+  /** With upstreamInflight: windows may grow up to maxWindow, out of windowPool bytes per direction. */
+  maxWindow?: number
+  windowPool?: number
 }
 
 export class ProtocolError extends Error {
@@ -170,4 +200,72 @@ export class FrameDecoder {
     this.buffered -= n
     return out
   }
+}
+
+/**
+ * The receiving side of flow control for one session: per-stream receive
+ * windows, grown for busy streams out of a shared pool. A stream's window
+ * doubles (up to `max`) when it has carried a whole window since it last
+ * grew and its local consumer keeps up (little received data still waits to
+ * be written). Without growth (`max` equal to `initial`) every window stays
+ * `initial`, as in the first protocol release.
+ *
+ * agent/gantry-agent.mjs has the same logic; keep both in sync.
+ */
+export class ReceiveWindows {
+  available: number
+
+  constructor(
+    readonly initial: number,
+    readonly max: number,
+    pool: number
+  ) {
+    this.available = max > initial ? pool : 0
+  }
+
+  /** State for a new stream. */
+  open(): RecvState {
+    return { window: this.initial, outstanding: 0, credit: 0, sinceGrowth: 0 }
+  }
+
+  /** Received `n` bytes; false when the sender overran the window. */
+  received(s: RecvState, n: number): boolean {
+    s.outstanding += n
+    return s.outstanding <= s.window + MAX_DATA
+  }
+
+  /** `n` received bytes were consumed; returns the increment to grant now, or 0. */
+  consumed(s: RecvState, n: number): number {
+    s.credit += n
+    s.sinceGrowth += n
+    if (s.credit < s.window / 4) return 0
+    let extra = 0
+    if (this.available > 0 && s.window < this.max && s.sinceGrowth >= s.window && s.outstanding - s.credit < s.window / 4) {
+      extra = Math.min(s.window, this.max - s.window, this.available)
+      this.available -= extra
+      s.window += extra
+      s.sinceGrowth = 0
+    }
+    const grant = s.credit + extra
+    s.outstanding -= s.credit
+    s.credit = 0
+    return grant
+  }
+
+  /** The stream is gone: its growth returns to the pool. */
+  close(s: RecvState) {
+    this.available += s.window - this.initial
+    s.window = this.initial
+  }
+}
+
+export type RecvState = {
+  /** Bytes the sender may have outstanding (received and not granted back). */
+  window: number
+  /** Received and not yet granted back. */
+  outstanding: number
+  /** Consumed (written onward) and not yet granted back. */
+  credit: number
+  /** Consumed since the window last grew. */
+  sinceGrowth: number
 }

@@ -60,6 +60,11 @@ export const nav: Dictionary["nav"] = {
     noEnvironments: "Belum ada environment",
     noneAssigned: "Belum ada — minta ke administrator",
     manage: "Kelola environment",
+    agentDocker: "Docker {version}",
+    agentConnected: "{host} · terhubung",
+    agentDisconnected: "{host} · terputus",
+    agentConnectedUnknown: "Agent terhubung",
+    agentNeverConnected: "Agent belum terhubung",
   },
   live: {
     connecting: "Menghubungkan",

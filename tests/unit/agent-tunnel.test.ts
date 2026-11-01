@@ -6,11 +6,11 @@ import type { Kysely } from "kysely"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import * as agentScript from "@/agent/gantry-agent.mjs"
-import { encodeFrame, FrameType, MAX_UPSTREAM_BODY } from "@/lib/agent/protocol"
+import { encodeFrame, FrameType, INITIAL_WINDOW, MAX_UPSTREAM_BODY, MAX_UPSTREAM_INFLIGHT, MAX_WINDOW, WINDOW_POOL } from "@/lib/agent/protocol"
 import { acceptAgent, agentStatus, disconnectAgent, receiveUpstream, AGENT_ENV_FAILURE_LIMIT } from "@/lib/server/agent/hub"
 import { encodeAgentInfo } from "@/lib/server/agent/info"
 import { generateAgentKey, hashAgentKey, maskAgentKey, parseAgentKey, verifyAgentKey } from "@/lib/server/agent/keys"
-import { agentContainerIds, agentUrl } from "@/lib/server/agent/state"
+import { agentContainerIds, agentState, agentUrl } from "@/lib/server/agent/state"
 import { dockerJson, dockerRaw, dockerRequest, DockerError, type DockerTarget } from "@/lib/server/docker/client"
 import { dockerHost } from "@/lib/server/stacks/compose"
 import { clearFailures } from "@/lib/server/rate-limit"
@@ -243,6 +243,72 @@ describe("agent enrollment", () => {
     expect(bad).toMatchObject({ status: 400, error: expect.stringMatching(/too large/) })
     expect(third.session.closed).toBe(true)
   })
+
+  it("offers concurrent upstream POSTs and window growth only to agents that ask", async () => {
+    const { id, key } = await addAgentEnvironment("gantry-test-c-features")
+    const hello = async (res: Awaited<ReturnType<typeof connect>>) => {
+      if (!res.ok) throw new Error("not accepted")
+      const reader = res.session.downstream.getReader()
+      const { value } = await reader.read()
+      reader.releaseLock()
+      return JSON.parse(Buffer.from(value!).subarray(9).toString())
+    }
+    // An agent from before these features: HELLO as it was, one POST at a time.
+    const old = await connect(`Bearer ${key}`)
+    const oldHello = await hello(old)
+    expect(oldHello).not.toHaveProperty("upstreamInflight")
+    expect(oldHello).not.toHaveProperty("maxWindow")
+    expect(old.ok && old.session.upstreamInflight).toBe(1)
+    expect(old.ok && old.session.windowPoolAvailable).toBe(0)
+
+    const fresh = await connect(`Bearer ${key}`, encodeAgentInfo({ version: "test", protocol: 1, hostname: "h", upstreamInflight: 16 }))
+    expect(await hello(fresh)).toMatchObject({ upstreamInflight: MAX_UPSTREAM_INFLIGHT, maxWindow: MAX_WINDOW, windowPool: WINDOW_POOL, window: INITIAL_WINDOW })
+    expect(old.ok && old.session.closed).toBe(true)
+    disconnectAgent(id, "test over")
+  })
+
+  it("applies upstream batches in order when they arrive out of order", async () => {
+    const { key } = await addAgentEnvironment("gantry-test-c-order")
+    const res = await connect(`Bearer ${key}`, encodeAgentInfo({ version: "test", protocol: 1, hostname: "h", upstreamInflight: 4 }))
+    if (!res.ok) throw new Error("not accepted")
+    const s = res.session
+    // PONGs carry the time of their PING: the last one applied sets rttMs.
+    const pong = (sentAt: number) => {
+      const p = Buffer.alloc(8)
+      p.writeDoubleBE(sentAt, 0)
+      return encodeFrame(FrameType.PONG, 0, p)
+    }
+    const up = (seq: number, frame: Buffer) =>
+      receiveUpstream({ session: s.id, authorization: `Bearer ${s.secret}`, seq: String(seq), contentLength: String(frame.length), body: [frame] })
+    let secondDone = false
+    const second = up(1, pong(Date.now())).then((r) => ((secondDone = true), r))
+    await new Promise((r) => setTimeout(r, 50))
+    // Batch 1 waits for batch 0.
+    expect(secondDone).toBe(false)
+    expect(s.expectedSeq).toBe(0)
+    expect(await up(0, pong(Date.now() - 100_000))).toEqual({ status: 204 })
+    expect(await second).toEqual({ status: 204 })
+    expect(s.expectedSeq).toBe(2)
+    expect(s.rttMs).toBeLessThan(50_000)
+
+    // Beyond the allowed number in flight, or a batch already waiting: the session ends.
+    const waiting = up(3, pong(Date.now()))
+    expect(await up(3, pong(Date.now()))).toMatchObject({ status: 409 })
+    expect(s.closed).toBe(true)
+    expect(await waiting).toMatchObject({ status: 401 })
+
+    const again = await connect(`Bearer ${key}`, encodeAgentInfo({ version: "test", protocol: 1, hostname: "h", upstreamInflight: 4 }))
+    if (!again.ok) throw new Error("not accepted")
+    const far = await receiveUpstream({
+      session: again.session.id,
+      authorization: `Bearer ${again.session.secret}`,
+      seq: String(MAX_UPSTREAM_INFLIGHT),
+      contentLength: "0",
+      body: [],
+    })
+    expect(far).toMatchObject({ status: 409 })
+    expect(again.session.closed).toBe(true)
+  })
 })
 
 describe("tunnel through a real agent", () => {
@@ -257,11 +323,11 @@ describe("tunnel through a real agent", () => {
   let sessions: agentScript.Session[] = []
   const logs: string[] = []
 
-  async function startAgent() {
+  async function startAgent(onInfo?: (info: Record<string, unknown>) => Record<string, unknown>) {
     abort = new AbortController()
     sessions = []
     const config = agentScript.loadConfig({ GANTRY_URL: endpoint.url, GANTRY_AGENT_KEY: key, DOCKER_SOCKET: fake.socket })
-    running = agentScript.runAgent(config, { signal: abort.signal, onSession: (s: agentScript.Session) => sessions.push(s) })
+    running = agentScript.runAgent(config, { signal: abort.signal, onSession: (s: agentScript.Session) => sessions.push(s), onInfo })
     // Connected on both ends: Gantry's live session is the one the agent got HELLO for.
     await waitFor(() => {
       const hello = sessions.at(-1)?.hello
@@ -336,6 +402,62 @@ describe("tunnel through a real agent", () => {
       rawBody: { data: body, contentType: "application/octet-stream" },
     })
     expect(sink).toEqual({ sha256: expected, length: size })
+  })
+
+  /** Smallest unclaimed window growth on both ends while `fn` runs. */
+  async function poolLowWater(fn: () => Promise<void>) {
+    const gantry = () => (agentState().sessions.get(id) as unknown as { windowPoolAvailable: number }).windowPoolAvailable
+    const agent = () => sessions.at(-1)!.windows.available as number
+    const low = { gantry: gantry(), agent: agent() }
+    const timer = setInterval(() => {
+      low.gantry = Math.min(low.gantry, gantry())
+      low.agent = Math.min(low.agent, agent())
+    }, 2)
+    try {
+      await fn()
+    } finally {
+      clearInterval(timer)
+    }
+    return low
+  }
+
+  /** 20 MiB down and back up on fresh connections, checked by hash. */
+  async function roundTrip() {
+    const size = 20 * 1024 * 1024
+    const { body } = await dockerRaw(target, "GET", "/blob", { query: { size }, headers: { Connection: "close" } })
+    expect(body.length).toBe(size)
+    const sink = await dockerJson<{ sha256: string; length: number }>(target, "POST", "/sink", {
+      headers: { Connection: "close" },
+      rawBody: { data: body, contentType: "application/octet-stream" },
+    })
+    expect(sink).toEqual({ sha256: crypto.createHash("sha256").update(body).digest("hex"), length: size })
+  }
+
+  it("grows the windows of busy streams both ways and gives the growth back", async () => {
+    expect(sessions.at(-1)!.maxInflight).toBe(MAX_UPSTREAM_INFLIGHT)
+    const low = await poolLowWater(roundTrip)
+    // Downloads: Gantry grew its receive window; uploads: the agent did.
+    expect(low.gantry).toBeLessThan(WINDOW_POOL)
+    expect(low.agent).toBeLessThan(WINDOW_POOL)
+    await waitFor(() => agentStatus(id).streams === 0, 5000, "streams to close")
+    const live = agentState().sessions.get(id) as unknown as { windowPoolAvailable: number }
+    expect(live.windowPoolAvailable).toBe(WINDOW_POOL)
+    await waitFor(() => sessions.at(-1)!.windows.available === WINDOW_POOL, 5000, "agent pool")
+  })
+
+  it("works with an agent from before concurrent POSTs and window growth", async () => {
+    await stopAgent()
+    // Reports no upstreamInflight, like agent 1.0.0: HELLO then has no features either.
+    await startAgent((info) => ({ ...info, upstreamInflight: undefined }))
+    try {
+      expect(sessions.at(-1)!.hello).not.toHaveProperty("upstreamInflight")
+      expect(sessions.at(-1)!.maxInflight).toBe(1)
+      const low = await poolLowWater(roundTrip)
+      expect(low).toEqual({ gantry: 0, agent: 0 })
+    } finally {
+      await stopAgent()
+      await startAgent()
+    }
   })
 
   it("pauses the agent's reads when Gantry's side doesn't consume (flow control)", async () => {

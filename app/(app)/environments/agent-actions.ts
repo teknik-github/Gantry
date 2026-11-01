@@ -6,10 +6,11 @@ import { z } from "zod"
 import { getI18n } from "@/lib/i18n/server"
 import { authorize, runAction, UserError } from "@/lib/server/action"
 import { agentImage, agentRunCommand, gantryPublicUrl, needsInsecure } from "@/lib/server/agent/command"
-import { agentStatus, disconnectAgent } from "@/lib/server/agent/hub"
+import { agentStatus, agentSummary, disconnectAgent, type AgentSummary } from "@/lib/server/agent/hub"
 import { generateAgentKey, hashAgentKey } from "@/lib/server/agent/keys"
 import { agentUrl } from "@/lib/server/agent/state"
 import { getDb } from "@/lib/server/db"
+import { listEnvironments } from "@/lib/server/environments"
 import { fieldErrors, type ActionState } from "@/lib/validation"
 
 /** Shown once after adding an agent environment or rotating its key. */
@@ -102,4 +103,13 @@ export async function agentConnection(id: number): Promise<AgentConnection | nul
   if ("error" in auth) return null
   const s = agentStatus(parsed.data)
   return { connected: s.connected, hostname: s.info?.hostname ?? null, dockerVersion: s.info?.dockerVersion ?? null }
+}
+
+/**
+ * Connection state of the agent environments the signed-in user can switch
+ * to; the environment switcher refreshes it when it opens.
+ */
+export async function switcherAgents(): Promise<Record<number, AgentSummary>> {
+  const envs = await listEnvironments()
+  return Object.fromEntries(envs.filter((e) => e.type === "agent").map((e) => [e.id, agentSummary(e)]))
 }

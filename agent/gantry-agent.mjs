@@ -28,7 +28,7 @@ import https from "node:https"
 import net from "node:net"
 import { pathToFileURL } from "node:url"
 
-export const AGENT_VERSION = "1.0.0"
+export const AGENT_VERSION = "1.1.0"
 export const PROTOCOL_VERSION = 1
 
 // ------------------------------------------------------------------- frames
@@ -37,6 +37,8 @@ export const FrameType = { HELLO: 1, OPEN: 2, DATA: 3, END: 4, RESET: 5, WINDOW:
 export const HEADER_BYTES = 9
 export const MAX_DATA = 64 * 1024
 export const MAX_CONTROL = 4 * 1024
+/** Upstream POSTs this agent offers to keep in flight at once (Gantry may allow fewer). */
+export const MAX_UPSTREAM_INFLIGHT = 4
 const TYPES = new Set(Object.values(FrameType))
 
 export class ProtocolError extends Error {
@@ -97,6 +99,54 @@ export class FrameDecoder {
 
   get pending() {
     return this.buffered
+  }
+}
+
+/**
+ * Receive windows with growth for busy streams, as ReceiveWindows in
+ * lib/agent/protocol.ts (keep both in sync): a stream's window doubles up to
+ * `max` once it carried a whole window and its consumer keeps up, out of a
+ * pool shared by the session. With `max` equal to `initial` (a Gantry that
+ * doesn't offer growth) windows stay fixed.
+ */
+export class ReceiveWindows {
+  constructor(initial, max, pool) {
+    this.initial = initial
+    this.max = max
+    this.available = max > initial ? pool : 0
+  }
+
+  open() {
+    return { window: this.initial, outstanding: 0, credit: 0, sinceGrowth: 0 }
+  }
+
+  /** false when the sender overran the window */
+  received(s, n) {
+    s.outstanding += n
+    return s.outstanding <= s.window + MAX_DATA
+  }
+
+  /** @returns the increment to grant now, or 0 */
+  consumed(s, n) {
+    s.credit += n
+    s.sinceGrowth += n
+    if (s.credit < s.window / 4) return 0
+    let extra = 0
+    if (this.available > 0 && s.window < this.max && s.sinceGrowth >= s.window && s.outstanding - s.credit < s.window / 4) {
+      extra = Math.min(s.window, this.max - s.window, this.available)
+      this.available -= extra
+      s.window += extra
+      s.sinceGrowth = 0
+    }
+    const grant = s.credit + extra
+    s.outstanding -= s.credit
+    s.credit = 0
+    return grant
+  }
+
+  close(s) {
+    this.available += s.window - this.initial
+    s.window = this.initial
   }
 }
 
@@ -231,12 +281,15 @@ export async function hostInfo(socket) {
     os: String(info?.OperatingSystem ?? version?.Os ?? ""),
     arch: String(version?.Arch ?? ""),
     containerId,
+    // Feature offer (lib/agent/protocol.ts): Gantry answers in HELLO.
+    upstreamInflight: MAX_UPSTREAM_INFLIGHT,
   }
 }
 
 // ------------------------------------------------------------------ session
 
 const MAX_BATCH = 1024 * 1024
+/** Upstream queue limit before HELLO says more (Gantry's windows bound it). */
 const MAX_QUEUED = 64 * 1024 * 1024
 
 /**
@@ -255,9 +308,15 @@ export class Session {
     this.streams = new Map()
     /** @type {Buffer[]} */
     this.queue = []
+    /** WINDOW and PONG frames: they go out first (their order relative to data doesn't matter). @type {Buffer[]} */
+    this.urgent = []
     this.queued = 0
+    this.maxQueued = MAX_QUEUED
     this.seq = 0
-    this.inflight = false
+    /** Upstream POSTs in flight, and how many Gantry allows. */
+    this.inflight = 0
+    this.maxInflight = 1
+    this.windows = new ReceiveWindows(1024 * 1024, 1024 * 1024, 0)
     this.ended = false
     this.hello = null
     this.window = 1024 * 1024
@@ -361,6 +420,14 @@ export class Session {
           this.window = hello.window
           this.maxStreams = hello.maxStreams
           this.heartbeatMs = hello.heartbeatMs
+          // Features Gantry answered our offer with; absent from older Gantrys.
+          const inflight = Number(hello.upstreamInflight)
+          this.maxInflight = Number.isInteger(inflight) ? Math.max(1, Math.min(inflight, MAX_UPSTREAM_INFLIGHT)) : 1
+          const maxWindow = Number.isInteger(hello.maxWindow) && hello.maxWindow > hello.window ? hello.maxWindow : hello.window
+          const pool = Number.isInteger(hello.windowPool) && hello.windowPool > 0 ? hello.windowPool : 0
+          this.windows = new ReceiveWindows(hello.window, maxWindow, pool)
+          // Gantry's windows (and their growth) bound what waits here.
+          this.maxQueued = Math.max(MAX_QUEUED, hello.maxStreams * hello.window + pool + 8 * 1024 * 1024)
           this.touch()
           this.connectedAt = Date.now()
           this.healthy()
@@ -368,7 +435,7 @@ export class Session {
           return
         }
         case T.PING:
-          this.send(encodeFrame(T.PONG, 0, f.payload))
+          this.send(encodeFrame(T.PONG, 0, f.payload), true)
           this.healthy()
           return
         case T.GOAWAY: {
@@ -391,16 +458,14 @@ export class Session {
       case T.DATA: {
         if (s.reset || s.remoteEnded) return
         const n = f.payload.length
-        s.outstanding += n
-        if (s.outstanding > this.window + MAX_DATA) return this.resetStream(s, "flow control window exceeded")
+        if (!this.windows.received(s.recv, n)) return this.resetStream(s, "flow control window exceeded")
         s.sock.write(f.payload, () => {
-          s.credit += n
-          if (s.credit >= this.window / 4 && !s.reset) {
+          if (s.reset) return
+          const grant = this.windows.consumed(s.recv, n)
+          if (grant) {
             const p = Buffer.allocUnsafe(4)
-            p.writeUInt32BE(s.credit, 0)
-            this.send(encodeFrame(T.WINDOW, s.id, p))
-            s.outstanding -= s.credit
-            s.credit = 0
+            p.writeUInt32BE(grant, 0)
+            this.send(encodeFrame(T.WINDOW, s.id, p), true)
           }
         })
         return
@@ -412,7 +477,7 @@ export class Session {
       case T.RESET:
         s.reset = true
         s.sock.destroy()
-        this.streams.delete(s.id)
+        this.forget(s)
         return
       case T.WINDOW: {
         if (f.payload.length !== 4) throw new ProtocolError("bad WINDOW frame")
@@ -436,7 +501,7 @@ export class Session {
       return
     }
     const sock = net.connect({ path: this.config.socket, allowHalfOpen: true })
-    const s = { id, sock, sendWindow: this.window, outstanding: 0, credit: 0, localEnded: false, remoteEnded: false, reset: false }
+    const s = { id, sock, sendWindow: this.window, recv: this.windows.open(), localEnded: false, remoteEnded: false, reset: false }
     this.streams.set(id, s)
     this.opened++
     if (this.config.debug) log.debug(`stream ${id} opened (${this.streams.size} open)`)
@@ -465,7 +530,7 @@ export class Session {
         s.reset = true
         this.send(encodeFrame(FrameType.RESET, id, Buffer.from("closed by the agent")))
       }
-      this.streams.delete(id)
+      this.forget(s)
       if (this.config.debug) log.debug(`stream ${id} closed (${this.streams.size} open)`)
     })
   }
@@ -476,19 +541,31 @@ export class Session {
       this.send(encodeFrame(FrameType.RESET, s.id, Buffer.from(reason)))
     }
     s.sock.destroy()
-    this.streams.delete(s.id)
+    this.forget(s)
   }
 
-  /** Queues a frame for the next upstream POST. */
-  send(frame) {
+  /** Drops a stream; its receive window growth goes back to the pool. */
+  forget(s) {
+    if (this.streams.get(s.id) !== s) return
+    this.streams.delete(s.id)
+    this.windows.close(s.recv)
+  }
+
+  /**
+   * Queues a frame for the next upstream POST. `urgent` frames (WINDOW,
+   * PONG) go before queued data: a grant held back behind a megabyte of
+   * data stalls the other direction.
+   */
+  send(frame, urgent = false) {
     if (this.ended) return
-    this.queue.push(frame)
+    if (urgent) this.urgent.push(frame)
+    else this.queue.push(frame)
     this.queued += frame.length
-    if (this.queued > MAX_QUEUED) {
+    if (this.queued > this.maxQueued) {
       this.end("upstream queue overflow", { retry: true })
       return
     }
-    if (!this.inflight && !this.flushScheduled) {
+    if (!this.flushScheduled) {
       this.flushScheduled = true
       // Collect what the same tick produces into one POST.
       setImmediate(() => {
@@ -498,19 +575,42 @@ export class Session {
     }
   }
 
+  /**
+   * Sends queued frames while Gantry allows more POSTs in flight. With one
+   * already on its way, another goes out at once for urgent frames, but for
+   * data only once a whole batch is waiting: every POST costs Gantry a
+   * request, so data batches don't get smaller than with one at a time.
+   */
   flush() {
-    if (this.ended || this.inflight || !this.queue.length || !this.hello) return
+    while (!this.ended && this.hello && this.inflight < this.maxInflight) {
+      const pending = this.urgent.length + this.queue.length
+      if (!pending) return
+      if (this.inflight > 0 && !this.urgent.length && this.queued < MAX_BATCH) return
+      this.post()
+    }
+  }
+
+  post() {
     const parts = []
     let size = 0
-    while (this.queue.length && (size === 0 || size + this.queue[0].length <= MAX_BATCH)) {
-      const f = this.queue.shift()
-      parts.push(f)
-      size += f.length
+    for (const q of [this.urgent, this.queue]) {
+      while (q.length && (size === 0 || size + q[0].length <= MAX_BATCH)) {
+        const f = q.shift()
+        parts.push(f)
+        size += f.length
+      }
     }
     this.queued -= size
     const body = Buffer.concat(parts, size)
     const seq = this.seq++
-    this.inflight = true
+    this.inflight++
+    let settled = false
+    const settle = () => {
+      if (settled) return false
+      settled = true
+      this.inflight--
+      return true
+    }
     const mod = this.config.url.protocol === "https:" ? https : http
     const req = mod.request(`${this.config.base}/api/agent/upstream`, {
       method: "POST",
@@ -530,7 +630,7 @@ export class Session {
       const chunks = []
       res.on("data", (c) => chunks.push(c))
       res.on("end", () => {
-        this.inflight = false
+        if (!settle()) return
         if (res.statusCode !== 204) {
           let message = Buffer.concat(chunks).toString("utf8").slice(0, 300)
           try {
@@ -544,7 +644,7 @@ export class Session {
     })
     req.on("timeout", () => req.destroy(new Error("timed out")))
     req.on("error", (err) => {
-      this.inflight = false
+      settle()
       this.end(`upstream failed: ${err.code ?? err.message}`, { retry: true })
     })
     req.end(body)
@@ -561,6 +661,7 @@ export class Session {
     }
     this.streams.clear()
     this.queue = []
+    this.urgent = []
     this.queued = 0
     this.request?.destroy()
     this.response?.destroy()
@@ -594,13 +695,19 @@ export function backoffDelay(attempt, outcome) {
 
 /**
  * Connects and reconnects until `signal` aborts. `onSession` lets tests see
- * the live session.
+ * the live session; `onInfo` changes what the agent reports (tests use it to
+ * act like an agent without the newer protocol features).
  */
-export async function runAgent(config, { signal, onSession } = {}) {
+export async function runAgent(config, { signal, onSession, onInfo } = {}) {
   // Upstream POSTs reuse connections. Idle ones are dropped after 4 s, before
   // the usual 5 s keep-alive timeout of Node servers, so a POST never goes out
   // on a connection the server is just closing.
-  const httpAgent = new (config.url.protocol === "https:" ? https : http).Agent({ keepAlive: true, maxSockets: 2, timeout: 4000, ca: config.ca })
+  const httpAgent = new (config.url.protocol === "https:" ? https : http).Agent({
+    keepAlive: true,
+    maxSockets: MAX_UPSTREAM_INFLIGHT,
+    timeout: 4000,
+    ca: config.ca,
+  })
   let attempt = 0
   log.info(`gantry-agent ${AGENT_VERSION} starting: Gantry ${config.base}, Docker ${config.socket}`)
   if (config.url.protocol === "http:") {
@@ -610,6 +717,7 @@ export async function runAgent(config, { signal, onSession } = {}) {
     let info
     try {
       info = await hostInfo(config.socket)
+      if (onInfo) info = onInfo(info)
     } catch (err) {
       const delay = backoffDelay(attempt++)
       log.error(`cannot reach Docker at ${config.socket}: ${err.code ?? err.message}; retrying in ${Math.round(delay / 1000)}s`)

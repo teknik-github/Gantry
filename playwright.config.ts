@@ -80,7 +80,8 @@ export default defineConfig({
           // git-stacks.spec.ts serves its repository over http on 127.0.0.1.
           GANTRY_TEST_ALLOW_HTTP_GIT: "1",
           // image-scan.spec.ts: Trivy's database goes to a test volume it removes.
-          TRIVY_CACHE_VOLUME: "gantry-test-s-trivy-cache",
+          // E2E_TRIVY_CACHE_VOLUME reuses an existing one instead (never removed).
+          TRIVY_CACHE_VOLUME: process.env.E2E_TRIVY_CACHE_VOLUME || "gantry-test-s-trivy-cache",
           // Single sign-on against the fake provider sso.spec.ts runs on OIDC_PORT;
           // nothing contacts it until a test clicks "Sign in with SSO".
           GANTRY_URL: baseURL,

@@ -11,11 +11,14 @@ import {
   encodeWindow,
   FrameType,
   MAX_DATA,
+  MAX_UPSTREAM_INFLIGHT,
   PROTOCOL_VERSION,
   ProtocolError,
   readWindow,
+  ReceiveWindows,
   type AgentHello,
   type Frame,
+  type RecvState,
 } from "@/lib/agent/protocol"
 import type { AgentInfo } from "@/lib/server/agent/info"
 import type { LiveAgent } from "@/lib/server/agent/state"
@@ -30,6 +33,9 @@ export type SessionOptions = {
   maxStreams: number
   /** Receive window per stream, in bytes. */
   window: number
+  /** Largest window of a busy stream and the growth shared by all streams (agents that support it). */
+  maxWindow: number
+  windowPool: number
   heartbeatMs: number
   /** How long a connection waits for a free stream when maxStreams are in use (default 30 s). */
   queueMs?: number
@@ -43,10 +49,8 @@ type Stream = {
   conn: net.Socket
   /** Bytes we may still send before the agent grants more. */
   sendWindow: number
-  /** Bytes received and not yet granted back with WINDOW. */
-  outstanding: number
-  /** Bytes written to the local connection, to be granted back. */
-  credit: number
+  /** What we received and granted back (flow control toward Gantry). */
+  recv: RecvState
   /** We sent END (the local side finished writing). */
   localEnded: boolean
   /** The agent sent END. */
@@ -59,6 +63,8 @@ type Stream = {
 const REVALIDATE_EVERY = 6
 /** Connections waiting for a free stream, per allowed stream. */
 const QUEUE_PER_STREAM = 4
+/** How long an upstream POST waits for the ones numbered before it. */
+const UPSTREAM_ORDER_MS = 60_000
 
 /**
  * Answers a local connection we won't tunnel with an HTTP error, so the
@@ -96,8 +102,10 @@ export class AgentSession implements LiveAgent {
   rttMs: number | null = null
   closed = false
   closeReason = ""
-  /** Upstream POSTs are numbered; the next one must carry this. */
+  /** Upstream POSTs are numbered; the next one to apply carries this. */
   expectedSeq = 0
+  /** Upstream POSTs the agent may have in flight (1 for agents that didn't offer more). */
+  readonly upstreamInflight: number
   /** Totals, for the logs. */
   bytesDown = 0
   bytesUp = 0
@@ -111,6 +119,11 @@ export class AgentSession implements LiveAgent {
   /** Local connections waiting for a stream to free up. */
   private waiting: { conn: net.Socket; timer: ReturnType<typeof setTimeout> }[] = []
   private lastLimitWarning = 0
+  private readonly windows: ReceiveWindows
+  /** A batch is being applied. */
+  private applying = false
+  /** POSTs that arrived before their turn, by sequence number. */
+  private early = new Map<number, (ok: boolean) => void>()
 
   constructor(opts: SessionOptions) {
     this.opts = opts
@@ -119,6 +132,10 @@ export class AgentSession implements LiveAgent {
     this.info = opts.info
     this.remoteAddress = opts.remoteAddress
     this.maxStreams = opts.maxStreams
+    // Concurrent POSTs and window growth only for agents that offer them.
+    const offered = opts.info.upstreamInflight
+    this.upstreamInflight = offered ? Math.min(offered, MAX_UPSTREAM_INFLIGHT) : 1
+    this.windows = new ReceiveWindows(opts.window, offered ? opts.maxWindow : opts.window, opts.windowPool)
     this.downstream = new ReadableStream<Uint8Array>({
       start: (controller) => {
         this.controller = controller
@@ -134,6 +151,7 @@ export class AgentSession implements LiveAgent {
       window: opts.window,
       maxData: MAX_DATA,
       heartbeatMs: opts.heartbeatMs,
+      ...(offered ? { upstreamInflight: this.upstreamInflight, maxWindow: opts.maxWindow, windowPool: opts.windowPool } : {}),
     }
     this.send(encodeJson(FrameType.HELLO, 0, hello))
     this.heartbeat = setInterval(() => void this.beat(), opts.heartbeatMs)
@@ -230,8 +248,7 @@ export class AgentSession implements LiveAgent {
       id,
       conn,
       sendWindow: this.opts.window,
-      outstanding: 0,
-      credit: 0,
+      recv: this.windows.open(),
       localEnded: false,
       remoteEnded: false,
       reset: false,
@@ -258,7 +275,7 @@ export class AgentSession implements LiveAgent {
         s.reset = true
         this.send(encodeReset(id, "closed by Gantry"))
       }
-      if (this.streams.get(id) === s) this.streams.delete(id)
+      this.forget(s)
       this.drain()
     })
   }
@@ -290,18 +307,14 @@ export class AgentSession implements LiveAgent {
       case FrameType.DATA: {
         if (s.reset || s.remoteEnded) return
         const n = frame.payload.length
-        s.outstanding += n
-        if (s.outstanding > this.opts.window + MAX_DATA) {
+        if (!this.windows.received(s.recv, n)) {
           this.resetStream(s, "flow control window exceeded")
           return
         }
         s.conn.write(frame.payload, () => {
-          s.credit += n
-          if (s.credit >= this.opts.window / 4 && !s.reset) {
-            this.send(encodeWindow(s.id, s.credit))
-            s.outstanding -= s.credit
-            s.credit = 0
-          }
+          if (s.reset) return
+          const grant = this.windows.consumed(s.recv, n)
+          if (grant) this.send(encodeWindow(s.id, grant))
         })
         return
       }
@@ -312,7 +325,7 @@ export class AgentSession implements LiveAgent {
       case FrameType.RESET:
         s.reset = true
         s.conn.destroy()
-        this.streams.delete(s.id)
+        this.forget(s)
         this.drain()
         return
       case FrameType.WINDOW:
@@ -330,8 +343,57 @@ export class AgentSession implements LiveAgent {
       this.send(encodeReset(s.id, reason))
     }
     s.conn.destroy()
-    this.streams.delete(s.id)
+    this.forget(s)
     this.drain()
+  }
+
+  /** Drops a stream; its window growth goes back to the pool. */
+  private forget(s: Stream) {
+    if (this.streams.get(s.id) !== s) return
+    this.streams.delete(s.id)
+    this.windows.close(s.recv)
+  }
+
+  /** Window growth not handed out to streams right now (for tests and the logs). */
+  get windowPoolAvailable() {
+    return this.windows.available
+  }
+
+  /**
+   * Waits until upstream batch `seq` may be applied: all before it were.
+   * The agent may have `upstreamInflight` POSTs in flight, so they can
+   * arrive out of order. False when `seq` is outside that range, already
+   * waiting, or the session ends first; the caller then ends the session.
+   */
+  async upstreamTurn(seq: number): Promise<boolean> {
+    if (this.closed || !Number.isSafeInteger(seq) || seq < this.expectedSeq || seq >= this.expectedSeq + this.upstreamInflight) return false
+    if (this.early.has(seq)) return false
+    if (seq === this.expectedSeq) {
+      // Not while it is being applied: that would be a replay.
+      if (this.applying) return false
+      this.applying = true
+      return true
+    }
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.early.delete(seq)
+        resolve(false)
+      }, UPSTREAM_ORDER_MS)
+      timer.unref?.()
+      this.early.set(seq, (ok) => {
+        clearTimeout(timer)
+        this.early.delete(seq)
+        if (ok) this.applying = true
+        resolve(ok)
+      })
+    })
+  }
+
+  /** The current upstream batch was applied: the next one may go. */
+  upstreamDone() {
+    this.applying = false
+    this.expectedSeq++
+    this.early.get(this.expectedSeq)?.(true)
   }
 
   /**
@@ -350,6 +412,7 @@ export class AgentSession implements LiveAgent {
       s.conn.destroy()
     }
     this.streams.clear()
+    for (const wake of [...this.early.values()]) wake(false)
     for (const { conn, timer } of this.waiting) {
       clearTimeout(timer)
       refuse(conn, 502, `The agent disconnected: ${reason}`)
