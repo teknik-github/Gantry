@@ -294,11 +294,6 @@ test("measures the tunnel: list latency, a 50 MB download and a 50 MB upload", a
     t.local.push(await transfer(1))
     t.agent.push(await transfer(environmentId))
   }
-  // The uploaded file arrived whole (checked through the host socket).
-  const check = await docker<{ Id: string }>("POST", `/containers/${runId}/exec`, { Cmd: ["sh", "-c", "test $(wc -c < /tmp/up.bin) -eq 52428800"] })
-  await docker("POST", `/exec/${check.Id}/start`, { Detach: false, Tty: false })
-  expect((await docker<{ ExitCode: number }>("GET", `/exec/${check.Id}/json`)).ExitCode).toBe(0)
-
   const line = (name: "local" | "agent", label: string) => {
     const l = lists[name]
     const rate = (s: number[]) => `${median(s).toFixed(2)} s = ${(50 / median(s)).toFixed(1)} MiB/s`
@@ -310,6 +305,12 @@ test("measures the tunnel: list latency, a 50 MB download and a 50 MB upload", a
   console.log(`[agent benchmark] ${line("local", "local socket")}`)
   console.log(`[agent benchmark] ${line("agent", "agent tunnel")}`)
   test.info().annotations.push({ type: "benchmark", description: `${line("local", "local socket")} | ${line("agent", "agent tunnel")}` })
+
+  // The uploaded file arrived whole (checked through the host socket; the
+  // exit code is set a moment after the exec's output ends).
+  const check = await docker<{ Id: string }>("POST", `/containers/${runId}/exec`, { Cmd: ["sh", "-c", "test $(wc -c < /tmp/up.bin) -eq 52428800"] })
+  await docker("POST", `/exec/${check.Id}/start`, { Detach: false, Tty: false })
+  await expect.poll(async () => (await docker<{ ExitCode: number | null }>("GET", `/exec/${check.Id}/json`)).ExitCode).toBe(0)
   await selectEnv(environmentId)
 })
 
