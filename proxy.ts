@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { WEBHOOK_ID_RE } from "@/lib/git-stacks"
 import { bearerToken } from "@/lib/server/auth/api-tokens"
 import { API_AUTH_HEADER, apiAuthMarker, SESSION_COOKIE, verifySession } from "@/lib/server/auth/token"
+import { isCrossSite } from "@/lib/server/same-origin"
 
 // Pages reachable without a session; signed-in users are sent to the dashboard.
 const PUBLIC_PAGES = ["/login", "/setup"]
@@ -76,8 +77,7 @@ export async function proxy(request: NextRequest) {
       )
     }
     // Only same-origin browser requests may use the API (scripts send no Sec-Fetch-Site).
-    const site = request.headers.get("sec-fetch-site")
-    if (site && site !== "same-origin" && site !== "none") {
+    if (isCrossSite(request.headers)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
     const res = NextResponse.next({ request: { headers: forwardedHeaders(request, apiToken) } })

@@ -2,6 +2,7 @@ import "server-only"
 
 import { DockerError } from "@/lib/server/docker/client"
 import { FilesError } from "@/lib/server/files/service"
+import { isCrossSite } from "@/lib/server/same-origin"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 
@@ -26,9 +27,7 @@ export function contentDisposition(filename: string): string {
 
 /** Refuses cross-site browser requests (routes that proxy.ts doesn't screen). */
 export function crossSite(request: Request): Response | null {
-  const site = request.headers.get("sec-fetch-site")
-  if (site && site !== "same-origin") return Response.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE })
-  return null
+  return isCrossSite(request.headers) ? Response.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE }) : null
 }
 
 export function searchParamsObject(params: URLSearchParams) {

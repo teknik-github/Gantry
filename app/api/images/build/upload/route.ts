@@ -5,6 +5,7 @@ import { expectedEnvironment } from "@/lib/server/action"
 import { authorizeRequest } from "@/lib/server/api-auth"
 import { formatLimit } from "@/lib/server/images/context"
 import { buildLimits, dockerTargetFor, startBuild, uploadProvider } from "@/lib/server/images/run"
+import { isCrossSite } from "@/lib/server/same-origin"
 
 const json = (status: number, body: object) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } })
 
@@ -22,8 +23,7 @@ const json = (status: number, body: object) => Response.json(body, { status, hea
  * cross-site form can't send) is required.
  */
 export async function POST(request: NextRequest) {
-  const site = request.headers.get("sec-fetch-site")
-  if (site && site !== "same-origin" && site !== "none") return json(403, { error: "Forbidden" })
+  if (isCrossSite(request.headers)) return json(403, { error: "Forbidden" })
   const header = request.headers.get(OPTIONS_HEADER)
   if (!header) return json(400, { error: `The ${OPTIONS_HEADER} header is required` })
 
