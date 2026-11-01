@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import path from "node:path"
 
 import { expect, test, type Page } from "@playwright/test"
@@ -23,7 +24,9 @@ const STACK = `gantry-test-a-stack-${RUN_ID}`
 const BUILD_TAG = `gantry-test-a-build:${RUN_ID}`
 const AGENT_IMAGE = "node:24-alpine"
 const SOCKET = process.env.DOCKER_SOCKET ?? "/var/run/docker.sock"
-const AGENT_DIR = path.resolve("agent")
+// E2E_AGENT_DIR runs another agent script against this Gantry, e.g. an older
+// release to check compatibility (or to measure the tunnel as it was).
+const AGENT_DIR = path.resolve(process.env.E2E_AGENT_DIR ?? "agent")
 const SLOW = 180_000
 
 const COMPOSE = `services:
@@ -242,17 +245,22 @@ test("containers are listed, created, logged and exec'd into through the agent",
     .toBe(true)
 })
 
-test("measures the tunnel: list latency and a 50 MB download", async ({ page, context, baseURL }) => {
-  test.setTimeout(SLOW)
+test("measures the tunnel: list latency, a 50 MB download and a 50 MB upload", async ({ page, context, baseURL }) => {
+  // E2E_AGENT_BENCH_ROUNDS=n repeats the transfers (alternating local and
+  // agent) and reports medians: this host's load makes single runs noisy.
+  const rounds = Math.max(1, Number(process.env.E2E_AGENT_BENCH_ROUNDS ?? 1) || 1)
+  test.setTimeout(SLOW * rounds)
   await signIn(page)
   // 50 MiB of random data in the container (through the host socket, not measured).
   const exec = await docker<{ Id: string }>("POST", `/containers/${runId}/exec`, {
     Cmd: ["sh", "-c", "head -c 52428800 /dev/urandom > /big.bin"],
   })
   await docker("POST", `/exec/${exec.Id}/start`, { Detach: false, Tty: false })
+  const upload = crypto.randomBytes(52428800)
 
-  const measure = async (envId: number) => {
-    await context.addCookies([{ name: "gantry_env", value: String(envId), url: baseURL! }])
+  const selectEnv = (envId: number) => context.addCookies([{ name: "gantry_env", value: String(envId), url: baseURL! }])
+  const list = async (envId: number) => {
+    await selectEnv(envId)
     const times: number[] = []
     for (let i = 0; i < 15; i++) {
       const t0 = performance.now()
@@ -261,22 +269,48 @@ test("measures the tunnel: list latency and a 50 MB download", async ({ page, co
       times.push(performance.now() - t0)
     }
     times.sort((a, b) => a - b)
-    const t0 = performance.now()
+    return { median: times[7], p90: times[13] }
+  }
+  const transfer = async (envId: number) => {
+    await selectEnv(envId)
+    let t0 = performance.now()
     const res = await page.request.get(`/api/files/download?container=${runId}&path=/big.bin`, { timeout: 120_000 })
     expect(res.ok()).toBe(true)
-    const body = await res.body()
-    const seconds = (performance.now() - t0) / 1000
-    expect(body.length).toBe(52428800)
-    return { median: times[7], p90: times[13], mbps: 50 / seconds, seconds }
+    expect((await res.body()).length).toBe(52428800)
+    const down = (performance.now() - t0) / 1000
+    t0 = performance.now()
+    const put = await page.request.put(`/api/uploads/files?container=${runId}&path=/tmp&name=up.bin&overwrite=1`, {
+      data: upload,
+      timeout: 120_000,
+    })
+    expect(put.status(), await put.text()).toBe(200)
+    const up = (performance.now() - t0) / 1000
+    return { down, up }
   }
-  const local = await measure(1)
-  const agent = await measure(environmentId)
-  const line = (name: string, m: typeof local) =>
-    `${name}: list containers median ${m.median.toFixed(0)} ms (p90 ${m.p90.toFixed(0)} ms); 50 MiB download ${m.seconds.toFixed(2)} s = ${m.mbps.toFixed(1)} MiB/s`
-  console.log(`[agent benchmark] ${line("local socket", local)}`)
-  console.log(`[agent benchmark] ${line("agent tunnel", agent)}`)
-  test.info().annotations.push({ type: "benchmark", description: `${line("local socket", local)} | ${line("agent tunnel", agent)}` })
-  await context.addCookies([{ name: "gantry_env", value: String(environmentId), url: baseURL! }])
+  const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+  const lists = { local: await list(1), agent: await list(environmentId) }
+  const t = { local: [] as { down: number; up: number }[], agent: [] as { down: number; up: number }[] }
+  for (let i = 0; i < rounds; i++) {
+    t.local.push(await transfer(1))
+    t.agent.push(await transfer(environmentId))
+  }
+  // The uploaded file arrived whole (checked through the host socket).
+  const check = await docker<{ Id: string }>("POST", `/containers/${runId}/exec`, { Cmd: ["sh", "-c", "test $(wc -c < /tmp/up.bin) -eq 52428800"] })
+  await docker("POST", `/exec/${check.Id}/start`, { Detach: false, Tty: false })
+  expect((await docker<{ ExitCode: number }>("GET", `/exec/${check.Id}/json`)).ExitCode).toBe(0)
+
+  const line = (name: "local" | "agent", label: string) => {
+    const l = lists[name]
+    const rate = (s: number[]) => `${median(s).toFixed(2)} s = ${(50 / median(s)).toFixed(1)} MiB/s`
+    const all = (s: number[]) => (rounds > 1 ? ` [${s.map((x) => (50 / x).toFixed(1)).join(", ")}]` : "")
+    const down = t[name].map((x) => x.down)
+    const up = t[name].map((x) => x.up)
+    return `${label}: list containers median ${l.median.toFixed(0)} ms (p90 ${l.p90.toFixed(0)} ms); 50 MiB download ${rate(down)}${all(down)}; 50 MiB upload ${rate(up)}${all(up)}`
+  }
+  console.log(`[agent benchmark] ${line("local", "local socket")}`)
+  console.log(`[agent benchmark] ${line("agent", "agent tunnel")}`)
+  test.info().annotations.push({ type: "benchmark", description: `${line("local", "local socket")} | ${line("agent", "agent tunnel")}` })
+  await selectEnv(environmentId)
 })
 
 test("a compose stack deploys through the agent", async ({ page }) => {
