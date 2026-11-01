@@ -27,7 +27,6 @@ export const common = {
     restart: "Restart",
     retry: "Retry",
     save: "Save",
-    saveChanges: "Save changes",
     search: "Search",
     start: "Start",
     stop: "Stop",
@@ -35,7 +34,6 @@ export const common = {
     update: "Update",
     upload: "Upload",
     view: "View",
-    moreActions: "More actions",
     openMenu: "Open menu",
   },
   status: {
@@ -139,9 +137,6 @@ export const common = {
     viewer: "Viewer",
     operator: "Operator",
     manager: "Manager",
-    viewerDescription: "Read-only",
-    operatorDescription: "Start, stop, restart, logs",
-    managerDescription: "Full control of this environment",
   },
   language: {
     label: "Language",

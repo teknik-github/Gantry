@@ -23,12 +23,6 @@ export const ROLE_LABELS: Record<EnvironmentRole, string> = {
   manager: "Manager",
 }
 
-export const ROLE_DESCRIPTIONS: Record<EnvironmentRole, string> = {
-  viewer: "Read-only",
-  operator: "Start, stop, restart, logs",
-  manager: "Full control of this environment",
-}
-
 const RANK: Record<EnvironmentRole, number> = { viewer: 1, operator: 2, manager: 3 }
 const NEEDED: Record<EnvironmentPermission, EnvironmentRole> = { view: "viewer", operate: "operator", manage: "manager" }
 

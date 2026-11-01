@@ -27,7 +27,6 @@ export const common: Dictionary["common"] = {
     restart: "Restart",
     retry: "Coba lagi",
     save: "Simpan",
-    saveChanges: "Simpan perubahan",
     search: "Cari",
     start: "Jalankan",
     stop: "Hentikan",
@@ -35,7 +34,6 @@ export const common: Dictionary["common"] = {
     update: "Perbarui",
     upload: "Unggah",
     view: "Lihat",
-    moreActions: "Aksi lainnya",
     openMenu: "Buka menu",
   },
   status: {
@@ -137,9 +135,6 @@ export const common: Dictionary["common"] = {
     viewer: "Viewer",
     operator: "Operator",
     manager: "Manager",
-    viewerDescription: "Hanya baca",
-    operatorDescription: "Start, stop, restart, log",
-    managerDescription: "Kendali penuh atas environment ini",
   },
   language: {
     label: "Bahasa",
