@@ -10,11 +10,16 @@ import {
   FrameDecoder,
   FrameType,
   HEADER_BYTES,
+  INITIAL_WINDOW,
   MAX_CONTROL,
   MAX_DATA,
+  MAX_UPSTREAM_INFLIGHT,
+  MAX_WINDOW,
   PROTOCOL_VERSION,
   ProtocolError,
   readWindow,
+  ReceiveWindows,
+  WINDOW_POOL,
 } from "@/lib/agent/protocol"
 
 describe("agent frame codec", () => {
@@ -142,6 +147,77 @@ describe("the agent script's codec matches Gantry's", () => {
     bad.writeUInt8(FrameType.DATA, 0)
     bad.writeUInt32BE(MAX_DATA + 1, 5)
     expect(() => new agent.FrameDecoder().push(bad)).toThrow(/too large/)
+  })
+})
+
+describe("receive windows", () => {
+  const MiB = 1024 * 1024
+  type Impl = { open(): { window: number; outstanding: number; credit: number; sinceGrowth: number }; received(s: unknown, n: number): boolean; consumed(s: unknown, n: number): number; close(s: unknown): void; available: number }
+
+  /** Runs the same script against Gantry's and the agent's implementation. */
+  function script(w: Impl) {
+    const log: unknown[] = []
+    const a = w.open()
+    const b = w.open()
+    // A bulk stream whose consumer keeps up: every grant after a whole window grows it.
+    for (let i = 0; i < 200; i++) {
+      expect(w.received(a, MAX_DATA)).toBe(true)
+      const g = w.consumed(a, MAX_DATA)
+      if (g) log.push(["a", g, a.window, w.available])
+    }
+    // A stream whose consumer lags (a quarter window or more still unwritten) doesn't grow.
+    for (let round = 0; round < 6; round++) {
+      while (b.outstanding + MAX_DATA <= INITIAL_WINDOW) w.received(b, MAX_DATA)
+      for (let i = 0; i < 12; i++) {
+        const g = w.consumed(b, MAX_DATA)
+        if (g) log.push(["b", g, b.window, w.available])
+      }
+    }
+    log.push(["overrun", w.received(b, 10 * MiB)])
+    w.close(a)
+    w.close(a)
+    log.push(["closed", w.available])
+    return log
+  }
+
+  it("grow a busy stream up to the maximum, out of a shared pool, and give it back", () => {
+    const g = new ReceiveWindows(INITIAL_WINDOW, MAX_WINDOW, 12 * MiB)
+    const log = script(g as unknown as Impl)
+    const grown = log.filter((e) => Array.isArray(e) && e[0] === "a").map((e) => (e as number[])[2])
+    expect(grown[0]).toBe(INITIAL_WINDOW)
+    expect(Math.max(...grown)).toBe(MAX_WINDOW)
+    // Doubling: 1 -> 2 -> 4 -> 8 MiB, using 7 MiB of the pool.
+    expect([...new Set(grown)]).toEqual([1, 2, 4, 8].map((x) => x * MiB))
+    expect(log).toContainEqual(["overrun", false])
+    expect(log.filter((e) => Array.isArray(e) && e[0] === "b").every((e) => (e as number[])[2] === INITIAL_WINDOW)).toBe(true)
+    expect(log.at(-1)).toEqual(["closed", 12 * MiB])
+  })
+
+  it("stay fixed without growth, as before", () => {
+    const w = new ReceiveWindows(INITIAL_WINDOW, INITIAL_WINDOW, WINDOW_POOL)
+    const s = w.open()
+    const grants: number[] = []
+    for (let i = 0; i < 100; i++) {
+      w.received(s, MAX_DATA)
+      const g = w.consumed(s, MAX_DATA)
+      if (g) grants.push(g)
+    }
+    expect(w.available).toBe(0)
+    expect(s.window).toBe(INITIAL_WINDOW)
+    expect(new Set(grants)).toEqual(new Set([INITIAL_WINDOW / 4]))
+  })
+
+  it("behave the same in the agent script", () => {
+    expect(agent.MAX_UPSTREAM_INFLIGHT).toBe(MAX_UPSTREAM_INFLIGHT)
+    for (const [max, pool] of [
+      [MAX_WINDOW, 12 * MiB],
+      [MAX_WINDOW, 2 * MiB],
+      [INITIAL_WINDOW, WINDOW_POOL],
+    ]) {
+      expect(script(new agent.ReceiveWindows(INITIAL_WINDOW, max, pool) as Impl)).toEqual(
+        script(new ReceiveWindows(INITIAL_WINDOW, max, pool) as unknown as Impl)
+      )
+    }
   })
 })
 

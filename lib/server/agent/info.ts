@@ -12,6 +12,8 @@ export type AgentInfo = {
   arch: string
   /** The agent's own container on that host, when it runs in one. */
   containerId: string | null
+  /** Upstream POSTs it can keep in flight at once; null for agents without the feature (lib/agent/protocol.ts). */
+  upstreamInflight: number | null
 }
 
 /** AgentInfo plus what Gantry saw, stored in environments.agent_info. */
@@ -43,6 +45,7 @@ export function parseAgentInfo(header: string | null): AgentInfo | null {
   const protocol = Number(raw.protocol)
   if (!Number.isInteger(protocol) || protocol < 1 || protocol > 1000) return null
   const containerId = typeof raw.containerId === "string" && /^[a-f0-9]{64}$/.test(raw.containerId) ? raw.containerId : null
+  const inflight = Number(raw.upstreamInflight)
   return {
     version: text(raw.version, 32) || "unknown",
     protocol,
@@ -51,6 +54,7 @@ export function parseAgentInfo(header: string | null): AgentInfo | null {
     os: text(raw.os, 64),
     arch: text(raw.arch, 32),
     containerId,
+    upstreamInflight: Number.isInteger(inflight) && inflight >= 1 && inflight <= 64 ? inflight : null,
   }
 }
 

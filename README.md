@@ -749,11 +749,25 @@ upgrade connections), through any reverse proxy that streams responses:
   key). Its response body is a stream of frames from Gantry. Frames are
   binary: type, stream id, length, then the payload. Types are HELLO, OPEN,
   DATA, END, RESET, WINDOW, PING, PONG and GOAWAY (`lib/agent/protocol.ts`).
-- Frames to Gantry go in `POST /api/agent/upstream` batches (up to 1 MB, one
-  at a time, numbered; authenticated with a per-session secret from HELLO).
+- Frames to Gantry go in `POST /api/agent/upstream` batches (up to 1 MB,
+  numbered; authenticated with a per-session secret from HELLO). Up to 4 are
+  in flight at once; Gantry applies them strictly in order, holding back one
+  that arrives early. Flow-control grants and heartbeat answers go out ahead
+  of queued data, in a POST of their own when the others are busy.
 - Each Docker connection Gantry makes is one tunneled stream. Per-stream
-  windows (1 MB) give flow control both ways, so a slow reader pauses the
-  writer instead of filling memory.
+  windows give flow control both ways, so a slow reader pauses the writer
+  instead of filling memory. A window starts at 1 MB; a stream that keeps
+  using all of it while its reader keeps up gets it doubled, up to 8 MB, out
+  of 32 MB shared by the agent's streams (per direction), and returned when
+  the stream closes. So an agent buffers at most
+  `GANTRY_AGENT_MAX_STREAMS` × 1 MB + 32 MB in each direction.
+- Versions: concurrent POSTs and growing windows are negotiated (the agent
+  offers them when it connects, Gantry answers in HELLO); the frames are
+  unchanged, so the protocol version stays 1. An agent from before
+  (1.0.0) works with this Gantry, and this agent with an older Gantry, one
+  POST at a time with fixed 1 MB windows. Agents and Gantrys with different
+  protocol versions refuse each other (HTTP 426): run the agent from the
+  same Gantry image version.
 - Gantry pings every 10 s. Either side drops a connection that stays silent
   for 35 s, and the agent reconnects with exponential backoff and jitter
   (slowly, every 5 minutes, once its key was refused).

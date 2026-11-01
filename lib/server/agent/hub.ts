@@ -5,7 +5,7 @@ import net from "node:net"
 
 import type { Kysely } from "kysely"
 
-import { FrameDecoder, INITIAL_WINDOW, MAX_UPSTREAM_BODY, PROTOCOL_VERSION, ProtocolError } from "@/lib/agent/protocol"
+import { FrameDecoder, INITIAL_WINDOW, MAX_UPSTREAM_BODY, MAX_WINDOW, PROTOCOL_VERSION, ProtocolError, WINDOW_POOL } from "@/lib/agent/protocol"
 import { parseAgentInfo, readStoredInfo, type AgentInfo, type StoredAgentInfo } from "@/lib/server/agent/info"
 import { hashAgentKey, maskAgentKey, parseAgentKey, verifyAgentKey } from "@/lib/server/agent/keys"
 import { AgentSession } from "@/lib/server/agent/session"
@@ -35,6 +35,8 @@ export const agentLimits = () => ({
   maxStreams: intFromEnv("GANTRY_AGENT_MAX_STREAMS", 64, 4, 1024),
   heartbeatMs: intFromEnv("GANTRY_AGENT_HEARTBEAT_SECONDS", 10, 2, 120) * 1000,
   window: INITIAL_WINDOW,
+  maxWindow: MAX_WINDOW,
+  windowPool: WINDOW_POOL,
 })
 
 /** Failed enrollments allowed per window, per environment named in the key and per client address. */
@@ -248,16 +250,26 @@ export async function receiveUpstream(input: UpstreamInput): Promise<{ status: n
     session.close("upstream batch too large")
     return { status: 413, error: "Upstream batch too large" }
   }
-  if (input.seq !== String(session.expectedSeq)) {
-    session.close(`upstream batch out of order (got ${input.seq}, expected ${session.expectedSeq})`)
+  // Batches apply in order; with several POSTs in flight, a later one waits here.
+  const seq = /^(0|[1-9][0-9]{0,15})$/.test(input.seq ?? "") ? Number(input.seq) : NaN
+  const expected = session.expectedSeq
+  if (!(await session.upstreamTurn(seq))) {
+    if (session.closed) return { status: 401, error: "Unknown or expired agent session; reconnect" }
+    session.close(`upstream batch out of order (got ${input.seq}, expected ${expected})`)
     return { status: 409, error: "Upstream batch out of order; reconnect" }
   }
-  session.expectedSeq++
+  try {
+    return await applyBatch(session, input.body)
+  } finally {
+    session.upstreamDone()
+  }
+}
 
+async function applyBatch(session: AgentSession, body: UpstreamInput["body"]): Promise<{ status: number; error?: string }> {
   const decoder = new FrameDecoder()
   let total = 0
   try {
-    for await (const chunk of input.body ?? []) {
+    for await (const chunk of body ?? []) {
       total += chunk.length
       if (total > MAX_UPSTREAM_BODY) throw new ProtocolError("upstream batch too large")
       for (const frame of decoder.push(chunk)) session.receive(frame)
