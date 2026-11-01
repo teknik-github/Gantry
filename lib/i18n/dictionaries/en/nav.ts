@@ -59,6 +59,11 @@ export const nav = {
     noEnvironments: "No environments",
     noneAssigned: "None assigned — ask an administrator",
     manage: "Manage environments",
+    agentDocker: "Docker {version}",
+    agentConnected: "{host} · connected",
+    agentDisconnected: "{host} · disconnected",
+    agentConnectedUnknown: "Agent connected",
+    agentNeverConnected: "Agent not connected yet",
   },
   live: {
     connecting: "Connecting",

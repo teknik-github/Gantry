@@ -6,7 +6,7 @@ import net from "node:net"
 import type { Kysely } from "kysely"
 
 import { FrameDecoder, INITIAL_WINDOW, MAX_UPSTREAM_BODY, PROTOCOL_VERSION, ProtocolError } from "@/lib/agent/protocol"
-import { parseAgentInfo, type AgentInfo, type StoredAgentInfo } from "@/lib/server/agent/info"
+import { parseAgentInfo, readStoredInfo, type AgentInfo, type StoredAgentInfo } from "@/lib/server/agent/info"
 import { hashAgentKey, maskAgentKey, parseAgentKey, verifyAgentKey } from "@/lib/server/agent/keys"
 import { AgentSession } from "@/lib/server/agent/session"
 import { agentSocketPath, agentState } from "@/lib/server/agent/state"
@@ -303,5 +303,23 @@ export function agentStatus(environmentId: number): AgentStatus {
     rttMs: s.rttMs,
     streams: s.streamCount,
     queued: s.queued,
+  }
+}
+
+/** What the environment switcher shows for an agent environment instead of its agent:// address. */
+export type AgentSummary = {
+  connected: boolean
+  /** The Docker host's name and version: live, or as the agent last reported them. */
+  hostname: string | null
+  dockerVersion: string | null
+}
+
+export function agentSummary(env: { id: number; agent_info: string | null }): AgentSummary {
+  const live = agentStatus(env.id)
+  const info = live.info ?? readStoredInfo(env.agent_info)
+  return {
+    connected: live.connected,
+    hostname: info?.hostname && info.hostname !== "unknown" ? info.hostname : null,
+    dockerVersion: info?.dockerVersion || null,
   }
 }

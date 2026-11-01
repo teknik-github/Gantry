@@ -8,6 +8,7 @@ import { NavUser } from "@/components/nav-user"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
+import { agentSummary } from "@/lib/server/agent/hub"
 import { requireUser } from "@/lib/server/auth/dal"
 import { getCurrentEnvironment, getPermissions, listEnvironments } from "@/lib/server/environments"
 
@@ -90,7 +91,7 @@ async function SidebarEnvironments() {
   const [envs, current] = await Promise.all([listEnvironments(), getCurrentEnvironment()])
   return (
     <EnvSwitcher
-      environments={envs.map(({ id, name, type, url }) => ({ id, name, type, url }))}
+      environments={envs.map((e) => ({ id: e.id, name: e.name, type: e.type, url: e.url, agent: e.type === "agent" ? agentSummary(e) : null }))}
       currentId={current?.id ?? null}
       isAdmin={user.role === "admin"}
     />
