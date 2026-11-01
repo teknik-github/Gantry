@@ -3,6 +3,7 @@
 import { headers } from "next/headers"
 import { z } from "zod"
 
+import { getI18n } from "@/lib/i18n/server"
 import { authorize, runAction, UserError } from "@/lib/server/action"
 import { agentImage, agentRunCommand, gantryPublicUrl, needsInsecure } from "@/lib/server/agent/command"
 import { agentStatus, disconnectAgent } from "@/lib/server/agent/hub"
@@ -24,7 +25,7 @@ export type AgentEnrollment = {
 
 export type AgentEnrollmentState = ActionState & { enrollment?: AgentEnrollment }
 
-const nameSchema = z.object({ name: z.string().trim().min(1, "Name is required").max(100) })
+const nameSchema = (required: string) => z.object({ name: z.string().trim().min(1, required).max(100) })
 const idSchema = z.number().int().positive()
 
 async function enrollment(id: number, name: string, key: string): Promise<AgentEnrollment> {
@@ -34,7 +35,9 @@ async function enrollment(id: number, name: string, key: string): Promise<AgentE
 
 /** Adds an "agent" environment and returns its enrollment key (stored only as a hash). */
 export async function createAgentEnvironment(_prev: AgentEnrollmentState, formData: FormData): Promise<AgentEnrollmentState> {
-  const parsed = nameSchema.safeParse({ name: formData.get("name") ?? "" })
+  const { t, format } = await getI18n()
+  const m = t.environments.messages
+  const parsed = nameSchema(m.nameRequired).safeParse({ name: formData.get("name") ?? "" })
   if (!parsed.success) return fieldErrors(parsed.error)
   const { name } = parsed.data
 
@@ -55,21 +58,23 @@ export async function createAgentEnvironment(_prev: AgentEnrollmentState, formDa
       .where("id", "=", id)
       .execute()
     result = await enrollment(id, name, key)
-    return `Environment "${name}" added; start the agent on the host`
+    return format(m.agentAdded, { name })
   })
   return { ...res, enrollment: res.ok ? result : undefined }
 }
 
 /** Issues a new key; the old one stops working and its agent is disconnected right away. */
 export async function rotateAgentKey(id: number): Promise<AgentEnrollmentState> {
+  const { t, format } = await getI18n()
+  const m = t.environments.messages
   const parsed = idSchema.safeParse(id)
-  if (!parsed.success) return { error: "Invalid environment" }
+  if (!parsed.success) return { error: m.invalid }
 
   let result: AgentEnrollment | undefined
   const res = await runAction("admin", "environment.agent_key_rotate", String(parsed.data), async () => {
     const db = await getDb()
     const env = await db.selectFrom("environments").select(["id", "name", "type"]).where("id", "=", parsed.data).executeTakeFirst()
-    if (!env || env.type !== "agent") throw new UserError("Agent environment not found")
+    if (!env || env.type !== "agent") throw new UserError(m.agentNotFound)
     const key = generateAgentKey(env.id)
     await db
       .updateTable("environments")
@@ -78,7 +83,7 @@ export async function rotateAgentKey(id: number): Promise<AgentEnrollmentState> 
       .execute()
     disconnectAgent(env.id, "the agent key was rotated; run the agent with the new key")
     result = await enrollment(env.id, env.name, key)
-    return `New key for "${env.name}"; the old agent was disconnected`
+    return format(m.keyRotated, { name: env.name })
   })
   return { ...res, enrollment: res.ok ? result : undefined }
 }

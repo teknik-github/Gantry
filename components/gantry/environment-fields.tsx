@@ -19,12 +19,20 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 
 // The connection fields of the Add/Edit environment dialogs: Docker over
 // TCP (with mutual TLS) or a socket, a Kubernetes API server, or the name
 // of an agent environment.
 
 type Errors = Record<string, string[] | undefined>
+
+/** Kinds of stored Kubernetes credentials (credentialSummary), in the user's language. */
+export function credentialKind(kind: string, t: I18n["t"]) {
+  const kinds = t.environments.kubernetes.kinds
+  return kind === "token" ? kinds.token : kind === "client certificate" ? kinds.clientCertificate : kind
+}
 
 const PEM_MAX_BYTES = 64 * 1024
 
@@ -54,26 +62,27 @@ function PemField({
   description?: React.ReactNode
 }) {
   const fileRef = React.useRef<HTMLInputElement>(null)
+  const { t, format } = useI18n()
   return (
     <Field data-invalid={error ? true : undefined}>
       <div className="flex items-center justify-between gap-2">
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
         <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => fileRef.current?.click()}>
           <UploadIcon data-icon="inline-start" />
-          Load file
+          {t.environments.form.loadFile}
         </Button>
         <input
           ref={fileRef}
           type="file"
           className="hidden"
           accept={accept}
-          aria-label={`${label} file`}
+          aria-label={format(t.environments.form.fileLabel, { label })}
           onChange={async (e) => {
             const file = e.target.files?.[0]
             e.target.value = ""
             if (!file) return
             if (file.size > maxBytes) {
-              toast.error(`${file.name} is too large`)
+              toast.error(format(t.environments.form.fileTooLarge, { name: file.name }))
               return
             }
             onChange(await file.text())
@@ -112,6 +121,8 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
   const tcp = type === "tcp"
   const kubernetes = type === "kubernetes"
   const showPem = tcp && useTls && replacing
+  const i18n = useI18n()
+  const text = i18n.t.environments.form
 
   if (initial?.type === "agent") return <AgentEnvironmentFields errors={errors} initial={initial} />
 
@@ -119,11 +130,11 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
     <>
       {initial ? <input type="hidden" name="id" value={initial.id} /> : null}
       <Field data-invalid={errors.name ? true : undefined}>
-        <FieldLabel htmlFor={`${prefix}-name`}>Name</FieldLabel>
+        <FieldLabel htmlFor={`${prefix}-name`}>{i18n.t.common.fields.name}</FieldLabel>
         <Input
           id={`${prefix}-name`}
           name="name"
-          placeholder="production"
+          placeholder={text.namePlaceholder}
           defaultValue={initial?.name}
           required
           autoFocus
@@ -131,7 +142,7 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
         <FieldError>{errors.name?.[0]}</FieldError>
       </Field>
       <Field>
-        <FieldLabel htmlFor={`${prefix}-type`}>Connection</FieldLabel>
+        <FieldLabel htmlFor={`${prefix}-type`}>{text.connection}</FieldLabel>
         <Select name="type" value={type} onValueChange={setType} disabled={initial?.type === "kubernetes"}>
           <SelectTrigger id={`${prefix}-type`} className="w-full">
             <SelectValue />
@@ -139,13 +150,13 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
           <SelectContent>
             {initial?.type !== "kubernetes" ? (
               <>
-                <SelectItem value="tcp">TCP (Docker API over the network)</SelectItem>
-                <SelectItem value="socket">Unix socket (mounted into Gantry)</SelectItem>
+                <SelectItem value="tcp">{text.typeTcp}</SelectItem>
+                <SelectItem value="socket">{text.typeSocket}</SelectItem>
               </>
             ) : null}
             {/* Docker and Kubernetes environments can't be turned into each other. */}
             {!initial || initial.type === "kubernetes" ? (
-              <SelectItem value="kubernetes">Kubernetes (API server)</SelectItem>
+              <SelectItem value="kubernetes">{text.typeKubernetes}</SelectItem>
             ) : null}
           </SelectContent>
         </Select>
@@ -157,7 +168,7 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
       ) : (
         <>
           <Field data-invalid={errors.url ? true : undefined}>
-            <FieldLabel htmlFor={`${prefix}-url`}>{tcp ? "Host and port" : "Socket path"}</FieldLabel>
+            <FieldLabel htmlFor={`${prefix}-url`}>{tcp ? text.hostAndPort : text.socketPath}</FieldLabel>
             <Input
               id={`${prefix}-url`}
               name="url"
@@ -167,14 +178,14 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
               placeholder={tcp ? (useTls ? "10.0.0.5:2376" : "10.0.0.5:2375") : "/var/run/docker.sock"}
             />
             {tcp && !useTls ? (
-              <FieldDescription>Unencrypted Docker API. Only use it over a private network or VPN.</FieldDescription>
+              <FieldDescription>{text.unencrypted}</FieldDescription>
             ) : null}
             <FieldError>{errors.url?.[0]}</FieldError>
           </Field>
           {tcp ? (
             <Field orientation="horizontal">
               <Switch id={`${prefix}-tls`} checked={useTls} onCheckedChange={setUseTls} />
-              <FieldLabel htmlFor={`${prefix}-tls`}>Use TLS</FieldLabel>
+              <FieldLabel htmlFor={`${prefix}-tls`}>{text.useTls}</FieldLabel>
               {useTls ? <input type="hidden" name="tls" value="on" /> : null}
             </Field>
           ) : null}
@@ -183,32 +194,27 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
               <div className="flex items-center gap-2">
                 <ShieldCheckIcon className="size-4 text-emerald-600" />
                 <div className="grid gap-0.5">
-                  <span className="font-medium">TLS configured</span>
-                  <span className="text-xs text-muted-foreground">
-                    Certificates are stored encrypted; the private key is never shown again.
-                  </span>
+                  <span className="font-medium">{text.tlsConfigured}</span>
+                  <span className="text-xs text-muted-foreground">{text.tlsStored}</span>
                 </div>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={() => setReplacing(true)}>
-                Replace
+                {text.replace}
               </Button>
             </div>
           ) : null}
           {tcp && initial?.tls && !useTls ? (
-            <FieldDescription>The stored TLS certificates will be removed when you save.</FieldDescription>
+            <FieldDescription>{text.tlsRemoved}</FieldDescription>
           ) : null}
           {showPem ? (
             <>
               <input type="hidden" name="tls_replace" value="on" />
-              <FieldDescription>
-                Mutual TLS as with <Mono>docker --tlsverify</Mono>: the daemon is verified against the CA and Gantry
-                authenticates with the client certificate. Paste PEM text or load the files.
-              </FieldDescription>
+              <FieldDescription>{i18n.rich(text.tlsHelp, { command: <Mono>docker --tlsverify</Mono> })}</FieldDescription>
               <PemField
                 id={`${prefix}-tls-ca`}
                 name="tls_ca"
-                label="CA certificate"
-                placeholder="ca.pem: -----BEGIN CERTIFICATE-----"
+                label={text.caCertificate}
+                placeholder={text.caPlaceholder}
                 value={pem.ca}
                 onChange={(ca) => setPem((p) => ({ ...p, ca }))}
                 error={errors.tls_ca?.[0]}
@@ -216,8 +222,8 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
               <PemField
                 id={`${prefix}-tls-cert`}
                 name="tls_cert"
-                label="Client certificate"
-                placeholder="cert.pem: -----BEGIN CERTIFICATE-----"
+                label={text.clientCertificate}
+                placeholder={text.certPlaceholder}
                 value={pem.cert}
                 onChange={(cert) => setPem((p) => ({ ...p, cert }))}
                 error={errors.tls_cert?.[0]}
@@ -225,8 +231,8 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
               <PemField
                 id={`${prefix}-tls-key`}
                 name="tls_key"
-                label="Client key"
-                placeholder="key.pem: -----BEGIN PRIVATE KEY-----"
+                label={text.clientKey}
+                placeholder={text.keyPlaceholder}
                 value={pem.key}
                 onChange={(key) => setPem((p) => ({ ...p, key }))}
                 error={errors.tls_key?.[0]}
@@ -242,18 +248,17 @@ export function EnvironmentFields({ errors, initial }: { errors: Errors; initial
 /** Agent environments: only the name is edited here; the key is rotated from the row. */
 function AgentEnvironmentFields({ errors, initial }: { errors: Errors; initial: EnvironmentDefaults }) {
   const uid = React.useId()
+  const { t } = useI18n()
   return (
     <>
       <input type="hidden" name="id" value={initial.id} />
       <input type="hidden" name="type" value="agent" />
       <Field data-invalid={errors.name ? true : undefined}>
-        <FieldLabel htmlFor={`${uid}-name`}>Name</FieldLabel>
+        <FieldLabel htmlFor={`${uid}-name`}>{t.common.fields.name}</FieldLabel>
         <Input id={`${uid}-name`} name="name" defaultValue={initial.name} required autoFocus />
         <FieldError>{errors.name?.[0]}</FieldError>
       </Field>
-      <FieldDescription>
-        The connection comes from the agent on the host. Use &ldquo;Rotate agent key&rdquo; to issue a new key.
-      </FieldDescription>
+      <FieldDescription>{t.environments.form.agentHelp}</FieldDescription>
     </>
   )
 }
@@ -274,25 +279,31 @@ function KubernetesFields({ errors, initial }: { errors: Errors; initial?: Envir
   const [insecure, setInsecure] = React.useState(false)
   const [ca, setCa] = React.useState("")
   const [kubeconfig, setKubeconfig] = React.useState("")
+  const i18n = useI18n()
+  const { t, format } = i18n
+  const text = t.environments.kubernetes
 
   const namespaceField = (
     <Field data-invalid={errors.kube_namespace ? true : undefined}>
-      <FieldLabel htmlFor={`${uid}-ns`}>Default namespace</FieldLabel>
+      <FieldLabel htmlFor={`${uid}-ns`}>{text.defaultNamespace}</FieldLabel>
       <Input
         id={`${uid}-ns`}
         name="kube_namespace"
-        placeholder={mode === "kubeconfig" && replacing ? "from the context" : "all namespaces"}
+        placeholder={mode === "kubeconfig" && replacing ? text.namespaceFromContext : text.allNamespaces}
         defaultValue={editing && !replacing ? (initial?.kubeNamespace ?? "") : ""}
         className="font-mono text-xs"
         autoComplete="off"
         spellCheck={false}
       />
-      <FieldDescription>Preselected on the list pages and for Apply. Leave empty to show all namespaces.</FieldDescription>
+      <FieldDescription>{text.namespaceHelp}</FieldDescription>
       <FieldError>{errors.kube_namespace?.[0]}</FieldError>
     </Field>
   )
 
   if (!replacing) {
+    const kinds = (initial?.kubeAuth ?? []).filter((a) => a !== "CA").map((a) => credentialKind(a, t))
+    const credentials =
+      kinds.length === 2 ? format(text.and, { first: kinds[0], second: kinds[1] }) : kinds.join(", ") || text.storedCredentials
     return (
       <>
         <div className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
@@ -301,14 +312,12 @@ function KubernetesFields({ errors, initial }: { errors: Errors; initial?: Envir
             <div className="grid min-w-0 gap-0.5">
               <span className="truncate font-mono text-xs">{initial?.url}</span>
               <span className="text-xs text-muted-foreground">
-                Connected with {initial?.kubeAuth.filter((a) => a !== "CA").join(" and ") || "stored credentials"}
-                {initial?.kubeInsecure ? ", TLS verification off" : ""}. Credentials are stored encrypted and never shown
-                again.
+                {format(initial?.kubeInsecure ? text.connectedWithInsecure : text.connectedWith, { credentials })}
               </span>
             </div>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => setReplacing(true)}>
-            Replace
+            {t.environments.form.replace}
           </Button>
         </div>
         {namespaceField}
@@ -321,24 +330,24 @@ function KubernetesFields({ errors, initial }: { errors: Errors; initial?: Envir
       {editing ? <input type="hidden" name="kube_replace" value="on" /> : null}
       <input type="hidden" name="kube_mode" value={mode} />
       <Field>
-        <FieldLabel>Credentials</FieldLabel>
+        <FieldLabel>{text.credentials}</FieldLabel>
         <ToggleGroup
           type="single"
           variant="outline"
           size="sm"
           value={mode}
           onValueChange={(v) => v && setMode(v as "token" | "kubeconfig")}
-          aria-label="Credentials"
+          aria-label={text.credentials}
         >
-          <ToggleGroupItem value="token">Service account token</ToggleGroupItem>
-          <ToggleGroupItem value="kubeconfig">Kubeconfig</ToggleGroupItem>
+          <ToggleGroupItem value="token">{text.serviceAccountToken}</ToggleGroupItem>
+          <ToggleGroupItem value="kubeconfig">{text.kubeconfig}</ToggleGroupItem>
         </ToggleGroup>
       </Field>
       {/* Keyed so inputs aren't reused across modes (the token would end up in Context). */}
       {mode === "token" ? (
         <React.Fragment key="token">
           <Field data-invalid={errors.kube_server ? true : undefined}>
-            <FieldLabel htmlFor={`${uid}-server`}>API server URL</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-server`}>{text.apiServer}</FieldLabel>
             <Input
               id={`${uid}-server`}
               name="kube_server"
@@ -351,7 +360,7 @@ function KubernetesFields({ errors, initial }: { errors: Errors; initial?: Envir
             <FieldError>{errors.kube_server?.[0]}</FieldError>
           </Field>
           <Field data-invalid={errors.kube_token ? true : undefined}>
-            <FieldLabel htmlFor={`${uid}-token`}>Bearer token</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-token`}>{text.bearerToken}</FieldLabel>
             <Input
               id={`${uid}-token`}
               name="kube_token"
@@ -361,32 +370,30 @@ function KubernetesFields({ errors, initial }: { errors: Errors; initial?: Envir
               className="font-mono text-xs"
             />
             <FieldDescription>
-              A service account token, e.g. from <Mono>kubectl create token gantry -n kube-system</Mono>. Gantry can do
-              what the account&apos;s RBAC allows.
+              {i18n.rich(text.tokenHelp, { command: <Mono>kubectl create token gantry -n kube-system</Mono> })}
             </FieldDescription>
             <FieldError>{errors.kube_token?.[0]}</FieldError>
           </Field>
           <PemField
             id={`${uid}-ca`}
             name="kube_ca"
-            label="CA certificate"
-            placeholder="Cluster CA: -----BEGIN CERTIFICATE----- (optional)"
+            label={t.environments.form.caCertificate}
+            placeholder={text.caPlaceholder}
             value={ca}
             onChange={setCa}
             required={false}
             error={errors.kube_ca?.[0]}
-            description="Leave empty if the API server's certificate is signed by a public CA."
+            description={text.caHelp}
           />
           <Field orientation="horizontal">
             <Switch id={`${uid}-insecure`} checked={insecure} onCheckedChange={setInsecure} />
-            <FieldLabel htmlFor={`${uid}-insecure`}>Skip TLS verification</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-insecure`}>{text.skipTlsVerify}</FieldLabel>
             {insecure ? <input type="hidden" name="kube_insecure" value="on" /> : null}
           </Field>
           {insecure ? (
             <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 p-3 text-xs text-amber-700 dark:text-amber-400">
               <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />
-              The API server&apos;s certificate won&apos;t be checked, so anyone on the network path could impersonate
-              the cluster and capture the token. Only use this for test clusters.
+              {text.insecureWarning}
             </p>
           ) : null}
         </React.Fragment>
@@ -395,26 +402,21 @@ function KubernetesFields({ errors, initial }: { errors: Errors; initial?: Envir
           <PemField
             id={`${uid}-kubeconfig`}
             name="kubeconfig"
-            label="Kubeconfig"
+            label={text.kubeconfig}
             placeholder="apiVersion: v1&#10;kind: Config&#10;clusters: ..."
             value={kubeconfig}
             onChange={setKubeconfig}
             accept=".yaml,.yml,.conf,.config,text/plain,application/yaml"
             maxBytes={KUBECONFIG_MAX_BYTES}
             error={errors.kubeconfig?.[0]}
-            description={
-              <>
-                Certificates must be embedded (<Mono>kubectl config view --raw --minify --flatten</Mono>). Token and
-                client certificate users work; exec and auth-provider plugins don&apos;t.
-              </>
-            }
+            description={i18n.rich(text.kubeconfigHelp, { command: <Mono>kubectl config view --raw --minify --flatten</Mono> })}
           />
           <Field data-invalid={errors.kube_context ? true : undefined}>
-            <FieldLabel htmlFor={`${uid}-context`}>Context</FieldLabel>
+            <FieldLabel htmlFor={`${uid}-context`}>{text.context}</FieldLabel>
             <Input
               id={`${uid}-context`}
               name="kube_context"
-              placeholder="current-context"
+              placeholder={text.contextPlaceholder}
               className="font-mono text-xs"
               autoComplete="off"
               spellCheck={false}

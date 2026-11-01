@@ -13,7 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ENVIRONMENT_ROLES, ROLE_LABELS, type EnvironmentRole } from "@/lib/permissions"
+import { useI18n } from "@/lib/i18n/client"
+import { ENVIRONMENT_ROLES, type EnvironmentRole } from "@/lib/permissions"
 import type { ActionState } from "@/lib/validation"
 
 // Environment access, shared by the Environments page (users of one
@@ -49,8 +50,9 @@ export function AccessDialog({
   selected: AccessGrant[]
   emptyMessage: string
 }) {
+  const { t } = useI18n()
   return (
-    <FormDialog trigger={trigger} title={title} description={description} submitLabel="Save" action={action}>
+    <FormDialog trigger={trigger} title={title} description={description} submitLabel={t.common.actions.save} action={action}>
       {() => (
         <>
           <input type="hidden" name="id" value={id} />
@@ -74,6 +76,7 @@ function AccessChecklist({
 }) {
   // Unique ids: Next keeps recently visited pages hidden in the DOM.
   const uid = React.useId()
+  const { t, format } = useI18n()
   const [roles, setRoles] = React.useState(() => new Map(initial.map((g) => [g.id, g.role])))
   if (options.length === 0) return <p className="text-sm text-muted-foreground">{emptyMessage}</p>
   const update = (id: number, role: EnvironmentRole | null) =>
@@ -84,7 +87,7 @@ function AccessChecklist({
       return next
     })
   return (
-    <div className="flex max-h-80 flex-col gap-3 overflow-y-auto" role="group" aria-label="Access">
+    <div className="flex max-h-80 flex-col gap-3 overflow-y-auto" role="group" aria-label={t.environments.access.label}>
       {options.map((o) => {
         const role = roles.get(o.id)
         return (
@@ -100,13 +103,13 @@ function AccessChecklist({
             {role ? (
               <>
                 <Select value={role} onValueChange={(r) => update(o.id, r as EnvironmentRole)}>
-                  <SelectTrigger size="sm" className="ml-auto w-32" aria-label={`Role for ${o.label}`}>
+                  <SelectTrigger size="sm" className="ml-auto w-32" aria-label={format(t.environments.access.roleFor, { name: o.label })}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {ENVIRONMENT_ROLES.map((r) => (
                       <SelectItem key={r} value={r}>
-                        {ROLE_LABELS[r]}
+                        {t.common.roles[r]}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -117,18 +120,17 @@ function AccessChecklist({
           </Field>
         )
       })}
-      <FieldDescription>
-        Viewer: read-only. Operator: start, stop, restart, logs. Manager: everything in the environment.
-      </FieldDescription>
+      <FieldDescription>{t.environments.access.rolesHelp}</FieldDescription>
     </div>
   )
 }
 
 export function RoleBadge({ name, role }: { name: string; role: EnvironmentRole }) {
+  const { t } = useI18n()
   return (
     <Badge variant="secondary" className="gap-1">
       {name}{" "}
-      <span className="font-normal text-muted-foreground">{ROLE_LABELS[role].toLowerCase()}</span>
+      <span className="font-normal text-muted-foreground">{t.common.roles[role].toLowerCase()}</span>
     </Badge>
   )
 }

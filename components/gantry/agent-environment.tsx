@@ -41,7 +41,8 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { timeAgo } from "@/lib/format"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 import { cn } from "@/lib/utils"
 
 /** What the Environments table shows about an agent environment (never the key). */
@@ -59,29 +60,36 @@ export type AgentRow = {
   keyCreatedAt: string | null
 }
 
-async function copy(text: string, what: string) {
+async function copy(text: string, what: string, i18n: I18n) {
+  const messages = i18n.t.environments.agent
   try {
     await navigator.clipboard.writeText(text)
-    toast.success(`${what} copied`)
+    toast.success(i18n.format(messages.copied, { what }))
   } catch {
-    toast.error("Copy failed; select the text instead")
+    toast.error(messages.copyFailed)
   }
 }
 
 // ------------------------------------------------------------- table cells
 
 export function AgentStatusBadge({ agent, version, error }: { agent: AgentRow; version: string | null; error: string | null }) {
+  const { t, format, timeAgo } = useI18n()
+  const text = t.environments.agent
   const up = agent.connected && !error
   const label = agent.connected
     ? error
-      ? "connected · Docker unreachable"
-      : `connected · ${version ?? "Docker"}`
-    : "disconnected"
+      ? text.connectedUnreachable
+      : format(text.connectedVersion, { version: version ?? "Docker" })
+    : text.disconnected
   const title = agent.connected
-    ? `Connected ${agent.since ? timeAgo(agent.since) : ""}${agent.rttMs !== null ? ` · ${agent.rttMs} ms round trip` : ""}${error ? ` · ${error}` : ""}`
+    ? [
+        format(text.connectedTitle, { ago: agent.since ? timeAgo(agent.since) : "" }),
+        ...(agent.rttMs !== null ? [format(text.roundTrip, { ms: agent.rttMs })] : []),
+        ...(error ? [error] : []),
+      ].join(" · ")
     : agent.lastSeen
-      ? `Last seen ${timeAgo(agent.lastSeen)}`
-      : "The agent has never connected"
+      ? format(text.lastSeenTitle, { ago: timeAgo(agent.lastSeen) })
+      : text.neverConnected
   return (
     <Badge variant="outline" className="gap-1.5 px-1.5 text-muted-foreground" title={title}>
       <span className={cn("size-2 rounded-full", up ? "bg-emerald-500" : agent.connected ? "bg-amber-500" : "bg-red-500")} />
@@ -91,11 +99,12 @@ export function AgentStatusBadge({ agent, version, error }: { agent: AgentRow; v
 }
 
 export function AgentTypeCell({ agent }: { agent: AgentRow }) {
+  const { t } = useI18n()
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      Agent
+      {t.environments.agent.type}
       {agent.version ? (
-        <Badge variant="outline" className="gap-1 px-1.5 text-muted-foreground" title="Agent version">
+        <Badge variant="outline" className="gap-1 px-1.5 text-muted-foreground" title={t.environments.agent.version}>
           <RadioTowerIcon />v{agent.version}
         </Badge>
       ) : null}
@@ -105,16 +114,20 @@ export function AgentTypeCell({ agent }: { agent: AgentRow }) {
 
 /** Host, remote address and when it was last seen, in place of an address. */
 export function AgentAddressCell({ agent }: { agent: AgentRow }) {
+  const { t, format, timeAgo } = useI18n()
+  const text = t.environments.agent
   return (
     <div className="grid gap-0.5 text-xs" data-testid="agent-address">
       {agent.hostname ? <span className="font-medium">{agent.hostname}</span> : null}
-      {agent.remoteAddress ? <Mono className="text-muted-foreground">from {agent.remoteAddress}</Mono> : null}
+      {agent.remoteAddress ? (
+        <Mono className="text-muted-foreground">{format(text.from, { address: agent.remoteAddress })}</Mono>
+      ) : null}
       <span className="text-muted-foreground">
         {agent.connected
-          ? `connected ${agent.since ? timeAgo(agent.since) : ""}`
+          ? format(text.connectedAgo, { ago: agent.since ? timeAgo(agent.since) : "" })
           : agent.lastSeen
-            ? `last seen ${timeAgo(agent.lastSeen)}`
-            : "waiting for the agent"}
+            ? format(text.lastSeen, { ago: timeAgo(agent.lastSeen) })
+            : text.waiting}
       </span>
     </div>
   )
@@ -153,19 +166,21 @@ function useAgentConnection(id: number, active: boolean) {
 export function AgentEnrollmentPanel({ enrollment }: { enrollment: AgentEnrollment }) {
   const uid = React.useId()
   const status = useAgentConnection(enrollment.id, true)
+  const i18n = useI18n()
+  const { t, format } = i18n
+  const text = t.environments.agent
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 p-3 text-xs text-amber-700 dark:text-amber-400">
         <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />
-        Copy the key now: it is stored only as a hash and won&apos;t be shown again. Anyone with it can connect a Docker
-        host as this environment.
+        {text.copyNow}
       </p>
       <Field>
         <div className="flex items-center justify-between gap-2">
-          <FieldLabel htmlFor={`${uid}-command`}>Docker run command</FieldLabel>
-          <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => copy(enrollment.command, "Command")}>
+          <FieldLabel htmlFor={`${uid}-command`}>{text.command}</FieldLabel>
+          <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => copy(enrollment.command, text.commandWhat, i18n)}>
             <CopyIcon data-icon="inline-start" />
-            Copy
+            {t.common.actions.copy}
           </Button>
         </div>
         <Textarea
@@ -177,24 +192,21 @@ export function AgentEnrollmentPanel({ enrollment }: { enrollment: AgentEnrollme
           onFocus={(e) => e.currentTarget.select()}
         />
         <FieldDescription>
-          Run it on the Docker host. The agent only connects out to <Mono>{enrollment.url}</Mono>; the Docker API is
-          not exposed. Set <Mono>GANTRY_URL</Mono> for Gantry if agents should use another address.
+          {i18n.rich(text.commandHelp, { url: <Mono>{enrollment.url}</Mono>, env: <Mono>GANTRY_URL</Mono> })}
         </FieldDescription>
       </Field>
       {enrollment.insecure ? (
         <p className="flex items-start gap-2 rounded-lg border border-red-500/40 p-3 text-xs text-red-700 dark:text-red-400">
           <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />
-          Gantry is reached over plain http://, so the key and all Docker traffic would cross the network unencrypted.
-          The agent refuses this unless you add <Mono>-e GANTRY_AGENT_INSECURE=1</Mono>. Serve Gantry over HTTPS
-          instead.
+          {i18n.rich(text.insecure, { flag: <Mono>-e GANTRY_AGENT_INSECURE=1</Mono> })}
         </p>
       ) : null}
       <Field>
         <div className="flex items-center justify-between gap-2">
-          <FieldLabel htmlFor={`${uid}-key`}>Enrollment key</FieldLabel>
-          <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => copy(enrollment.key, "Key")}>
+          <FieldLabel htmlFor={`${uid}-key`}>{text.key}</FieldLabel>
+          <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => copy(enrollment.key, text.keyWhat, i18n)}>
             <CopyIcon data-icon="inline-start" />
-            Copy
+            {t.common.actions.copy}
           </Button>
         </div>
         <Input id={`${uid}-key`} readOnly value={enrollment.key} className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
@@ -204,20 +216,16 @@ export function AgentEnrollmentPanel({ enrollment }: { enrollment: AgentEnrollme
           <>
             <CheckCircle2Icon className="size-4 text-emerald-600" />
             <span>
-              Agent connected
-              {status.hostname ? (
-                <>
-                  {" "}
-                  from <span className="font-medium">{status.hostname}</span>
-                </>
-              ) : null}
-              {status.dockerVersion ? ` (Docker ${status.dockerVersion})` : ""}
+              {status.hostname
+                ? i18n.rich(text.statusConnectedFrom, { host: <span className="font-medium">{status.hostname}</span> })
+                : text.statusConnected}
+              {status.dockerVersion ? ` ${format(text.statusDocker, { version: status.dockerVersion })}` : ""}
             </span>
           </>
         ) : (
           <>
             <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-            <span className="text-muted-foreground">Waiting for the agent to connect…</span>
+            <span className="text-muted-foreground">{text.statusWaiting}</span>
           </>
         )}
       </div>
@@ -233,6 +241,7 @@ const DIALOG_CLASS = "max-h-[90vh] overflow-y-auto sm:max-w-2xl"
 export function AddAgentDialog() {
   const [open, setOpen] = React.useState(false)
   const [formKey, setFormKey] = React.useState(0)
+  const { t } = useI18n()
   return (
     <Dialog
       open={open}
@@ -244,8 +253,8 @@ export function AddAgentDialog() {
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
           <RadioTowerIcon data-icon="inline-start" />
-          <span className="hidden lg:inline">Add agent</span>
-          <span className="sr-only lg:hidden">Add agent</span>
+          <span className="hidden lg:inline">{t.environments.agent.add}</span>
+          <span className="sr-only lg:hidden">{t.environments.agent.add}</span>
         </Button>
       </DialogTrigger>
       <DialogContent className={DIALOG_CLASS}>
@@ -257,9 +266,11 @@ export function AddAgentDialog() {
 
 function AddAgentForm({ onDone }: { onDone: () => void }) {
   const uid = React.useId()
+  const { t, format } = useI18n()
+  const text = t.environments.agent
   const [state, action, pending] = useActionState(async (prev: AgentEnrollmentState, fd: FormData) => {
     const res = await createAgentEnvironment(prev, fd)
-    if (res.ok) toast.success(res.message ?? "Agent environment added")
+    if (res.ok) toast.success(res.message ?? text.added)
     return res
   }, {})
 
@@ -267,13 +278,13 @@ function AddAgentForm({ onDone }: { onDone: () => void }) {
     return (
       <>
         <DialogHeader>
-          <DialogTitle>Start the agent on {state.enrollment.name}</DialogTitle>
-          <DialogDescription>Run this on the Docker host you want to manage.</DialogDescription>
+          <DialogTitle>{format(text.startTitle, { name: state.enrollment.name })}</DialogTitle>
+          <DialogDescription>{text.startDescription}</DialogDescription>
         </DialogHeader>
         <AgentEnrollmentPanel enrollment={state.enrollment} />
         <DialogFooter>
           <Button type="button" onClick={onDone}>
-            Done
+            {t.common.status.done}
           </Button>
         </DialogFooter>
       </>
@@ -283,28 +294,24 @@ function AddAgentForm({ onDone }: { onDone: () => void }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Add agent</DialogTitle>
-        <DialogDescription>
-          For a Docker host behind NAT or a firewall: a small agent container on it connects out to Gantry, and Gantry
-          manages the host through that connection. No Docker API port or TLS setup on the host. Only administrators
-          can use it until you grant access.
-        </DialogDescription>
+        <DialogTitle>{text.add}</DialogTitle>
+        <DialogDescription>{text.addDescription}</DialogDescription>
       </DialogHeader>
       <form method="post" onSubmit={submitKeepingValues(action)} className="flex flex-col gap-5">
         <Field data-invalid={state.fieldErrors?.name ? true : undefined}>
-          <FieldLabel htmlFor={`${uid}-name`}>Name</FieldLabel>
-          <Input id={`${uid}-name`} name="name" placeholder="edge-host" required autoFocus maxLength={100} />
+          <FieldLabel htmlFor={`${uid}-name`}>{t.common.fields.name}</FieldLabel>
+          <Input id={`${uid}-name`} name="name" placeholder={text.namePlaceholder} required autoFocus maxLength={100} />
           <FieldError>{state.fieldErrors?.name?.[0]}</FieldError>
         </Field>
         {state.error && !state.fieldErrors ? <FieldError>{state.error}</FieldError> : null}
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline" disabled={pending}>
-              Cancel
+              {t.common.actions.cancel}
             </Button>
           </DialogClose>
           <Button type="submit" disabled={pending}>
-            {pending ? "Working…" : "Create"}
+            {pending ? t.common.status.working : t.common.actions.create}
           </Button>
         </DialogFooter>
       </form>
@@ -321,21 +328,23 @@ const EnrollmentContext = React.createContext<(enrollment: AgentEnrollment) => v
  */
 export function AgentEnrollmentProvider({ children }: { children: React.ReactNode }) {
   const [enrollment, setEnrollment] = React.useState<AgentEnrollment | null>(null)
+  const i18n = useI18n()
+  const { t, format } = i18n
   return (
     <EnrollmentContext.Provider value={setEnrollment}>
       {children}
       <Dialog open={enrollment !== null} onOpenChange={(o) => !o && setEnrollment(null)}>
         <DialogContent className={DIALOG_CLASS}>
           <DialogHeader>
-            <DialogTitle>New key for {enrollment?.name}</DialogTitle>
+            <DialogTitle>{format(t.environments.agent.newKeyTitle, { name: enrollment?.name ?? "" })}</DialogTitle>
             <DialogDescription>
-              Replace the agent on the host: <Mono>docker rm -f gantry-agent</Mono>, then run the command below.
+              {i18n.rich(t.environments.agent.newKeyDescription, { command: <Mono>docker rm -f gantry-agent</Mono> })}
             </DialogDescription>
           </DialogHeader>
           {enrollment ? <AgentEnrollmentPanel enrollment={enrollment} /> : null}
           <DialogFooter>
             <Button type="button" onClick={() => setEnrollment(null)}>
-              Done
+              {t.common.status.done}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -349,40 +358,39 @@ export function RotateAgentKeyButton({ id, name }: { id: number; name: string })
   const [confirming, setConfirming] = React.useState(false)
   const [pending, startTransition] = React.useTransition()
   const showEnrollment = React.useContext(EnrollmentContext)
+  const { t, format } = useI18n()
+  const text = t.environments.agent
 
   const rotate = () =>
     startTransition(async () => {
       try {
         const res = await rotateAgentKey(id)
         if (res.error || !res.enrollment) {
-          toast.error(res.error ?? "Could not rotate the key")
+          toast.error(res.error ?? text.rotateFailed)
           return
         }
-        toast.success(res.message ?? "Key rotated")
+        toast.success(res.message ?? text.rotated)
         setConfirming(false)
         showEnrollment(res.enrollment)
       } catch {
-        toast.error("Request failed. Check your connection.")
+        toast.error(t.common.errors.requestFailed)
       }
     })
 
   return (
     <AlertDialog open={confirming} onOpenChange={(o) => !pending && setConfirming(o)}>
       <AlertDialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Rotate agent key">
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={text.rotateLabel}>
           <KeyRoundIcon />
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Rotate the agent key of {name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            A new key is issued and the current one stops working at once: the connected agent is disconnected until
-            you run it again with the new key.
-          </AlertDialogDescription>
+          <AlertDialogTitle>{format(text.rotateTitle, { name })}</AlertDialogTitle>
+          <AlertDialogDescription>{text.rotateDescription}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>{t.common.actions.cancel}</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
             disabled={pending}
@@ -391,7 +399,7 @@ export function RotateAgentKeyButton({ id, name }: { id: number; name: string })
               rotate()
             }}
           >
-            {pending ? "Working…" : "Rotate key"}
+            {pending ? t.common.status.working : text.rotate}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

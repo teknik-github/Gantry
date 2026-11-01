@@ -21,11 +21,13 @@ import {
   type AgentRow,
 } from "@/components/gantry/agent-environment"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
-import { EnvironmentFields } from "@/components/gantry/environment-fields"
+import { credentialKind, EnvironmentFields } from "@/components/gantry/environment-fields"
 import { FormDialog } from "@/components/gantry/form-dialog"
 import { Mono } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import type { I18n } from "@/lib/i18n"
+import { useI18n } from "@/lib/i18n/client"
 import type { EnvironmentRole } from "@/lib/permissions"
 import { cn } from "@/lib/utils"
 
@@ -55,73 +57,75 @@ type UserOption = { id: number; username: string }
 
 const envHelper = columnHelperFor<EnvironmentRow>()
 
-function environmentColumns(users: UserOption[]) {
+function environmentColumns(users: UserOption[], i18n: I18n) {
+  const { t, format } = i18n
+  const text = t.environments
   return envHelper.columns([
     envHelper.accessor("name", {
-      header: ({ column }) => <SortHeader column={column} title="Name" />,
+      header: ({ column }) => <SortHeader column={column} title={t.common.fields.name} />,
       cell: ({ row }) => (
         <div className="flex items-center gap-2 font-medium">
           {row.original.name}
-          {row.original.current ? <Badge variant="secondary">current</Badge> : null}
+          {row.original.current ? <Badge variant="secondary">{text.current}</Badge> : null}
         </div>
       ),
       enableHiding: false,
     }),
     envHelper.accessor("status", {
-      header: "Status",
+      header: text.columns.status,
       cell: ({ row }) =>
         row.original.agent ? (
           <AgentStatusBadge agent={row.original.agent} version={row.original.version} error={row.original.error} />
         ) : (
           <Badge variant="outline" className="gap-1.5 px-1.5 text-muted-foreground" title={row.original.error ?? undefined}>
             <span className={cn("size-2 rounded-full", row.original.status === "up" ? "bg-emerald-500" : "bg-red-500")} />
-            {row.original.status === "up" ? `up · ${row.original.version}` : "unreachable"}
+            {row.original.status === "up" ? format(text.up, { version: row.original.version ?? "" }) : text.unreachable}
           </Badge>
         ),
     }),
     envHelper.accessor("type", {
-      header: "Type",
+      header: text.columns.type,
       cell: ({ row }) =>
         row.original.type === "socket" ? (
-          "Unix socket"
+          text.types.socket
         ) : row.original.agent ? (
           <AgentTypeCell agent={row.original.agent} />
         ) : row.original.type === "kubernetes" ? (
           <div className="flex flex-wrap items-center gap-1.5">
-            Kubernetes
+            {text.types.kubernetes}
             {row.original.kubeAuth
               .filter((a) => a !== "CA")
               .map((a) => (
                 <Badge key={a} variant="outline" className="px-1.5 text-muted-foreground">
-                  {a}
+                  {credentialKind(a, t)}
                 </Badge>
               ))}
             {row.original.kubeInsecure ? (
-              <Badge variant="outline" className="gap-1 px-1.5 text-amber-600" title="The API server's certificate is not verified">
+              <Badge variant="outline" className="gap-1 px-1.5 text-amber-600" title={text.tlsVerifyOffTitle}>
                 <ShieldAlertIcon />
-                TLS verify off
+                {text.tlsVerifyOff}
               </Badge>
             ) : null}
           </div>
         ) : (
           <div className="flex items-center gap-1.5">
-            TCP
+            {text.types.tcp}
             {row.original.tls ? (
               <Badge variant="outline" className="gap-1 px-1.5 text-muted-foreground">
                 <LockIcon />
-                TLS
+                {text.tls}
               </Badge>
             ) : null}
           </div>
         ),
     }),
     envHelper.accessor("url", {
-      header: "Address",
+      header: text.columns.url,
       cell: ({ row }) => (row.original.agent ? <AgentAddressCell agent={row.original.agent} /> : <Mono>{row.original.url}</Mono>),
     }),
     envHelper.display({
       id: "access",
-      header: "Access",
+      header: text.columns.access,
       cell: ({ row }) =>
         row.original.access.length ? (
           <div className="flex max-w-72 flex-wrap gap-1" data-testid={`env-access-${row.original.name}`}>
@@ -131,7 +135,7 @@ function environmentColumns(users: UserOption[]) {
           </div>
         ) : (
           <span className="text-muted-foreground" data-testid={`env-access-${row.original.name}`}>
-            Admins only
+            {text.adminsOnly}
           </span>
         ),
     }),
@@ -141,34 +145,30 @@ function environmentColumns(users: UserOption[]) {
         <div className="flex justify-end gap-1">
           <AccessDialog
             trigger={
-              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Manage access">
+              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={text.manageAccess}>
                 <UsersIcon />
               </Button>
             }
-            title={`Access to ${row.original.name}`}
-            description="Standard users who can use this environment, and what they may do. Administrators always can."
+            title={format(text.accessTitle, { name: row.original.name })}
+            description={text.accessDescription}
             action={setEnvironmentAccess}
             id={row.original.id}
             fieldName="user"
             options={users.map((u) => ({ id: u.id, label: u.username }))}
             selected={row.original.access.map((u) => ({ id: u.id, role: u.role }))}
-            emptyMessage="There are no standard users yet."
+            emptyMessage={text.noStandardUsers}
           />
           {row.original.agent ? <RotateAgentKeyButton id={row.original.id} name={row.original.name} /> : null}
           <EditEnvironmentDialog row={row.original} />
           <ConfirmAction
-            title={`Remove environment ${row.original.name}?`}
+            title={format(text.removeTitle, { name: row.original.name })}
             description={
-              row.original.type === "kubernetes"
-                ? "Gantry will stop managing this cluster and forget its credentials. Nothing in the cluster is changed."
-                : row.original.agent
-                  ? "Gantry will stop managing this Docker host and forget the agent's key, so the agent is disconnected and can't come back. Remove the gantry-agent container on the host. Nothing else on the host is changed."
-                  : "Gantry will stop managing this Docker host. Nothing on the host is changed."
+              row.original.type === "kubernetes" ? text.removeKubernetes : row.original.agent ? text.removeAgent : text.removeDocker
             }
-            confirmLabel="Remove"
+            confirmLabel={t.common.actions.remove}
             onConfirm={() => deleteEnvironment(row.original.id)}
           >
-            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Remove environment">
+            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={text.removeLabel}>
               <Trash2Icon />
             </Button>
           </ConfirmAction>
@@ -180,14 +180,16 @@ function environmentColumns(users: UserOption[]) {
 }
 
 export function EnvironmentsTable({ data, users }: { data: EnvironmentRow[]; users: UserOption[] }) {
-  const columns = React.useMemo(() => environmentColumns(users), [users])
+  const i18n = useI18n()
+  const columns = React.useMemo(() => environmentColumns(users, i18n), [users, i18n])
   return (
     <AgentEnrollmentProvider>
       <DataTable
         data={data}
         columns={columns}
         getRowId={(r) => String(r.id)}
-        emptyMessage="No environments."
+        emptyMessage={i18n.t.environments.empty}
+        columnLabels={i18n.t.environments.columns}
         toolbar={
           <>
             <AddAgentDialog />
@@ -202,17 +204,18 @@ export function EnvironmentsTable({ data, users }: { data: EnvironmentRow[]; use
 const ENV_DIALOG_CLASS = "max-h-[90vh] overflow-y-auto sm:max-w-xl"
 
 function AddEnvironmentDialog() {
+  const { t } = useI18n()
   return (
     <FormDialog
       trigger={
         <Button size="sm">
           <PlusIcon data-icon="inline-start" />
-          <span className="hidden lg:inline">Add environment</span>
+          <span className="hidden lg:inline">{t.environments.add}</span>
         </Button>
       }
-      title="Add environment"
-      description="Connect another Docker host or a Kubernetes cluster. Gantry checks the connection before saving. Only administrators can use it until you grant access."
-      submitLabel="Connect"
+      title={t.environments.add}
+      description={t.environments.addDescription}
+      submitLabel={t.environments.connect}
       action={createEnvironment}
       className={ENV_DIALOG_CLASS}
     >
@@ -222,16 +225,17 @@ function AddEnvironmentDialog() {
 }
 
 function EditEnvironmentDialog({ row }: { row: EnvironmentRow }) {
+  const { t, format } = useI18n()
   return (
     <FormDialog
       trigger={
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Edit environment">
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={t.environments.editLabel}>
           <PencilIcon />
         </Button>
       }
-      title={`Edit ${row.name}`}
-      description="Gantry checks the connection before saving."
-      submitLabel="Save"
+      title={format(t.environments.editTitle, { name: row.name })}
+      description={t.environments.editDescription}
+      submitLabel={t.common.actions.save}
       action={updateEnvironment}
       className={ENV_DIALOG_CLASS}
     >
