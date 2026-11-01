@@ -291,8 +291,6 @@ export async function hostInfo(socket) {
 const MAX_BATCH = 1024 * 1024
 /** Upstream queue limit before HELLO says more (Gantry's windows bound it). */
 const MAX_QUEUED = 64 * 1024 * 1024
-/** With a POST in flight, data waits for this much before another POST goes out. */
-const MIN_EXTRA_BATCH = 256 * 1024
 
 /**
  * One connection to Gantry: the downstream GET, the upstream POSTs and the
@@ -579,14 +577,15 @@ export class Session {
 
   /**
    * Sends queued frames while Gantry allows more POSTs in flight. With one
-   * already on its way, another goes out at once for urgent frames, or once
-   * enough data is waiting to be worth a request.
+   * already on its way, another goes out at once for urgent frames, but for
+   * data only once a whole batch is waiting: every POST costs Gantry a
+   * request, so data batches don't get smaller than with one at a time.
    */
   flush() {
     while (!this.ended && this.hello && this.inflight < this.maxInflight) {
       const pending = this.urgent.length + this.queue.length
       if (!pending) return
-      if (this.inflight > 0 && !this.urgent.length && this.queued < MIN_EXTRA_BATCH) return
+      if (this.inflight > 0 && !this.urgent.length && this.queued < MAX_BATCH) return
       this.post()
     }
   }
