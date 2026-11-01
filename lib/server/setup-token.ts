@@ -5,6 +5,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { config, ensureDataDir } from "@/lib/server/config"
+import { safeEqual } from "@/lib/server/safe-equal"
 
 /**
  * One-time token required by /setup while no user exists, so whoever reaches
@@ -40,9 +41,7 @@ export function getSetupToken(): string {
 }
 
 export function verifySetupToken(input: string): boolean {
-  const expected = Buffer.from(getSetupToken())
-  const actual = Buffer.from(input.trim())
-  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected)
+  return safeEqual(input.trim(), getSetupToken())
 }
 
 export function clearSetupToken() {

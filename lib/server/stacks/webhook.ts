@@ -2,6 +2,8 @@ import "server-only"
 
 import crypto from "node:crypto"
 
+import { safeEqual } from "@/lib/server/safe-equal"
+
 // Verification and parsing of Git webhook deliveries (GitHub, GitLab,
 // Gitea/Forgejo and a generic token). Pure apart from node:crypto, so the
 // signature vectors are unit-tested.
@@ -14,13 +16,6 @@ export type Verification =
 
 export function hmacSha256Hex(secret: string, body: Uint8Array) {
   return crypto.createHmac("sha256", secret).update(body).digest("hex")
-}
-
-/** Constant-time string comparison (digests first, so lengths don't leak either). */
-export function safeEqual(a: string, b: string) {
-  const da = crypto.createHash("sha256").update(a, "utf8").digest()
-  const db = crypto.createHash("sha256").update(b, "utf8").digest()
-  return crypto.timingSafeEqual(da, db) && a.length === b.length
 }
 
 /**

@@ -12,7 +12,8 @@ import { composeArgs } from "@/lib/server/stacks/compose"
 import { checkCredentials, gitConfigEntries, gitEnv, parseCommit, pickRemoteRef, redact } from "@/lib/server/stacks/git"
 import { deployFingerprint } from "@/lib/server/stacks/git-records"
 import { RedeployQueue } from "@/lib/server/stacks/redeploy-queue"
-import { hmacSha256Hex, parseDelivery, safeEqual, verifyDelivery } from "@/lib/server/stacks/webhook"
+import { safeEqual } from "@/lib/server/safe-equal"
+import { hmacSha256Hex, parseDelivery, verifyDelivery } from "@/lib/server/stacks/webhook"
 
 describe("validateRepoUrl", () => {
   it.each([

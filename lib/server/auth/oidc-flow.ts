@@ -17,12 +17,12 @@ import {
   OidcError,
   randomUrlToken,
   resolveOidcUser,
-  safeEqual,
   validateIdToken,
   type OidcConfig,
 } from "@/lib/server/auth/oidc"
 import { setAuthCookie, signIn } from "@/lib/server/auth/session"
 import { getDb } from "@/lib/server/db"
+import { safeEqual } from "@/lib/server/safe-equal"
 
 // The request side of single sign-on (cookies, sessions, audit). Used by
 // app/auth/oidc/* and the Account page's "Link" button.

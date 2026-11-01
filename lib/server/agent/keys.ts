@@ -45,14 +45,3 @@ export function maskAgentKey(key: string): string {
   const m = KEY_RE.exec(key)
   return m ? `${AGENT_KEY_PREFIX}${m[1]}_${m[2].slice(0, 4)}…` : "(malformed key)"
 }
-
-/** Constant-time equality of two strings (session secrets). */
-export function safeEqual(a: string, b: string): boolean {
-  const x = Buffer.from(a, "utf8")
-  const y = Buffer.from(b, "utf8")
-  if (x.length !== y.length) {
-    crypto.timingSafeEqual(x, x)
-    return false
-  }
-  return crypto.timingSafeEqual(x, y)
-}

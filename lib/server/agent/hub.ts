@@ -7,12 +7,13 @@ import type { Kysely } from "kysely"
 
 import { FrameDecoder, INITIAL_WINDOW, MAX_UPSTREAM_BODY, PROTOCOL_VERSION, ProtocolError } from "@/lib/agent/protocol"
 import { parseAgentInfo, type AgentInfo, type StoredAgentInfo } from "@/lib/server/agent/info"
-import { hashAgentKey, maskAgentKey, parseAgentKey, safeEqual, verifyAgentKey } from "@/lib/server/agent/keys"
+import { hashAgentKey, maskAgentKey, parseAgentKey, verifyAgentKey } from "@/lib/server/agent/keys"
 import { AgentSession } from "@/lib/server/agent/session"
 import { agentSocketPath, agentState } from "@/lib/server/agent/state"
 import { audit, SYSTEM_ACTOR } from "@/lib/server/audit"
 import type { Database } from "@/lib/server/db/schema"
 import { checkRateLimit, clearFailures, recordFailure } from "@/lib/server/rate-limit"
+import { safeEqual } from "@/lib/server/safe-equal"
 
 /**
  * Accepting agents and carrying their traffic, independent of Next.js so it

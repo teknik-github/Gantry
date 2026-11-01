@@ -5,10 +5,10 @@ import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { authenticateApiToken, bearerToken } from "@/lib/server/auth/api-tokens"
-import { safeEqual } from "@/lib/server/auth/oidc"
 import { API_AUTH_HEADER, apiAuthMarker, SESSION_COOKIE, verifySession } from "@/lib/server/auth/token"
 import { getDb } from "@/lib/server/db"
 import type { Role } from "@/lib/server/db/schema"
+import { safeEqual } from "@/lib/server/safe-equal"
 
 export type CurrentUser = {
   id: number

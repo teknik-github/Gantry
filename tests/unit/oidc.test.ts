@@ -15,12 +15,12 @@ import {
   pkceChallenge,
   randomUrlToken,
   resolveOidcUser,
-  safeEqual,
   usernameFromClaims,
   validateIdToken,
   type OidcConfig,
 } from "@/lib/server/auth/oidc"
 import { verifyPassword } from "@/lib/server/auth/password"
+import { safeEqual } from "@/lib/server/safe-equal"
 import { startFakeOidc, type FakeOidc } from "../helpers/fake-oidc"
 import { openTestDb } from "../helpers/test-db"
 

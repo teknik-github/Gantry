@@ -5,6 +5,7 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose"
 import type { Kysely } from "kysely"
 
 import type { Database, Role } from "@/lib/server/db/schema"
+import { safeEqual } from "@/lib/server/safe-equal"
 import { changeRole } from "@/lib/server/users"
 
 // OpenID Connect single sign-on (authorization code flow with PKCE, state
@@ -125,13 +126,6 @@ export function generatePkce(): { verifier: string; challenge: string } {
 
 export function pkceChallenge(verifier: string): string {
   return crypto.createHash("sha256").update(verifier).digest("base64url")
-}
-
-/** Constant-time string comparison (different lengths are simply unequal). */
-export function safeEqual(a: string, b: string): boolean {
-  const x = Buffer.from(a)
-  const y = Buffer.from(b)
-  return x.length === y.length && crypto.timingSafeEqual(x, y)
 }
 
 export type Discovery = {
