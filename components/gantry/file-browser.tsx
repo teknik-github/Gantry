@@ -1,54 +1,25 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
-import {
-  ArrowUpIcon,
-  DownloadIcon,
-  FileIcon,
-  FileSymlinkIcon,
-  FileTextIcon,
-  FolderIcon,
-  FolderPlusIcon,
-  HardDriveIcon,
-  RefreshCwIcon,
-  Trash2Icon,
-  TriangleAlertIcon,
-  UploadIcon,
-} from "lucide-react"
+import { DownloadIcon, FolderPlusIcon, HardDriveIcon, RefreshCwIcon, TriangleAlertIcon, UploadIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { createFolderAction, deletePathAction } from "@/app/(app)/files/actions"
-import { ConfirmAction } from "@/components/gantry/confirm-button"
 import { useEnvironmentId } from "@/components/gantry/environment-scope"
-import { useRunAction } from "@/components/gantry/use-action"
-import { Mono } from "@/components/gantry/ui"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+  EditFileDialog,
+  NewFolderDialog,
+  UploadConflictDialog,
+  WriteWarningDialog,
+} from "@/components/gantry/file-browser-dialogs"
+import { EntriesTable } from "@/components/gantry/file-browser-table"
+import { useDirectoryListing, useFileDrop, useUploads, useWriteGuard } from "@/components/gantry/use-file-browser"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Textarea } from "@/components/ui/textarea"
-import { formatMode, targetQuery, type FileEntry, type FileTarget, type Listing } from "@/lib/files/entries"
-import { joinPath, normalizePath, parentPath, pathSegments, resolveLinkTarget } from "@/lib/files/paths"
+import { followableLink } from "@/lib/files/browser"
+import { targetQuery, type FileEntry, type FileTarget, type Listing } from "@/lib/files/entries"
+import { joinPath, normalizePath, pathSegments } from "@/lib/files/paths"
 import { useI18n } from "@/lib/i18n/client"
 import { cn } from "@/lib/utils"
 import type { ActionState } from "@/lib/validation"
@@ -67,48 +38,6 @@ export type FileBrowserProps = {
   initialPath?: string
 }
 
-type ApiError = { error?: string; code?: string }
-
-async function errorOf(res: Response, fallback: string) {
-  const body = (await res.json().catch(() => ({}))) as ApiError
-  return { message: body.error ?? fallback, code: body.code }
-}
-
-function formatTime(seconds: number, formatDate: (date: number) => string) {
-  if (!seconds) return "—"
-  return formatDate(seconds * 1000)
-}
-
-function owner(e: FileEntry) {
-  return `${e.user ?? e.uid}:${e.group ?? e.gid}`
-}
-
-/** Upload one file with progress (XHR: fetch has no upload progress). */
-function putFile(
-  url: string,
-  file: Blob,
-  onProgress: (fraction: number) => void,
-  connectionError: string
-): Promise<{ ok: boolean; status: number; body: ApiError }> {
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest()
-    xhr.open("PUT", url)
-    xhr.setRequestHeader("Content-Type", "application/octet-stream")
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(e.loaded / e.total)
-    }
-    xhr.onload = () => {
-      let body: ApiError = {}
-      try {
-        body = JSON.parse(xhr.responseText)
-      } catch {}
-      resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, body })
-    }
-    xhr.onerror = () => resolve({ ok: false, status: 0, body: { error: connectionError } })
-    xhr.send(file)
-  })
-}
-
 export function FileBrowser({
   target,
   rootLabel,
@@ -118,254 +47,56 @@ export function FileBrowser({
   limits,
   initialPath = "/",
 }: FileBrowserProps) {
-  const i18n = useI18n()
-  const { t, format } = i18n
+  const { t } = useI18n()
   const text = t.files
-  const listFailed = text.errors.listFailed
-  const router = useRouter()
   const environmentId = useEnvironmentId()
-  const inputId = React.useId()
-  const [listing, setListing] = React.useState<Listing | null>(null)
-  const [error, setError] = React.useState<string | null>(null)
-  // Set when a navigation starts, cleared when its listing arrives.
-  const [loading, setLoading] = React.useState(true)
-  const [pathInput, setPathInput] = React.useState(initialPath)
-  const [dragging, setDragging] = React.useState(false)
-  const [uploading, setUploading] = React.useState<string | null>(null)
   const [editing, setEditing] = React.useState<FileEntry | null>(null)
   const [newFolderOpen, setNewFolderOpen] = React.useState(false)
-  const [conflicts, setConflicts] = React.useState<{ files: File[]; existing: string[] } | null>(null)
-  const [warnAck, setWarnAck] = React.useState(false)
-  const [pendingWrite, setPendingWrite] = React.useState<(() => void) | null>(null)
-  const fileInput = React.useRef<HTMLInputElement>(null)
-  /** The user is typing a path: a listing arriving meanwhile must not overwrite it. */
-  const typingRef = React.useRef(false)
 
   const query = React.useMemo(() => targetQuery(target).toString(), [target])
-  const path = listing?.path ?? normalizePath(initialPath)
+  const { listing, error, loading, path, pathInput, typePath, navigate, reload } = useDirectoryListing(query, initialPath)
+  const writes = useWriteGuard(writeWarning)
+  const { guardWrite } = writes
+  const uploads = useUploads({
+    query,
+    path,
+    listing,
+    canWrite,
+    uploadMaxBytes: limits.uploadMaxBytes,
+    guardWrite,
+    reload,
+  })
+  const { dragging, handlers: dropHandlers } = useFileDrop(canWrite, uploads.startUpload)
 
-  // Each navigation is a request; the effect below fetches it (and aborts the previous one).
-  const [request, setRequest] = React.useState({ path: normalizePath(initialPath), keepOnError: false, n: 0 })
-
-  React.useEffect(() => {
-    const controller = new AbortController()
-    const { path: next, keepOnError } = request
-    const fail = (message: string) => (keepOnError ? toast.error(message) : setError(message))
-    fetch(`/api/files/list?${query}&path=${encodeURIComponent(next)}`, { cache: "no-store", signal: controller.signal })
-      .then(async (res) => {
-        if (res.status === 401) return router.replace("/login")
-        if (!res.ok) return fail((await errorOf(res, listFailed)).message)
-        const data = (await res.json()) as Listing
-        setListing(data)
-        if (!typingRef.current) setPathInput(data.path)
-        setError(null)
-      })
-      .catch((err: Error) => {
-        if (err.name !== "AbortError") fail(listFailed)
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false)
-      })
-    return () => controller.abort()
-  }, [request, query, router, listFailed])
-
-  const navigate = (next: string) => {
-    typingRef.current = false
-    setLoading(true)
-    setRequest((r) => ({ path: next, keepOnError: listing !== null, n: r.n + 1 }))
-  }
-  const reload = () => navigate(path)
-
-  /** Runs a change, asking once to confirm `writeWarning` first. */
-  const guardWrite = (fn: () => void) => {
-    if (writeWarning && !warnAck) setPendingWrite(() => fn)
-    else fn()
-  }
-
-  const linkPath = (e: FileEntry) => {
-    if (e.type !== "symlink" || !e.linkTarget) return null
-    // In a volume, absolute links point into whatever container mounts it: not followable.
-    if (target.kind === "volume" && e.linkTarget.startsWith("/")) return null
-    return resolveLinkTarget(path, e.linkTarget)
-  }
-
+  const linkPath = (e: FileEntry) => followableLink(target, path, e)
   const downloadUrl = (p: string) => `/api/files/download?${query}&path=${encodeURIComponent(p)}`
-
-  async function uploadFiles(files: File[], overwrite: Set<string>) {
-    let done = 0
-    for (const file of files) {
-      if (file.size > limits.uploadMaxBytes) {
-        toast.error(format(text.uploadTooLarge, { name: file.name, limit: i18n.formatBytes(limits.uploadMaxBytes) }))
-        continue
-      }
-      const params = new URLSearchParams(query)
-      params.set("path", path)
-      params.set("name", file.name)
-      if (overwrite.has(file.name)) params.set("overwrite", "1")
-      if (environmentId !== undefined) params.set("env", String(environmentId))
-      setUploading(`${file.name} (0%)`)
-      const res = await putFile(
-        `/api/uploads/files?${params}`,
-        file,
-        (f) => setUploading(`${file.name} (${Math.round(f * 100)}%)`),
-        text.errors.uploadConnection
-      )
-      if (res.ok) done++
-      else toast.error(`${file.name}: ${res.body.error ?? format(text.uploadFailedStatus, { status: res.status })}`)
-    }
-    setUploading(null)
-    if (done) {
-      toast.success(
-        done === 1 && files.length === 1 ? format(text.uploadedName, { name: files[0].name }) : i18n.plural(text.uploadedCount, done)
-      )
-    }
-    reload()
-  }
-
-  function startUpload(list: FileList | File[] | null) {
-    const files = [...(list ?? [])]
-    if (!files.length || !canWrite) return
-    guardWrite(() => {
-      const names = new Set(listing?.entries.map((e) => e.name))
-      const existing = files.filter((f) => names.has(f.name)).map((f) => f.name)
-      if (existing.length) setConflicts({ files, existing })
-      else void uploadFiles(files, new Set())
+  /** Runs a Server Action on the folder shown; reloads it when that worked. */
+  const thenReload = (promise: Promise<ActionState>) =>
+    promise.then((res) => {
+      if (res.ok) reload()
+      return res
     })
-  }
-
-  const segments = pathSegments(path)
-  const busy = loading || uploading !== null
 
   return (
-    <Card
-      data-testid="file-browser"
-      className={cn(dragging && "ring-2 ring-primary")}
-      onDragOver={(e) => {
-        if (!canWrite || !e.dataTransfer.types.includes("Files")) return
-        e.preventDefault()
-        setDragging(true)
-      }}
-      onDragLeave={(e) => {
-        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
-        setDragging(false)
-      }}
-      onDrop={(e) => {
-        if (!canWrite) return
-        e.preventDefault()
-        setDragging(false)
-        startUpload(e.dataTransfer.files)
-      }}
-    >
+    <Card data-testid="file-browser" className={cn(dragging && "ring-2 ring-primary")} {...dropHandlers}>
       <CardHeader>
         <CardTitle>{text.title}</CardTitle>
         <CardDescription>{canWrite ? text.descriptionWrite : text.descriptionRead}</CardDescription>
         <CardAction className="flex flex-wrap items-center gap-2">
-          <Button size="icon-sm" variant="outline" onClick={reload} disabled={loading} aria-label={text.refresh}>
-            <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
-          </Button>
-          <Button size="sm" variant="outline" asChild>
-            <a href={downloadUrl(path)} download aria-label={text.downloadFolderLabel}>
-              <DownloadIcon data-icon="inline-start" />
-              {text.downloadFolder}
-            </a>
-          </Button>
-          {canWrite ? (
-            <>
-              <Button size="sm" variant="outline" onClick={() => guardWrite(() => setNewFolderOpen(true))} disabled={busy}>
-                <FolderPlusIcon data-icon="inline-start" />
-                {text.newFolder}
-              </Button>
-              <Button size="sm" onClick={() => fileInput.current?.click()} disabled={busy}>
-                <UploadIcon data-icon="inline-start" />
-                {t.common.actions.upload}
-              </Button>
-              <input
-                ref={fileInput}
-                type="file"
-                multiple
-                className="hidden"
-                aria-label={text.filesToUpload}
-                onChange={(e) => {
-                  startUpload(e.currentTarget.files)
-                  e.currentTarget.value = ""
-                }}
-              />
-            </>
-          ) : null}
+          <Toolbar
+            canWrite={canWrite}
+            loading={loading}
+            busy={loading || uploads.uploading !== null}
+            folderDownloadUrl={downloadUrl(path)}
+            onReload={reload}
+            onNewFolder={() => guardWrite(() => setNewFolderOpen(true))}
+            onUpload={uploads.startUpload}
+          />
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <nav aria-label={text.path} className="flex min-w-0 flex-wrap items-center gap-1 text-sm">
-            <Button variant="ghost" size="xs" onClick={() => navigate("/")} aria-label={format(text.root, { name: rootLabel })}>
-              <HardDriveIcon data-icon="inline-start" />
-              {rootLabel}
-            </Button>
-            {segments.map((s, i) => (
-              <React.Fragment key={s.path}>
-                <span className="text-muted-foreground">/</span>
-                {i === segments.length - 1 ? (
-                  <span className="px-1 font-medium" aria-current="page">
-                    {s.name}
-                  </span>
-                ) : (
-                  <Button variant="ghost" size="xs" onClick={() => navigate(s.path)}>
-                    {s.name}
-                  </Button>
-                )}
-              </React.Fragment>
-            ))}
-          </nav>
-          <form
-            className="ml-auto flex items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              try {
-                navigate(normalizePath(pathInput))
-              } catch (err) {
-                toast.error((err as Error).message)
-              }
-            }}
-          >
-            <label htmlFor={`${inputId}-path`} className="sr-only">
-              {text.goToPath}
-            </label>
-            <Input
-              id={`${inputId}-path`}
-              value={pathInput}
-              onChange={(e) => {
-                typingRef.current = true
-                setPathInput(e.target.value)
-              }}
-              className="h-7 w-56 font-mono text-xs"
-            />
-            <Button size="sm" variant="outline" type="submit">
-              {text.go}
-            </Button>
-          </form>
-        </div>
-
-        {listing?.source === "archive" ? (
-          <p className="text-xs text-muted-foreground" data-testid="files-archive-note">
-            {text.archiveNote}
-          </p>
-        ) : null}
-        {listing?.truncated ? (
-          <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-            <TriangleAlertIcon className="size-3.5" />
-            {listing.truncated}
-          </p>
-        ) : null}
-        {canWrite && deleteBlocker ? (
-          <p className="text-xs text-muted-foreground" data-testid="files-delete-blocker">
-            {format(text.deleteUnavailable, { reason: deleteBlocker })}
-          </p>
-        ) : null}
-        {uploading ? (
-          <p className="text-sm" role="status">
-            {format(text.uploading, { name: uploading })}
-          </p>
-        ) : null}
+        <PathBar rootLabel={rootLabel} path={path} pathInput={pathInput} onPathInput={typePath} navigate={navigate} />
+        <ListingNotes listing={listing} deleteBlocker={canWrite ? deleteBlocker : null} uploading={uploads.uploading} />
 
         {error ? (
           <p className="text-sm text-destructive" role="alert">
@@ -374,74 +105,25 @@ export function FileBrowser({
         ) : !listing ? (
           <p className="text-sm text-muted-foreground">{t.common.status.loading}</p>
         ) : (
-          <div className="rounded-lg border">
-            <Table aria-label={text.title}>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{text.columns.name}</TableHead>
-                  <TableHead>{text.columns.type}</TableHead>
-                  <TableHead className="text-right">{text.columns.size}</TableHead>
-                  <TableHead>{text.columns.mode}</TableHead>
-                  <TableHead>{text.columns.owner}</TableHead>
-                  <TableHead>{text.columns.modified}</TableHead>
-                  <TableHead className="w-0">
-                    <span className="sr-only">{text.columns.actions}</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {path !== "/" ? (
-                  <TableRow>
-                    <TableCell colSpan={7}>
-                      <Button variant="ghost" size="xs" onClick={() => navigate(parentPath(path))} aria-label={text.parentFolder}>
-                        <ArrowUpIcon data-icon="inline-start" />
-                        ..
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-                {listing.entries.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground">
-                      {text.emptyFolder}
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-                {listing.entries.map((e) => (
-                  <EntryRow
-                    key={e.name}
-                    entry={e}
-                    path={joinPath(path, e.name)}
-                    linkPath={linkPath(e)}
-                    canWrite={canWrite}
-                    deleteBlocker={deleteBlocker ?? null}
-                    downloadUrl={downloadUrl}
-                    onOpen={navigate}
-                    onEdit={() => setEditing(e)}
-                    onDelete={() =>
-                      deletePathAction(target, joinPath(path, e.name), environmentId).then((res) => {
-                        if (res.ok) reload()
-                        return res
-                      })
-                    }
-                    guardWrite={guardWrite}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <EntriesTable
+            listing={listing}
+            path={path}
+            linkPath={linkPath}
+            canWrite={canWrite}
+            deleteBlocker={deleteBlocker ?? null}
+            downloadUrl={downloadUrl}
+            onOpen={navigate}
+            onEdit={setEditing}
+            onDelete={(e) => thenReload(deletePathAction(target, joinPath(path, e.name), environmentId))}
+            guardWrite={guardWrite}
+          />
         )}
       </CardContent>
 
       <NewFolderDialog
         open={newFolderOpen}
         onOpenChange={setNewFolderOpen}
-        onCreate={(name) =>
-          createFolderAction(target, path, name, environmentId).then((res) => {
-            if (res.ok) reload()
-            return res
-          })
-        }
+        onCreate={(name) => thenReload(createFolderAction(target, path, name, environmentId))}
       />
 
       {editing ? (
@@ -461,383 +143,181 @@ export function FileBrowser({
         />
       ) : null}
 
-      <AlertDialog open={conflicts !== null} onOpenChange={(o) => !o && setConflicts(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{text.replaceTitle}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {conflicts?.existing.length === 1
-                ? format(text.existsOne, { name: conflicts.existing[0] })
-                : format(text.existsMany, { count: String(conflicts?.existing.length), names: String(conflicts?.existing.join(", ")) })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t.common.actions.cancel}</AlertDialogCancel>
-            <Button
-              variant="outline"
-              onClick={() => {
-                const c = conflicts!
-                setConflicts(null)
-                const skip = new Set(c.existing)
-                const rest = c.files.filter((f) => !skip.has(f.name))
-                if (rest.length) void uploadFiles(rest, new Set())
-              }}
-            >
-              {text.skipExisting}
-            </Button>
-            <AlertDialogAction
-              onClick={() => {
-                const c = conflicts!
-                setConflicts(null)
-                void uploadFiles(c.files, new Set(c.existing))
-              }}
-            >
-              {text.replace}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={pendingWrite !== null} onOpenChange={(o) => !o && setPendingWrite(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{text.inUseTitle}</AlertDialogTitle>
-            <AlertDialogDescription>{writeWarning}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t.common.actions.cancel}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                const fn = pendingWrite
-                setPendingWrite(null)
-                setWarnAck(true)
-                fn?.()
-              }}
-            >
-              {t.common.actions.continue}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <UploadConflictDialog
+        conflicts={uploads.conflicts}
+        onSkip={uploads.skipExisting}
+        onReplace={uploads.replaceExisting}
+        onDismiss={uploads.dismissConflicts}
+      />
+      <WriteWarningDialog open={writes.pending} warning={writeWarning} onContinue={writes.confirm} onCancel={writes.cancel} />
     </Card>
   )
 }
 
-function EntryRow({
-  entry: e,
-  path,
-  linkPath,
+/** Refresh, download the folder, and for managers: new folder and upload. */
+function Toolbar({
   canWrite,
-  deleteBlocker,
-  downloadUrl,
-  onOpen,
-  onEdit,
-  onDelete,
-  guardWrite,
+  loading,
+  busy,
+  folderDownloadUrl,
+  onReload,
+  onNewFolder,
+  onUpload,
 }: {
-  entry: FileEntry
-  path: string
-  linkPath: string | null
   canWrite: boolean
-  deleteBlocker: string | null
-  downloadUrl: (path: string) => string
-  onOpen: (path: string) => void
-  onEdit: () => void
-  onDelete: () => Promise<ActionState>
-  guardWrite: (fn: () => void) => void
-}) {
-  const i18n = useI18n()
-  const { t, format } = i18n
-  const text = t.files
-  const [confirmOpen, setConfirmOpen] = React.useState(false)
-  const Icon = e.type === "dir" ? FolderIcon : e.type === "symlink" ? FileSymlinkIcon : FileIcon
-  const openable = e.type === "dir" || (e.type === "symlink" && linkPath !== null)
-  const fileLike = e.type === "file" || (e.type === "symlink" && linkPath !== null)
-  const readPath = e.type === "symlink" ? linkPath : path
-  const typeLabel =
-    e.type === "other"
-      ? (e.kind ?? text.types.other)
-      : e.kind === "hardlink"
-        ? text.types.hardlink
-        : e.type === "dir"
-          ? text.types.folder
-          : text.types[e.type]
-
-  return (
-    <TableRow data-testid={`file-row-${e.name}`}>
-      <TableCell className="max-w-96">
-        <div className="flex min-w-0 items-center gap-2">
-          <Icon className={cn("size-4 shrink-0", e.type === "dir" ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground")} />
-          {openable ? (
-            <button
-              type="button"
-              className="truncate text-left font-medium underline-offset-4 hover:underline"
-              onClick={() => onOpen(e.type === "dir" ? path : linkPath!)}
-              aria-label={format(text.open, { name: e.name })}
-            >
-              {e.name}
-            </button>
-          ) : (
-            <span className="truncate">{e.name}</span>
-          )}
-          {e.linkTarget && e.type === "symlink" ? (
-            <Mono className="truncate text-muted-foreground" title={e.linkTarget}>
-              → {e.linkTarget}
-            </Mono>
-          ) : null}
-        </div>
-      </TableCell>
-      <TableCell className="text-muted-foreground">{typeLabel}</TableCell>
-      <TableCell className="text-right tabular-nums">{e.type === "file" ? i18n.formatBytes(e.size) : "—"}</TableCell>
-      <TableCell>
-        <Mono>{formatMode(e)}</Mono>
-      </TableCell>
-      <TableCell>
-        <Mono>{owner(e)}</Mono>
-      </TableCell>
-      <TableCell className="whitespace-nowrap text-muted-foreground">{formatTime(e.mtime, i18n.formatDate)}</TableCell>
-      <TableCell>
-        <div className="flex items-center justify-end gap-1">
-          {fileLike ? (
-            <Button variant="ghost" size="icon-sm" onClick={onEdit} aria-label={format(canWrite ? text.edit : text.view, { name: e.name })}>
-              <FileTextIcon />
-            </Button>
-          ) : null}
-          {readPath && e.type !== "other" ? (
-            <Button variant="ghost" size="icon-sm" asChild>
-              <a href={downloadUrl(readPath)} download aria-label={format(text.download, { name: e.name })}>
-                <DownloadIcon />
-              </a>
-            </Button>
-          ) : null}
-          {canWrite ? (
-            <>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground"
-                disabled={deleteBlocker !== null}
-                title={deleteBlocker ?? undefined}
-                aria-label={format(text.delete, { name: e.name })}
-                onClick={() => guardWrite(() => setConfirmOpen(true))}
-              >
-                <Trash2Icon />
-              </Button>
-              <ConfirmAction
-                open={confirmOpen}
-                onOpenChange={setConfirmOpen}
-                title={format(text.deleteTitle, { name: e.name })}
-                description={format(e.type === "dir" ? text.deleteFolder : text.deleteFile, { path })}
-                confirmLabel={t.common.actions.delete}
-                onConfirm={onDelete}
-              />
-            </>
-          ) : null}
-        </div>
-      </TableCell>
-    </TableRow>
-  )
-}
-
-function NewFolderDialog({
-  open,
-  onOpenChange,
-  onCreate,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onCreate: (name: string) => Promise<ActionState>
+  loading: boolean
+  /** Loading or uploading: no new folder or upload meanwhile. */
+  busy: boolean
+  folderDownloadUrl: string
+  onReload: () => void
+  onNewFolder: () => void
+  onUpload: (files: FileList | null) => void
 }) {
   const { t } = useI18n()
-  const id = React.useId()
-  const [name, setName] = React.useState("")
-  const [pending, run] = useRunAction()
+  const text = t.files
+  const fileInput = React.useRef<HTMLInputElement>(null)
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (pending) return
-        onOpenChange(o)
-        if (o) setName("")
-      }}
-    >
-      <DialogContent>
-        <form
-          className="grid gap-4"
-          onSubmit={async (e) => {
-            e.preventDefault()
-            if (await run(() => onCreate(name.trim()))) {
-              onOpenChange(false)
-              setName("")
-            }
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>{t.files.newFolder}</DialogTitle>
-            <DialogDescription>{t.files.newFolderDescription}</DialogDescription>
-          </DialogHeader>
-          <Field>
-            <FieldLabel htmlFor={`${id}-name`}>{t.files.folderName}</FieldLabel>
-            <Input id={`${id}-name`} value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
-          </Field>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-              {t.common.actions.cancel}
-            </Button>
-            <Button type="submit" disabled={pending || !name.trim()}>
-              {pending ? t.files.creating : t.common.actions.create}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Button size="icon-sm" variant="outline" onClick={onReload} disabled={loading} aria-label={text.refresh}>
+        <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
+      </Button>
+      <Button size="sm" variant="outline" asChild>
+        <a href={folderDownloadUrl} download aria-label={text.downloadFolderLabel}>
+          <DownloadIcon data-icon="inline-start" />
+          {text.downloadFolder}
+        </a>
+      </Button>
+      {canWrite ? (
+        <>
+          <Button size="sm" variant="outline" onClick={onNewFolder} disabled={busy}>
+            <FolderPlusIcon data-icon="inline-start" />
+            {text.newFolder}
+          </Button>
+          <Button size="sm" onClick={() => fileInput.current?.click()} disabled={busy}>
+            <UploadIcon data-icon="inline-start" />
+            {t.common.actions.upload}
+          </Button>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            className="hidden"
+            aria-label={text.filesToUpload}
+            onChange={(e) => {
+              onUpload(e.currentTarget.files)
+              e.currentTarget.value = ""
+            }}
+          />
+        </>
+      ) : null}
+    </>
   )
 }
 
-type ReadResult =
-  | { ok: true; content: string; size: number; mode: number; limit: number }
-  | { ok: false; reason: "binary" | "too-large" | "not-a-file"; size: number; limit: number }
-
-function EditFileDialog({
-  query,
-  dir,
-  entry,
-  linkPath,
-  canWrite,
-  limit,
-  guardWrite,
-  onClose,
+/** Breadcrumb of the folder shown, and a box to type a path. */
+function PathBar({
+  rootLabel,
+  path,
+  pathInput,
+  onPathInput,
+  navigate,
 }: {
-  query: string
-  dir: string
-  entry: FileEntry
-  linkPath: string | null
-  canWrite: boolean
-  limit: number
-  guardWrite: (fn: () => void) => void
-  onClose: (saved: boolean) => void
+  rootLabel: string
+  path: string
+  pathInput: string
+  onPathInput: (value: string) => void
+  navigate: (path: string) => void
 }) {
-  const i18n = useI18n()
-  const { t, format } = i18n
+  const { t, format } = useI18n()
   const text = t.files
-  const openFailed = text.errors.openFailed
-  const id = React.useId()
-  const router = useRouter()
-  const environmentId = useEnvironmentId()
-  const filePath = entry.type === "symlink" && linkPath ? linkPath : joinPath(dir, entry.name)
-  const [file, setFile] = React.useState<ReadResult | null>(null)
-  const [error, setError] = React.useState<string | null>(null)
-  const [content, setContent] = React.useState("")
-  const [saving, setSaving] = React.useState(false)
-
-  React.useEffect(() => {
-    let cancelled = false
-    fetch(`/api/files/read?${query}&path=${encodeURIComponent(filePath)}`, { cache: "no-store" })
-      .then(async (res) => {
-        if (cancelled) return
-        if (res.status === 401) return router.replace("/login")
-        if (!res.ok) return setError((await errorOf(res, openFailed)).message)
-        const data = (await res.json()) as ReadResult
-        if (cancelled) return
-        setFile(data)
-        if (data.ok) setContent(data.content)
-      })
-      .catch(() => !cancelled && setError(openFailed))
-    return () => {
-      cancelled = true
-    }
-  }, [query, filePath, router, openFailed])
-
-  const bytes = React.useMemo(() => new TextEncoder().encode(content).length, [content])
-  const dirty = file?.ok === true && content !== file.content
-  const tooBig = bytes > limit
-
-  async function save() {
-    // Save where the file really is: uploads never replace a symbolic link.
-    const target = parentPath(filePath)
-    const name = filePath.slice(target === "/" ? 1 : target.length + 1)
-    const params = new URLSearchParams(query)
-    params.set("path", target)
-    params.set("name", name)
-    params.set("mode", "edit")
-    params.set("overwrite", "1")
-    if (environmentId !== undefined) params.set("env", String(environmentId))
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/uploads/files?${params}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/octet-stream" },
-        body: new Blob([content]),
-      })
-      if (!res.ok) {
-        toast.error((await errorOf(res, text.errors.saveFailed)).message)
-        return
-      }
-      toast.success(format(text.saved, { name }))
-      onClose(true)
-    } catch {
-      toast.error(text.errors.saveConnection)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const reason =
-    file && !file.ok
-      ? file.reason === "binary"
-        ? text.binary
-        : file.reason === "too-large"
-          ? format(text.tooLarge, { size: i18n.formatBytes(file.size), limit: i18n.formatBytes(file.limit) })
-          : text.notAFile
-      : null
-
+  const inputId = React.useId()
+  const segments = pathSegments(path)
   return (
-    <Dialog open onOpenChange={(o) => !o && !saving && onClose(false)}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle className="truncate">{filePath}</DialogTitle>
-          <DialogDescription>
-            {canWrite ? format(text.editHelp, { limit: i18n.formatBytes(limit) }) : text.readOnly}
-          </DialogDescription>
-        </DialogHeader>
-        {error ? (
-          <p className="text-sm text-destructive" role="alert">
-            {error}
-          </p>
-        ) : !file ? (
-          <p className="text-sm text-muted-foreground">{t.common.status.loading}</p>
-        ) : reason ? (
-          <p className="text-sm text-muted-foreground" role="status">
-            {reason}
-          </p>
-        ) : (
-          <Field>
-            <FieldLabel htmlFor={`${id}-content`}>{text.fileContent}</FieldLabel>
-            <Textarea
-              id={`${id}-content`}
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              readOnly={!canWrite}
-              spellCheck={false}
-              className="h-[24rem] resize-y font-mono text-xs"
-            />
-            <FieldDescription className={tooBig ? "text-destructive" : undefined}>
-              {i18n.formatBytes(bytes)}
-              {tooBig ? format(text.overLimit, { limit: i18n.formatBytes(limit) }) : ""}
-            </FieldDescription>
-          </Field>
-        )}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onClose(false)} disabled={saving}>
-            {t.common.actions.close}
-          </Button>
-          {canWrite && file?.ok ? (
-            <Button onClick={() => guardWrite(() => void save())} disabled={saving || !dirty || tooBig}>
-              {saving ? t.common.status.saving : t.common.actions.save}
-            </Button>
-          ) : null}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <div className="flex flex-wrap items-center gap-2">
+      <nav aria-label={text.path} className="flex min-w-0 flex-wrap items-center gap-1 text-sm">
+        <Button variant="ghost" size="xs" onClick={() => navigate("/")} aria-label={format(text.root, { name: rootLabel })}>
+          <HardDriveIcon data-icon="inline-start" />
+          {rootLabel}
+        </Button>
+        {segments.map((s, i) => (
+          <React.Fragment key={s.path}>
+            <span className="text-muted-foreground">/</span>
+            {i === segments.length - 1 ? (
+              <span className="px-1 font-medium" aria-current="page">
+                {s.name}
+              </span>
+            ) : (
+              <Button variant="ghost" size="xs" onClick={() => navigate(s.path)}>
+                {s.name}
+              </Button>
+            )}
+          </React.Fragment>
+        ))}
+      </nav>
+      <form
+        className="ml-auto flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          try {
+            navigate(normalizePath(pathInput))
+          } catch (err) {
+            toast.error((err as Error).message)
+          }
+        }}
+      >
+        <label htmlFor={`${inputId}-path`} className="sr-only">
+          {text.goToPath}
+        </label>
+        <Input
+          id={`${inputId}-path`}
+          value={pathInput}
+          onChange={(e) => onPathInput(e.target.value)}
+          className="h-7 w-56 font-mono text-xs"
+        />
+        <Button size="sm" variant="outline" type="submit">
+          {text.go}
+        </Button>
+      </form>
+    </div>
+  )
+}
+
+/** Notes above the table: archive listing, truncation, why deleting is off, upload progress. */
+function ListingNotes({
+  listing,
+  deleteBlocker,
+  uploading,
+}: {
+  listing: Listing | null
+  /** Shown to managers only (null otherwise). */
+  deleteBlocker: string | null | undefined
+  uploading: string | null
+}) {
+  const { t, format } = useI18n()
+  const text = t.files
+  return (
+    <>
+      {listing?.source === "archive" ? (
+        <p className="text-xs text-muted-foreground" data-testid="files-archive-note">
+          {text.archiveNote}
+        </p>
+      ) : null}
+      {listing?.truncated ? (
+        <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+          <TriangleAlertIcon className="size-3.5" />
+          {listing.truncated}
+        </p>
+      ) : null}
+      {deleteBlocker ? (
+        <p className="text-xs text-muted-foreground" data-testid="files-delete-blocker">
+          {format(text.deleteUnavailable, { reason: deleteBlocker })}
+        </p>
+      ) : null}
+      {uploading ? (
+        <p className="text-sm" role="status">
+          {format(text.uploading, { name: uploading })}
+        </p>
+      ) : null}
+    </>
   )
 }
