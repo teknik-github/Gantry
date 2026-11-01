@@ -3,7 +3,7 @@ import "server-only"
 import type http from "node:http"
 import { Readable } from "node:stream"
 
-import { connectionError, dockerJson, dockerRequest, DockerError, type DockerTarget } from "@/lib/server/docker/client"
+import { connectionError, dockerErrorMessage, dockerJson, dockerRequest, DockerError, type DockerTarget } from "@/lib/server/docker/client"
 
 /**
  * Streaming access to the Docker API, for responses and request bodies that
@@ -41,10 +41,7 @@ async function errorFrom(res: http.IncomingMessage): Promise<DockerError> {
     if (size > 64 * 1024) break
     chunks.push(c)
   }
-  let message = Buffer.concat(chunks).toString("utf8").trim()
-  try {
-    message = JSON.parse(message).message ?? message
-  } catch {}
+  const message = dockerErrorMessage(Buffer.concat(chunks).toString("utf8"))
   return new DockerError(message || `Docker API error ${res.statusCode}`, res.statusCode ?? 502)
 }
 

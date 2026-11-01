@@ -111,6 +111,24 @@ function failedRequest(options: http.RequestOptions, err: Error): http.ClientReq
   })
 }
 
+/**
+ * The message of a Docker error response: Docker answers {"message": "..."};
+ * anything else (plain text, an HTML page from a proxy in front of the
+ * daemon) is shown as it is.
+ */
+export function dockerErrorMessage(body: string): string {
+  const text = body.trim()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    // Not JSON: the text itself is the message.
+    return text
+  }
+  const message = parsed && typeof parsed === "object" ? (parsed as { message?: unknown }).message : undefined
+  return typeof message === "string" ? message : text
+}
+
 /** Maps a socket/TLS error to a DockerError without leaking anything sensitive. */
 export function connectionError(err: NodeJS.ErrnoException): DockerError {
   if (err instanceof DockerError) return err
@@ -170,10 +188,7 @@ export function dockerRaw(
           const body = Buffer.concat(chunks)
           const status = res.statusCode ?? 0
           if (status >= 400) {
-            let message = body.toString("utf8").trim()
-            try {
-              message = JSON.parse(message).message ?? message
-            } catch {}
+            const message = dockerErrorMessage(body.toString("utf8"))
             reject(new DockerError(message || `Docker API error ${status}`, status))
             return
           }

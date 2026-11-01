@@ -6,6 +6,7 @@ import { splitImageRef } from "@/lib/server/docker/api"
 import {
   connectionError,
   demuxLogs,
+  dockerErrorMessage,
   dockerJson,
   dockerRaw,
   dockerRequest,
@@ -193,10 +194,7 @@ async function copyImage(target: DockerTarget, imageId: string, containerId: str
         res.on("data", (c: Buffer) => (body += c.toString("utf8")))
         res.on("end", () => {
           if ((res.statusCode ?? 500) < 400) return resolve()
-          let message = body.trim()
-          try {
-            message = JSON.parse(message).message ?? message
-          } catch {}
+          const message = dockerErrorMessage(body)
           reject(new DockerError(`Copying the image into the scanner failed: ${message}`, res.statusCode ?? 500))
         })
       }
