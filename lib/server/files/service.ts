@@ -278,7 +278,16 @@ export async function listFiles(api: DockerApi, target: FileTarget, dir: string,
 
 // ---- Reading ----------------------------------------------------------------
 
-type OpenedFile = { entry: TarEntry; body: AsyncGenerator<Buffer> }
+type OpenedFile = {
+  entry: TarEntry
+  body: AsyncGenerator<Buffer>
+  /**
+   * Drops the response without reading the body. (Returning the generator
+   * before it started wouldn't run its cleanup: the response stayed open
+   * until its idle timeout, and Docker held the container's archive lock.)
+   */
+  close: () => void
+}
 
 /**
  * Reads the first entry of an archive response: resolves once its header is
@@ -328,7 +337,7 @@ async function openSingleFile(res: http.IncomingMessage): Promise<OpenedFile> {
       res.destroy()
     }
   }
-  return { entry: first, body: body() }
+  return { entry: first, body: body(), close: () => res.destroy() }
 }
 
 export type Download = {
@@ -369,9 +378,9 @@ async function openDownloadIn(target: DockerTarget, containerId: string, inner: 
     const name = baseName(shown) || "root"
     return { filename: `${name}.tar`, kind: "tar", body: res as AsyncIterable<Buffer> }
   }
-  const { entry, body } = await openSingleFile(res)
+  const { entry, body, close } = await openSingleFile(res)
   if (entry.type !== "file") {
-    await body.return(undefined)
+    close()
     throw new FilesError("Only regular files and folders can be downloaded", 400)
   }
   return { filename: baseName(shown) || "file", kind: "file", size: entry.size, body }
@@ -406,9 +415,9 @@ export async function readTextFile(api: DockerApi, target: FileTarget, path: str
     if (!isRegular(stat)) return { ok: false, reason: "not-a-file", size: stat.size }
     if (stat.size > editMaxBytes) return { ok: false, reason: "too-large", size: stat.size }
     const res = await dockerStream(t, "GET", `/containers/${containerId}/archive`, { query: { path: resolved } })
-    const { entry, body } = await openSingleFile(res)
+    const { entry, body, close } = await openSingleFile(res)
     if (entry.size > editMaxBytes) {
-      await body.return(undefined)
+      close()
       return { ok: false, reason: "too-large", size: entry.size }
     }
     const chunks: Buffer[] = []
@@ -433,8 +442,8 @@ export async function readTextFile(api: DockerApi, target: FileTarget, path: str
 /** Owner and mode of an existing regular file (first header of its archive), to keep them on overwrite. */
 async function existingOwner(target: DockerTarget, containerId: string, path: string) {
   const res = await dockerStream(target, "GET", `/containers/${containerId}/archive`, { query: { path } })
-  const { entry, body } = await openSingleFile(res)
-  await body.return(undefined)
+  const { entry, close } = await openSingleFile(res)
+  close()
   return { uid: entry.uid, gid: entry.gid, mode: entry.mode }
 }
 
