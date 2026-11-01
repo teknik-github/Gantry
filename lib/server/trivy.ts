@@ -1,7 +1,6 @@
 import "server-only"
 
-import type http from "node:http"
-
+import { JsonLineParser } from "@/lib/image-build"
 import { registryAuthHeader } from "@/lib/registry"
 import { splitImageRef } from "@/lib/server/docker/api"
 import {
@@ -13,6 +12,7 @@ import {
   DockerError,
   type DockerTarget,
 } from "@/lib/server/docker/client"
+import { dockerStream } from "@/lib/server/docker/stream"
 import { credentialsForImage } from "@/lib/server/registries"
 import { directoryTar } from "@/lib/server/tar"
 
@@ -88,32 +88,6 @@ function idSeg(value: string) {
   return enc(value)
 }
 
-/** A streaming request: resolves with the response once headers arrive (errors read the body). */
-function openStream(
-  target: DockerTarget,
-  method: string,
-  path: string,
-  opts: { headers?: Record<string, string>; idleMs: number }
-): Promise<http.IncomingMessage> {
-  return new Promise((resolve, reject) => {
-    const req = dockerRequest(target, { method, path, headers: opts.headers, timeout: opts.idleMs }, (res) => {
-      if ((res.statusCode ?? 500) < 400) return resolve(res)
-      let body = ""
-      res.on("data", (c: Buffer) => (body += c.toString("utf8")))
-      res.on("end", () => {
-        let message = body.trim()
-        try {
-          message = JSON.parse(message).message ?? message
-        } catch {}
-        reject(new DockerError(message || `Docker API error ${res.statusCode}`, res.statusCode ?? 500))
-      })
-    })
-    req.on("timeout", () => req.destroy(new DockerError("Docker stopped responding", 504)))
-    req.on("error", (err: NodeJS.ErrnoException) => reject(connectionError(err)))
-    req.end()
-  })
-}
-
 /** Pulls `reference` unless present, reporting progress. */
 export async function ensureScannerImage(target: DockerTarget, reference: string, phase: Phase = () => {}) {
   try {
@@ -131,35 +105,32 @@ export async function ensureScannerImage(target: DockerTarget, reference: string
   phase("Pulling scanner image")
   const { image, tag } = splitImageRef(reference)
   const cred = await credentialsForImage(reference)
-  const query = new URLSearchParams({ fromImage: image, ...(tag ? { tag } : {}) })
-  const res = await openStream(target, "POST", `/images/create?${query}`, {
+  const res = await dockerStream(target, "POST", "/images/create", {
+    query: { fromImage: image, tag: tag || undefined },
     headers: cred ? { "X-Registry-Auth": registryAuthHeader(cred) } : {},
-    idleMs: 5 * 60_000,
+    idleTimeoutMs: 5 * 60_000,
   }).catch((err: Error) => {
     throw new ScanError(pullFailure(reference, err.message))
   })
   // Progress arrives as JSON lines; per layer: {"id", "status", "progressDetail": {current, total}}.
   const layers = new Map<string, { current: number; total: number }>()
   let error: string | null = null
-  let rest = ""
   let lastShown = 0
+  const take = (value: unknown) => {
+    const msg = value as { id?: string; status?: string; error?: string; progressDetail?: { current?: number; total?: number } }
+    if (msg.error) error = msg.error
+    if (msg.id && msg.status === "Downloading" && msg.progressDetail?.total) {
+      layers.set(msg.id, { current: msg.progressDetail.current ?? 0, total: msg.progressDetail.total })
+    } else if (msg.id && (msg.status === "Download complete" || msg.status === "Pull complete") && layers.has(msg.id)) {
+      const l = layers.get(msg.id)!
+      layers.set(msg.id, { current: l.total, total: l.total })
+    }
+  }
+  const parser = new JsonLineParser()
+  res.setEncoding("utf8")
   await new Promise<void>((resolve, reject) => {
-    res.on("data", (chunk: Buffer) => {
-      const lines = (rest + chunk.toString("utf8")).split("\n")
-      rest = lines.pop() ?? ""
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const msg = JSON.parse(line) as { id?: string; status?: string; error?: string; progressDetail?: { current?: number; total?: number } }
-          if (msg.error) error = msg.error
-          if (msg.id && msg.status === "Downloading" && msg.progressDetail?.total) {
-            layers.set(msg.id, { current: msg.progressDetail.current ?? 0, total: msg.progressDetail.total })
-          } else if (msg.id && (msg.status === "Download complete" || msg.status === "Pull complete") && layers.has(msg.id)) {
-            const l = layers.get(msg.id)!
-            layers.set(msg.id, { current: l.total, total: l.total })
-          }
-        } catch {}
-      }
+    res.on("data", (chunk: string) => {
+      parser.push(chunk).forEach(take)
       const total = [...layers.values()].reduce((s, l) => s + l.total, 0)
       const current = [...layers.values()].reduce((s, l) => s + l.current, 0)
       if (total && Date.now() - lastShown > 500) {
@@ -167,7 +138,10 @@ export async function ensureScannerImage(target: DockerTarget, reference: string
         phase(`Pulling scanner image (${Math.floor((current / total) * 100)}%)`)
       }
     })
-    res.on("end", () => resolve())
+    res.on("end", () => {
+      parser.end().forEach(take)
+      resolve()
+    })
     res.on("error", reject)
   })
   if (error) throw new ScanError(pullFailure(reference, error))
@@ -201,7 +175,7 @@ export function firstTarFile(tar: Buffer): Buffer | null {
 
 /** Copies `docker save` of the image into the (created) container, streaming. Returns the bytes copied. */
 async function copyImage(target: DockerTarget, imageId: string, containerId: string, idleMs: number): Promise<number> {
-  const source = await openStream(target, "GET", `/images/${idSeg(imageId)}/get`, { idleMs })
+  const source = await dockerStream(target, "GET", `/images/${idSeg(imageId)}/get`, { idleTimeoutMs: idleMs })
   let bytes = 0
   source.on("data", (c: Buffer) => (bytes += c.length))
   await new Promise<void>((resolve, reject) => {
