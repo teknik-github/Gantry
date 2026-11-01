@@ -421,6 +421,11 @@ export class JsonLineParser {
   }
 }
 
+/** A line JsonLineParser couldn't parse (or cut off), as opposed to a JSON value. */
+export function isUnparsedLine(value: unknown): value is { raw: string } {
+  return typeof value === "object" && value !== null && Object.keys(value).length === 1 && typeof (value as { raw?: unknown }).raw === "string"
+}
+
 function parseLine(line: string): unknown {
   const text = line.trim()
   if (!text) return undefined

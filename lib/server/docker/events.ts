@@ -1,27 +1,22 @@
 import "server-only"
 
+import { StringDecoder } from "node:string_decoder"
+
+import { isUnparsedLine, JsonLineParser } from "@/lib/image-build"
 import { DOCKER_EVENT_FILTERS, toLiveEvent } from "@/lib/live"
 import { DockerError, dockerRequest, type DockerTarget } from "@/lib/server/docker/client"
 import type { HubSource } from "@/lib/server/event-hub"
 
 /** Splits a byte stream of newline-delimited JSON into parsed values. */
 export function createJsonLineParser(onValue: (value: unknown) => void) {
-  let pending = ""
+  // At most 1 MB without a newline: a peer that never sends one is cut off.
+  const parser = new JsonLineParser(1024 * 1024)
+  const decoder = new StringDecoder("utf8")
   return (chunk: Buffer | string) => {
-    pending += typeof chunk === "string" ? chunk : chunk.toString("utf8")
-    let nl: number
-    while ((nl = pending.indexOf("\n")) !== -1) {
-      const line = pending.slice(0, nl).trim()
-      pending = pending.slice(nl + 1)
-      if (!line) continue
-      try {
-        onValue(JSON.parse(line))
-      } catch {
-        // Not JSON; skip the line rather than kill the stream.
-      }
+    for (const value of parser.push(typeof chunk === "string" ? chunk : decoder.write(chunk))) {
+      // Not JSON (or that runaway line): skip it rather than kill the stream.
+      if (!isUnparsedLine(value)) onValue(value)
     }
-    // Guard against a peer that never sends a newline.
-    if (pending.length > 1024 * 1024) pending = ""
   }
 }
 
