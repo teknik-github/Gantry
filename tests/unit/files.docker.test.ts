@@ -113,6 +113,16 @@ describe.runIf(enabled)("file browser against Docker", () => {
     await expect(listFiles(api, stopped, "/srv/a/x.txt")).rejects.toThrow(/not a folder/)
   }, SLOW)
 
+  it("overwrites a large file at once", async () => {
+    // Larger than socket buffers: reading the old file's owner left its
+    // GET /archive open, and Docker held the PUT until that timed out (60 s).
+    const big = Buffer.alloc(16 * 1024 * 1024, 7)
+    await uploadFile(api, running, { dir: "/tmp", name: "big.bin", size: big.length, body: bytes(big), overwrite: false })
+    const t0 = Date.now()
+    await uploadFile(api, running, { dir: "/tmp", name: "big.bin", size: big.length, body: bytes(big), overwrite: true })
+    expect(Date.now() - t0).toBeLessThan(30_000)
+  }, 120_000)
+
   it("uploads, reads, overwrites (keeping owner and mode) and downloads a file", async () => {
     await uploadFile(api, running, { dir: "/tmp", name: "note.txt", size: 6, body: bytes("first\n"), overwrite: false })
     await expect(
