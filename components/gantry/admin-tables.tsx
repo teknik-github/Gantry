@@ -28,6 +28,7 @@ import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
 import {
   AddAgentDialog,
   AgentAddressCell,
+  AgentEnrollmentProvider,
   AgentStatusBadge,
   AgentTypeCell,
   RotateAgentKeyButton,
@@ -329,18 +330,20 @@ function environmentColumns(users: UserOption[]) {
 export function EnvironmentsTable({ data, users }: { data: EnvironmentRow[]; users: UserOption[] }) {
   const columns = React.useMemo(() => environmentColumns(users), [users])
   return (
-    <DataTable
-      data={data}
-      columns={columns}
-      getRowId={(r) => String(r.id)}
-      emptyMessage="No environments."
-      toolbar={
-        <>
-          <AddAgentDialog />
-          <AddEnvironmentDialog />
-        </>
-      }
-    />
+    <AgentEnrollmentProvider>
+      <DataTable
+        data={data}
+        columns={columns}
+        getRowId={(r) => String(r.id)}
+        emptyMessage="No environments."
+        toolbar={
+          <>
+            <AddAgentDialog />
+            <AddEnvironmentDialog />
+          </>
+        }
+      />
+    </AgentEnrollmentProvider>
   )
 }
 

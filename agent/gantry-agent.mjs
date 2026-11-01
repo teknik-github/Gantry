@@ -428,7 +428,10 @@ export class Session {
   /** A new tunneled connection: only ever to the local Docker socket. */
   open(id) {
     if (id === 0 || this.streams.has(id)) throw new ProtocolError(`bad stream id ${id}`)
-    if (this.streams.size >= this.maxStreams) {
+    // Gantry enforces maxStreams. A stream that ended cleanly can still be
+    // closing here when Gantry already reuses its slot, so this is only a
+    // safety bound with room for that.
+    if (this.streams.size >= this.maxStreams * 2 + 16) {
       this.send(encodeFrame(FrameType.RESET, id, Buffer.from("too many connections through the agent")))
       return
     }

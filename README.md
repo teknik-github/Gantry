@@ -781,8 +781,15 @@ upgrade connections), through any reverse proxy that streams responses:
   tunnel, so large images take longer over slow links.
 - Gantry refuses to stop, remove or recreate the agent's own container through
   the agent (it would cut its own connection), like its own container.
-- Measured on this project's test host (agent and Gantry on the same
-  machine, so this is the tunnel's overhead, not a WAN): MEASUREMENTS.
+- Measured on this project's (heavily loaded, 4-CPU) test host, with the
+  agent and Gantry on the same machine, so this is the tunnel's overhead, not
+  a WAN. Listing 44 containers took about as long through the agent as over
+  the local socket (median 430 vs 420 ms through Gantry's API, dominated by
+  the daemon). A console echo round trip took about 110 ms. Downloading a
+  50 MB file from a container ran at 9–15 MB/s through the agent and
+  15–25 MB/s locally. Uploading a 50 MB archive into a container ran at about
+  20 MB/s through the agent and about 190 MB/s locally: uploads wait for
+  flow-control grants that come back through the agent's POSTs.
 
 ### Roles and permissions
 

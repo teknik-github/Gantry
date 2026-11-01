@@ -120,7 +120,11 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   test.setTimeout(SLOW)
-  if (await dockerAvailable()) await cleanup()
+  if (!(await dockerAvailable())) return
+  // The agent's log helps when something above failed.
+  const logs = await agentLogs().catch(() => "")
+  if (logs) console.log(`[agent log]\n${logs.trim().split("\n").slice(-40).join("\n")}`)
+  await cleanup()
 })
 
 async function signIn(page: Page) {
@@ -134,6 +138,9 @@ async function signIn(page: Page) {
 async function switchEnvironment(page: Page, name: string) {
   await page.locator('[data-sidebar="header"]').getByRole("button").first().click()
   await page.getByRole("menuitem", { name: new RegExp(`^${name}`) }).click()
+  // The switch is a Server Action: wait for it before navigating, or the next
+  // page may still be rendered for the previous environment.
+  await expect(page.locator('[data-sidebar="header"]')).toContainText(name)
 }
 
 const envRow = (page: Page) => page.getByRole("row", { name: new RegExp(ENV) })
@@ -189,9 +196,9 @@ test("containers are listed, created, logged and exec'd into through the agent",
   // Created and started by Gantry, through the tunnel.
   await page.getByRole("button", { name: "Add container" }).click()
   const dialog = page.getByRole("dialog")
-  await dialog.getByLabel("Image").fill("alpine:3")
-  await dialog.getByLabel("Name").fill(RUN)
-  await dialog.getByLabel("Command").fill('sh -c "while true; do date +tick-%s; sleep 1; done"')
+  await dialog.getByLabel("Image", { exact: true }).fill("alpine:3")
+  await dialog.getByLabel("Name", { exact: true }).fill(RUN)
+  await dialog.getByLabel("Command", { exact: true }).fill('sh -c "while true; do date +tick-%s; sleep 1; done"')
   await dialog.getByText("Pull image first").click()
   await dialog.getByRole("button", { name: "Create" }).click()
   await expect(dialog).toBeHidden({ timeout: 60_000 })

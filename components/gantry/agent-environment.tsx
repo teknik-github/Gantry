@@ -312,63 +312,22 @@ function AddAgentForm({ onDone }: { onDone: () => void }) {
   )
 }
 
-/** Row action: confirm, issue a new key (dropping the connected agent), show it once. */
-export function RotateAgentKeyButton({ id, name }: { id: number; name: string }) {
-  const [confirming, setConfirming] = React.useState(false)
-  const [pending, startTransition] = React.useTransition()
+const EnrollmentContext = React.createContext<(enrollment: AgentEnrollment) => void>(() => {})
+
+/**
+ * Shows the key after a rotation. Lives above the table: the action's
+ * refresh re-renders the rows (and may remount their buttons), which must
+ * not drop a key that is only shown once.
+ */
+export function AgentEnrollmentProvider({ children }: { children: React.ReactNode }) {
   const [enrollment, setEnrollment] = React.useState<AgentEnrollment | null>(null)
-
-  const rotate = () =>
-    startTransition(async () => {
-      try {
-        const res = await rotateAgentKey(id)
-        if (res.error || !res.enrollment) {
-          toast.error(res.error ?? "Could not rotate the key")
-          return
-        }
-        toast.success(res.message ?? "Key rotated")
-        setConfirming(false)
-        setEnrollment(res.enrollment)
-      } catch {
-        toast.error("Request failed. Check your connection.")
-      }
-    })
-
   return (
-    <>
-      <AlertDialog open={confirming} onOpenChange={(o) => !pending && setConfirming(o)}>
-        <AlertDialogTrigger asChild>
-          <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Rotate agent key">
-            <KeyRoundIcon />
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Rotate the agent key of {name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              A new key is issued and the current one stops working at once: the connected agent is disconnected
-              until you run it again with the new key.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={pending}
-              onClick={(e) => {
-                e.preventDefault()
-                rotate()
-              }}
-            >
-              {pending ? "Working…" : "Rotate key"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+    <EnrollmentContext.Provider value={setEnrollment}>
+      {children}
       <Dialog open={enrollment !== null} onOpenChange={(o) => !o && setEnrollment(null)}>
         <DialogContent className={DIALOG_CLASS}>
           <DialogHeader>
-            <DialogTitle>New key for {name}</DialogTitle>
+            <DialogTitle>New key for {enrollment?.name}</DialogTitle>
             <DialogDescription>
               Replace the agent on the host: <Mono>docker rm -f gantry-agent</Mono>, then run the command below.
             </DialogDescription>
@@ -381,6 +340,61 @@ export function RotateAgentKeyButton({ id, name }: { id: number; name: string })
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </EnrollmentContext.Provider>
+  )
+}
+
+/** Row action: confirm, issue a new key (dropping the connected agent), show it once. */
+export function RotateAgentKeyButton({ id, name }: { id: number; name: string }) {
+  const [confirming, setConfirming] = React.useState(false)
+  const [pending, startTransition] = React.useTransition()
+  const showEnrollment = React.useContext(EnrollmentContext)
+
+  const rotate = () =>
+    startTransition(async () => {
+      try {
+        const res = await rotateAgentKey(id)
+        if (res.error || !res.enrollment) {
+          toast.error(res.error ?? "Could not rotate the key")
+          return
+        }
+        toast.success(res.message ?? "Key rotated")
+        setConfirming(false)
+        showEnrollment(res.enrollment)
+      } catch {
+        toast.error("Request failed. Check your connection.")
+      }
+    })
+
+  return (
+    <AlertDialog open={confirming} onOpenChange={(o) => !pending && setConfirming(o)}>
+      <AlertDialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Rotate agent key">
+          <KeyRoundIcon />
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Rotate the agent key of {name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            A new key is issued and the current one stops working at once: the connected agent is disconnected until
+            you run it again with the new key.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            disabled={pending}
+            onClick={(e) => {
+              e.preventDefault()
+              rotate()
+            }}
+          >
+            {pending ? "Working…" : "Rotate key"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
