@@ -304,7 +304,8 @@ export async function startHelperSweeper() {
       })
     )
   }
-  const timer = setInterval(() => void pass(false).catch(() => {}), SWEEP_EVERY_MS)
+  // Unreachable environments are skipped inside pass(); what is left (the database) is worth a log line.
+  const timer = setInterval(() => void pass(false).catch((err) => console.error("[gantry] file helper sweep failed", err)), SWEEP_EVERY_MS)
   timer.unref?.()
   globalForHelpers.__gantryHelperSweeper = timer
   // Don't hold up startup on slow or unreachable environments.

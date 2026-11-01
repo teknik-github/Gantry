@@ -385,6 +385,7 @@ export async function sweepScanners(target: DockerTarget) {
     if ((finished && age > 600) || age > scanTimeoutMs() / 1000 + 600) {
       await dockerRaw(target, "DELETE", `/containers/${idSeg(c.Id)}`, { query: { force: true, v: true }, timeoutMs: 60_000 })
         .then(() => removed++)
+        // Already removed (another Gantry sharing the daemon) or busy: the next sweep tries again.
         .catch(() => {})
     }
   }

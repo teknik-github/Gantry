@@ -102,7 +102,9 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/kubernet
         release()
         try {
           controller.close()
-        } catch {}
+        } catch {
+          // Already closed: the client went away.
+        }
       }
       res.on("data", (chunk: Buffer) => {
         if (open) controller.enqueue(new Uint8Array(chunk))

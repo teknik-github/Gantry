@@ -231,6 +231,7 @@ export function writeInput(sid: string, userId: number, data: string) {
 export async function resizeSession(sid: string, userId: number, cols: number, rows: number) {
   const session = owned(sid, userId)
   if (session.closedAt) return
+  // A resize racing the shell's exit fails harmlessly; the terminal keeps its size.
   await session.backend?.resize(cols, rows).catch(() => {})
 }
 

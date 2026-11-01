@@ -9,6 +9,7 @@ import { ImagesCard, ImagesCardSkeleton, SectionCards } from "@/components/secti
 import { SetupChecks } from "@/components/gantry/setup-checks"
 import { getI18n } from "@/lib/i18n/server"
 import { requireUser } from "@/lib/server/auth/dal"
+import { DockerError } from "@/lib/server/docker/client"
 import { getCurrentEnvironment, getDocker, getPermissions } from "@/lib/server/environments"
 import { updatesFor } from "@/lib/server/image-updates"
 import { setupChecks } from "@/lib/server/setup-checks"
@@ -105,7 +106,11 @@ async function DashboardImages() {
   const i18n = await getI18n()
   const images = await getDocker()
     .then((api) => api.listImages())
-    .catch(() => null)
+    .catch((err) => {
+      // Docker unreachable: the rest of the dashboard says so; this card just stays empty.
+      if (!(err instanceof DockerError)) console.error("[gantry] dashboard images failed", err)
+      return null
+    })
   return (
     <ImagesCard
       images={

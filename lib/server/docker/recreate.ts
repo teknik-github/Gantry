@@ -575,6 +575,7 @@ export async function recreateContainer(
     try {
       await api.containerAction(old.Id, "stop")
     } catch (err) {
+      // Best effort: the stop may have half-happened; the error below is what matters.
       await api.containerAction(old.Id, "start").catch(() => {})
       throw new RecreateError(`Could not stop ${name}: ${message(err)}. Nothing was changed.`)
     }

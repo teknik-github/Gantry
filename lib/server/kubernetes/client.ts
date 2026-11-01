@@ -131,7 +131,9 @@ export function errorFromResponse(status: number, body: string): KubeError {
       if (typeof parsed.message === "string" && parsed.message) message = parsed.message
       if (typeof parsed.reason === "string") reason = parsed.reason
     }
-  } catch {}
+  } catch {
+    // Not a Status object (plain text, a proxy's HTML page): the body itself is the message.
+  }
   if (status === 401) {
     return new KubeError("The Kubernetes API rejected the credentials (401 Unauthorized)", 401, reason ?? "Unauthorized")
   }

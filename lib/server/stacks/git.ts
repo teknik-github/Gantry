@@ -240,6 +240,7 @@ async function withGit<T>(
       home
     )
   } finally {
+    // Best effort: a leftover temp HOME must not fail the git command.
     await fs.rm(home, { recursive: true, force: true }).catch(() => {})
   }
 }

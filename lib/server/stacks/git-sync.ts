@@ -149,6 +149,7 @@ async function readLimited(request: Request, max: number): Promise<Uint8Array | 
     if (done) break
     size += value.byteLength
     if (size > max) {
+      // The body is refused either way; cancelling only stops reading it.
       await reader.cancel().catch(() => {})
       return null
     }

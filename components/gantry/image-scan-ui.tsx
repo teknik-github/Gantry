@@ -362,7 +362,9 @@ export function RescanButton({
           setPhase(null)
           router.refresh()
         }
-      } catch {}
+      } catch {
+        // Offline for a moment: try again on the next tick.
+      }
     }, POLL_MS)
     return () => clearInterval(timer)
   }, [following, environmentId, imageId, router, queued])

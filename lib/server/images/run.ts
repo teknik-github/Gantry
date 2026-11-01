@@ -305,6 +305,7 @@ export function gitProvider(source: GitBuildSource, credentials: GitCredentials 
   return async (io) => {
     const { maxContextBytes } = buildLimits()
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gantry-build-"))
+    // Best effort: a leftover temp dir must not turn a finished build into a failure.
     const cleanup = () => fs.rm(dir, { recursive: true, force: true }).catch(() => {})
     try {
       io.step(`Cloning ${source.url} @ ${source.ref}`)
