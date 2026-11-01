@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server"
 
 import { authorizeRequest } from "@/lib/server/api-auth"
-import { DockerError } from "@/lib/server/docker/client"
 import { getDocker } from "@/lib/server/environments"
+import { errorResponse } from "@/lib/server/http"
 
 // Logs may contain secrets: operators and up (viewers only see the lists).
 export async function GET(request: NextRequest, ctx: RouteContext<"/api/containers/[id]/logs">) {
@@ -21,7 +21,6 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/containe
       headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
     })
   } catch (err) {
-    const status = err instanceof DockerError ? err.status : 500
-    return Response.json({ error: (err as Error).message }, { status })
+    return errorResponse(err, "container logs")
   }
 }

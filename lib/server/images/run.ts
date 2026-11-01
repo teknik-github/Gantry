@@ -26,6 +26,7 @@ import type { CurrentUser } from "@/lib/server/auth/dal"
 import type { Environment } from "@/lib/server/db/schema"
 import { DockerError, type DockerTarget } from "@/lib/server/docker/client"
 import { environmentTarget } from "@/lib/server/environments"
+import { json, upstreamStatus } from "@/lib/server/http"
 import {
   activeBuildCount,
   finishBuild,
@@ -63,9 +64,6 @@ export function buildLimits() {
   }
 }
 
-const json = (status: number, body: object) =>
-  Response.json(body, { status, headers: { "Cache-Control": "no-store" } })
-
 /** Checks that the build/push runs on the environment the page showed and that it is a Docker one. */
 export function dockerTargetFor(environment: Environment | null, expectedId: number | undefined): DockerTarget | Response {
   if (!environment) return json(404, { error: "No Docker environment configured" })
@@ -73,7 +71,7 @@ export function dockerTargetFor(environment: Environment | null, expectedId: num
   try {
     return environmentTarget(environment)
   } catch (err) {
-    if (err instanceof DockerError) return json(err.status, { error: err.message })
+    if (err instanceof DockerError) return json(upstreamStatus(err.status), { error: err.message })
     throw err
   }
 }

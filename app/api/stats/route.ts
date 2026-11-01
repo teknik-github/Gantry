@@ -1,6 +1,6 @@
 import { authorizeRequest } from "@/lib/server/api-auth"
-import { DockerError } from "@/lib/server/docker/client"
 import { getDocker } from "@/lib/server/environments"
+import { errorResponse } from "@/lib/server/http"
 import { sampleHost } from "@/lib/server/metrics"
 
 export type StatsResponse = {
@@ -38,7 +38,6 @@ export async function GET() {
     }
     return Response.json(body, { headers: { "Cache-Control": "no-store" } })
   } catch (err) {
-    const status = err instanceof DockerError ? 502 : 500
-    return Response.json({ error: (err as Error).message }, { status })
+    return errorResponse(err, "stats")
   }
 }

@@ -1,7 +1,7 @@
 import { containerName } from "@/lib/format"
 import { authorizeRequest } from "@/lib/server/api-auth"
-import { DockerError } from "@/lib/server/docker/client"
 import { getDocker } from "@/lib/server/environments"
+import { errorResponse } from "@/lib/server/http"
 
 export type ContainerListResponse = {
   environment: { id: number; name: string }
@@ -49,8 +49,6 @@ export async function GET() {
     }
     return Response.json(body, { headers: { "Cache-Control": "no-store" } })
   } catch (err) {
-    if (err instanceof DockerError) return Response.json({ error: err.message }, { status: 502 })
-    console.error("[gantry] /api/v1/containers failed", err)
-    return Response.json({ error: "Internal error" }, { status: 500 })
+    return errorResponse(err, "/api/v1/containers")
   }
 }

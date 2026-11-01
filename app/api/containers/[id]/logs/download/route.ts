@@ -5,7 +5,8 @@ import type { NextRequest } from "next/server"
 import { authorizeRequest } from "@/lib/server/api-auth"
 import { FrameDemuxer, dockerStream, toWebStream } from "@/lib/server/docker/stream"
 import { getDocker } from "@/lib/server/environments"
-import { contentDisposition, errorResponse } from "@/lib/server/files/http"
+import { contentDisposition } from "@/lib/server/files/http"
+import { errorResponse } from "@/lib/server/http"
 import { parseLogDownloadOptions } from "@/lib/log-search"
 
 /** Docker's frames carry stdout and stderr; the file gets their payloads in order. */
@@ -61,6 +62,6 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/containe
       },
     })
   } catch (err) {
-    return errorResponse(err)
+    return errorResponse(err, "log download")
   }
 }

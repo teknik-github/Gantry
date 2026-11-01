@@ -5,14 +5,12 @@ import { allows, ROLE_LABELS, roleFor, type EnvironmentPermission } from "@/lib/
 import { getCurrentUser, type CurrentUser } from "@/lib/server/auth/dal"
 import type { Environment } from "@/lib/server/db/schema"
 import { getCurrentEnvironment, getEnvironmentRole } from "@/lib/server/environments"
+import { json } from "@/lib/server/http"
 
 type Options = {
   /** Refuse API tokens (interactive, browser-only endpoints such as the console). */
   sessionOnly?: boolean
 }
-
-const json = (status: number, error: string) =>
-  Response.json({ error }, { status, headers: { "Cache-Control": "no-store" } })
 
 /**
  * Route handler guard: the user from the cookie session or an API token
@@ -25,14 +23,14 @@ export async function authorizeRequest(
   options: Options = {}
 ): Promise<{ user: CurrentUser; environment: Environment | null; response?: never } | { response: Response }> {
   const user = await getCurrentUser()
-  if (!user) return { response: json(401, "Unauthorized") }
-  if (options.sessionOnly && user.via !== "session") return { response: json(403, "Not available with API tokens") }
+  if (!user) return { response: json(401, { error: "Unauthorized" }) }
+  if (options.sessionOnly && user.via !== "session") return { response: json(403, { error: "Not available with API tokens" }) }
   const environment = await getCurrentEnvironment()
   if (user.role === "admin") return { user, environment }
-  if (!environment) return { response: json(403, NO_ENVIRONMENT_ASSIGNED) }
+  if (!environment) return { response: json(403, { error: NO_ENVIRONMENT_ASSIGNED }) }
   const role = await getEnvironmentRole()
   if (!allows(user.role, role === "admin" ? null : role, permission)) {
-    return { response: json(403, `This needs the ${ROLE_LABELS[roleFor(permission)].toLowerCase()} role in ${environment.name}`) }
+    return { response: json(403, { error: `This needs the ${ROLE_LABELS[roleFor(permission)].toLowerCase()} role in ${environment.name}` }) }
   }
   return { user, environment }
 }
