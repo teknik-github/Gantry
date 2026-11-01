@@ -12,12 +12,13 @@ import { connectionError, dockerJson, dockerRequest, DockerError, type DockerTar
  */
 
 type StreamOptions = {
-  query?: Record<string, string | number | boolean | undefined>
+  /** Query parameters; a list of pairs repeats keys (e.g. one `t` per tag). */
+  query?: Record<string, string | number | boolean | undefined> | [string, string][]
   headers?: Record<string, string>
   /** JSON body, or a raw body (Buffer or stream) with its content type and length. */
   json?: unknown
   body?: { data: Buffer | AsyncIterable<Buffer>; contentType: string; length?: number }
-  /** Idle socket timeout (no data either way), default 60 s. */
+  /** Idle socket timeout (no data either way), default 60 s; 0 for none. */
   idleTimeoutMs?: number
   signal?: AbortSignal
 }
@@ -25,7 +26,8 @@ type StreamOptions = {
 function buildPath(path: string, query?: StreamOptions["query"]) {
   if (!query) return path
   const qs = new URLSearchParams()
-  for (const [k, v] of Object.entries(query)) if (v !== undefined) qs.set(k, String(v))
+  if (Array.isArray(query)) for (const [k, v] of query) qs.append(k, v)
+  else for (const [k, v] of Object.entries(query)) if (v !== undefined) qs.set(k, String(v))
   const s = qs.toString()
   return s ? `${path}?${s}` : path
 }

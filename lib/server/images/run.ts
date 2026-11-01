@@ -35,7 +35,7 @@ import {
   MAX_STORED_LOG,
 } from "@/lib/server/images/builds"
 import { ContextError, directoryContext, editorContext, formatLimit, resolveInside, uploadGuard } from "@/lib/server/images/context"
-import { dockerStream, refPath, StreamAborted } from "@/lib/server/images/docker-stream"
+import { dockerJsonStream, refPath, StreamAborted } from "@/lib/server/images/docker-stream"
 import { allRegistryCredentials, credentialsForImage } from "@/lib/server/registries"
 import { OutputBuffer } from "@/lib/server/stacks/compose"
 import { GitError, syncCheckout, type GitCredentials } from "@/lib/server/stacks/git"
@@ -208,7 +208,7 @@ async function pushReference(target: DockerTarget, reference: string, io: Io): P
   let failure: string | null = null
   let digest: string | undefined
   try {
-    await dockerStream(target, {
+    await dockerJsonStream(target, {
       method: "POST",
       path: `/images/${refPath(repository)}/push`,
       query: [["tag", tag]],
@@ -379,7 +379,7 @@ export async function startBuild(opts: {
       io.step(`Building on ${environment.name}${creds.length ? ` (with ${creds.length} registry login(s) for base images)` : ""}`)
 
       let buildError: string | null = null
-      await dockerStream(target, {
+      await dockerJsonStream(target, {
         method: "POST",
         path: "/build",
         query,
