@@ -26,6 +26,8 @@ async function signIn(page: Page) {
 const sidebar = (page: Page) => page.locator('[data-slot="sidebar"]')
 
 test("switches the interface to Indonesian and back", async ({ page }) => {
+  // Visits a dozen pages and reloads twice; slow on a busy host.
+  test.setTimeout(240_000)
   await signIn(page)
   await expect(page.locator("html")).toHaveAttribute("lang", "en")
 
@@ -47,7 +49,7 @@ test("switches the interface to Indonesian and back", async ({ page }) => {
 
   await page.goto("/containers")
   await expect(page.getByRole("heading", { level: 1, name: id.nav.pages.containers, exact: true })).toBeVisible()
-  await expect(page.getByPlaceholder(id.common.table.searchPlaceholder).first()).toBeVisible()
+  await expect(page.getByPlaceholder(id.containers.searchPlaceholder)).toBeVisible()
   await expect(page.getByText(new RegExp(`^${id.common.table.rowsPerPage}$`))).toBeVisible()
 
   for (const path of ["/notifications", "/backups", "/users", "/stacks", "/images", "/volumes", "/networks"]) {
@@ -181,7 +183,8 @@ test.describe("on a phone", () => {
     await expect(confirm).toBeHidden()
 
     // A form dialog fits the screen and scrolls inside itself.
-    await page.getByRole("button", { name: "Create container" }).click()
+    // Icon-only on phones; the label stays available to screen readers.
+    await page.getByRole("button", { name: "Add container" }).click()
     const dialog = page.getByRole("dialog", { name: "Create container" })
     await expect(dialog).toBeVisible()
     await expectInViewport(page, dialog)
