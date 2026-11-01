@@ -723,7 +723,8 @@ The agent is a dependency-free Node.js script in the Gantry image
 `--group-add $(stat -c %g /var/run/docker.sock)`). The dialog waits until the
 agent connects. The environment then shows connected/last seen, the agent
 version, the host's name and Docker version and the address it connects from
-(`X-Forwarded-For` behind a proxy). The key icon on its row **rotates the
+(`X-Forwarded-For` behind a proxy); the environment switcher shows the host's
+name and Docker version too, and whether the agent is connected. The key icon on its row **rotates the
 key**: the old key stops working and the connected agent is dropped at once;
 run the agent again with the new key. Deleting the environment drops it too.
 Set `GANTRY_URL` for Gantry so the command names the address agents should
@@ -792,18 +793,36 @@ upgrade connections), through any reverse proxy that streams responses:
   Gantry, and **Import** of stacks started outside Gantry only works for the
   local socket.
 - A Trivy scan streams the image out of the host and back in through the
-  tunnel, so large images take longer over slow links.
+  tunnel, so large images take longer over slow links. On the test host
+  (same machine) it made no difference: node:24-alpine (60 MB exported)
+  took 42–45 s through the agent and 57 s locally, copying the image about
+  16–22 s either way (Docker's export and unpacking, not the tunnel).
 - Gantry refuses to stop, remove or recreate the agent's own container through
   the agent (it would cut its own connection), like its own container.
 - Measured on this project's (heavily loaded, 4-CPU) test host, with the
   agent and Gantry on the same machine, so this is the tunnel's overhead, not
   a WAN. Listing 44 containers took about as long through the agent as over
   the local socket (median 430 vs 420 ms through Gantry's API, dominated by
-  the daemon). A console echo round trip took about 110 ms. Downloading a
-  50 MB file from a container ran at 9–15 MB/s through the agent and
-  15–25 MB/s locally. Uploading a 50 MB archive into a container ran at about
-  20 MB/s through the agent and about 190 MB/s locally: uploads wait for
-  flow-control grants that come back through the agent's POSTs.
+  the daemon). A console echo round trip took about 110 ms.
+- Throughput of the tunnel itself, 50 MB into and out of a container
+  (`PUT`/`GET /archive`) through the production server, transfers
+  alternating between the local socket, agent 1.0.0 and this agent (median
+  of 5, four runs): uploads 27–65 MB/s with agent 1.0.0 and 71–114 MB/s now,
+  downloads 42–62 MB/s and 49–74 MB/s (locally 235–430 and 170–275 MB/s).
+  Agent 1.0.0 was held back by its fixed 1 MB windows and one POST at a
+  time; flow-control grants for uploads waited behind it. Through Gantry's
+  own file download and upload (`/api/files/download`,
+  `/api/uploads/files`) both agents ran at 14–17 MB/s against 31–47 MB/s
+  locally: there the Gantry process, which carries both the request and the
+  tunnel, is the limit on this host. To measure again (after `pnpm build`):
+
+  ```bash
+  GANTRY_TEST_AGENT_BENCH=1 GANTRY_TEST_AGENT_BENCH_NEXT=1 \
+    pnpm vitest run tests/integration/agent-throughput.test.ts
+  ```
+
+  (options in that file), or the agent e2e suite with
+  `E2E_AGENT_BENCH_ROUNDS=3`.
 
 ### Roles and permissions
 
