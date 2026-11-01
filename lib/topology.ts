@@ -470,3 +470,19 @@ export function nodeMatches(node: TopologyNode, query: string) {
 export function allNodes(graph: TopologyGraph): TopologyNode[] {
   return [...graph.projects, ...graph.containers, ...graph.networks, ...graph.volumes, ...graph.binds]
 }
+
+/**
+ * Edges of the given kinds that leave ("from": the node is the source) or
+ * reach ("to": the node is the target) the node `id`, in graph order.
+ */
+export function edgesAt<K extends TopologyEdge["kind"]>(
+  graph: Pick<TopologyGraph, "edges">,
+  id: string,
+  direction: "from" | "to",
+  ...kinds: K[]
+): Extract<TopologyEdge, { kind: K }>[] {
+  const end = direction === "from" ? "source" : "target"
+  return graph.edges.filter(
+    (e): e is Extract<TopologyEdge, { kind: K }> => (kinds as string[]).includes(e.kind) && e[end] === id
+  )
+}
