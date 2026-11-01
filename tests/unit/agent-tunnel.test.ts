@@ -2,7 +2,8 @@ import crypto from "node:crypto"
 import http from "node:http"
 import type { Duplex } from "node:stream"
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+import type { Kysely } from "kysely"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import * as agentScript from "@/agent/gantry-agent.mjs"
 import { encodeFrame, FrameType, MAX_UPSTREAM_BODY } from "@/lib/agent/protocol"
@@ -15,6 +16,21 @@ import { dockerHost } from "@/lib/server/stacks/compose"
 import { clearFailures } from "@/lib/server/rate-limit"
 import { startAgentEndpoint, startFakeDocker, waitFor } from "../helpers/agent-harness"
 import { openTestDb } from "../helpers/test-db"
+import type { Database } from "@/lib/server/db/schema"
+
+// Refused enrollments are audited through getDb(). Without this, that is the
+// shared .test-data/unit/gantry.db, which other test files (other processes)
+// open and migrate at the same time: the first audit then waits for its
+// migrations and SQLite's 5 s busy timeout, which made "refuses wrong keys"
+// take from 2 s up to more than the 30 s test timeout on a loaded host.
+// Each describe points it at its own throwaway database instead.
+const auditDb = vi.hoisted(() => ({ current: null as Kysely<Database> | null }))
+vi.mock("@/lib/server/db", () => ({
+  getDb: async () => {
+    if (!auditDb.current) throw new Error("no test database")
+    return auditDb.current
+  },
+}))
 
 describe("agent keys", () => {
   it("embeds the environment id and 256 random bits", () => {
@@ -60,6 +76,7 @@ describe("agent enrollment", () => {
 
   beforeAll(async () => {
     t = await openTestDb()
+    auditDb.current = t.db
   })
   afterAll(() => t?.cleanup())
 
@@ -115,6 +132,10 @@ describe("agent enrollment", () => {
       const res = await connect(auth)
       expect(res, String(auth)).toMatchObject({ ok: false, status: 401 })
     }
+    // Audited on the first failure of each bucket, not on every retry.
+    const audited = await t.db.selectFrom("audit_logs").select("target").where("action", "=", "agent.refused").execute()
+    expect(audited.length).toBeGreaterThan(0)
+    expect(audited.length).toBeLessThan(6)
     await t.db.deleteFrom("environments").where("id", "=", b.id).execute()
     expect(await connect(`Bearer ${b.key}`)).toMatchObject({ ok: false, status: 401 })
     // A non-agent environment never accepts agents, even with a hash set.
@@ -256,6 +277,7 @@ describe("tunnel through a real agent", () => {
   beforeAll(async () => {
     agentScript.setLogger((level: string, message: string) => logs.push(`${level} ${message}`))
     t = await openTestDb()
+    auditDb.current = t.db
     endpoint = await startAgentEndpoint(t.db)
     fake = await startFakeDocker()
     const r = await t.db
