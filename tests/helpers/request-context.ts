@@ -17,6 +17,7 @@ import type { Database } from "@/lib/server/db/schema"
  *   vi.mock("next/cache", async () => (await import("../helpers/request-context")).nextCache)
  *   vi.mock("next/navigation", async () => (await import("../helpers/request-context")).nextNavigation)
  *   vi.mock("@/lib/server/db", async () => (await import("../helpers/request-context")).serverDb)
+ *   vi.mock("next/server", async (original) => (await import("../helpers/request-context")).nextServer(original))
  */
 export const request = {
   cookies: new Map<string, string>(),
@@ -29,6 +30,7 @@ export function resetRequest() {
   request.cookies.clear()
   request.headers = new Headers()
   nextCache.refresh.mockClear()
+  connection.mockClear()
 }
 
 const cookieStore = {
@@ -48,6 +50,18 @@ const cookieStore = {
 export const nextHeaders = {
   cookies: async () => cookieStore,
   headers: async () => request.headers,
+}
+
+/**
+ * next/server as it is, except connection(): Next's throws outside its
+ * request scope. Here it resolves at once, like it does for a real request;
+ * a test can make it hang, as it does in a prefetch render, with
+ * `connection.mockReturnValueOnce(new Promise(() => {}))`.
+ */
+export const connection = vi.fn(async () => {})
+
+export async function nextServer(original: () => Promise<typeof import("next/server")>) {
+  return { ...(await original()), connection }
 }
 
 export const nextCache = {

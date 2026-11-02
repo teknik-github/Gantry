@@ -8,17 +8,19 @@ import { createApiToken } from "@/lib/server/auth/api-tokens"
 import { API_AUTH_HEADER, apiAuthMarker, ENV_COOKIE, SESSION_COOKIE, signSession } from "@/lib/server/auth/token"
 import { DockerError } from "@/lib/server/docker/client"
 import { KubeError } from "@/lib/server/kubernetes/client"
-import { request, resetRequest, nextCache, RedirectError } from "../helpers/request-context"
+import { connection, request, resetRequest, nextCache, RedirectError } from "../helpers/request-context"
 import { openTestDb } from "../helpers/test-db"
 
 vi.mock("next/headers", async () => (await import("../helpers/request-context")).nextHeaders)
 vi.mock("next/cache", async () => (await import("../helpers/request-context")).nextCache)
 vi.mock("next/navigation", async () => (await import("../helpers/request-context")).nextNavigation)
 vi.mock("@/lib/server/db", async () => (await import("../helpers/request-context")).serverDb)
+vi.mock("next/server", async (original) => (await import("../helpers/request-context")).nextServer(original))
 
 const { authorize, expectedEnvironment, inEnvironment, requirePermission, runAction, runBulkAction, UserError } = await import(
   "@/lib/server/action"
 )
+const { getDocker } = await import("@/lib/server/environments")
 
 // lib/server/action.ts: who may run a Server Action (global admin, or a role
 // in the current environment), the environment pin, and what the user sees
@@ -293,5 +295,22 @@ describe("runBulkAction", () => {
     expect(await runBulkAction("operate", "x", [], opts, fn)).toEqual({ error: en.common.errors.nothingSelected })
     expect((await runBulkAction("operate", "x", Array.from({ length: 1000 }, (_, i) => String(i)), opts, fn)).error).toBeTruthy()
     expect(fn).not.toHaveBeenCalled()
+  })
+})
+
+describe("getDocker", () => {
+  it("waits for a real request: a prefetch render never gets to Docker", async () => {
+    await signIn(users.admin, "admin")
+    request.cookies.set(ENV_COOKIE, String(envs.one))
+    // In a prefetch (App Shell or runtime prefetch) render, connection() never resolves.
+    connection.mockReturnValueOnce(new Promise(() => {}))
+    let settled = false
+    void getDocker().finally(() => (settled = true))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(settled).toBe(false)
+
+    // For the request itself it does, and the client is for the selected environment.
+    expect((await getDocker()).target.url).toBe("/nonexistent/gantry-test-t-one.sock")
+    expect(connection).toHaveBeenCalledTimes(2)
   })
 })
