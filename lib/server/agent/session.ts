@@ -106,7 +106,7 @@ export class AgentSession implements LiveAgent {
   expectedSeq = 0
   /** Upstream POSTs the agent may have in flight (1 for agents that didn't offer more). */
   readonly upstreamInflight: number
-  /** Totals, for the logs. */
+  /** Totals, for the logs (upstream: the POST bodies, counted by the hub). */
   bytesDown = 0
   bytesUp = 0
 
@@ -292,7 +292,6 @@ export class AgentSession implements LiveAgent {
   receive(frame: Frame) {
     if (this.closed) return
     this.lastSeen = Date.now()
-    this.bytesUp += frame.payload.length + 9
     if (frame.stream === 0) {
       if (frame.type === FrameType.PONG) {
         if (frame.payload.length === 8) this.rttMs = Math.max(0, Date.now() - frame.payload.readDoubleBE(0))

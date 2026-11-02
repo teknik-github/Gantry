@@ -266,11 +266,13 @@ export async function receiveUpstream(input: UpstreamInput): Promise<{ status: n
 }
 
 async function applyBatch(session: AgentSession, body: UpstreamInput["body"]): Promise<{ status: number; error?: string }> {
-  const decoder = new FrameDecoder()
+  // DATA pieces go to their local connections as they arrive, uncopied.
+  const decoder = new FrameDecoder({ splitData: true })
   let total = 0
   try {
     for await (const chunk of body ?? []) {
       total += chunk.length
+      session.bytesUp += chunk.length
       if (total > MAX_UPSTREAM_BODY) throw new ProtocolError("upstream batch too large")
       for (const frame of decoder.push(chunk)) session.receive(frame)
     }

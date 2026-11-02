@@ -154,10 +154,23 @@ export function readWindow(frame: Frame): number {
  * Incremental decoder: feed it chunks as they arrive, get whole frames.
  * Unknown frame types and oversized payloads throw ProtocolError before any
  * of the payload is buffered.
+ *
+ * With `splitData`, a DATA frame that doesn't arrive in one piece comes out
+ * as several DATA frames for the same stream, one per piece as it arrives,
+ * instead of being copied together: DATA is a byte stream, so receivers
+ * treat the pieces like the frame (flow control counts bytes). This saves a
+ * copy of almost every frame, whose 64 KiB payloads rarely line up with the
+ * chunks a socket delivers.
  */
 export class FrameDecoder {
   private chunks: Buffer[] = []
   private buffered = 0
+  /** splitData: payload bytes still to come of the DATA frame being passed through, and its stream. */
+  private dataLeft = 0
+  private dataStream = 0
+  private readonly head = Buffer.alloc(HEADER_BYTES)
+
+  constructor(private readonly options: { splitData?: boolean } = {}) {}
 
   push(chunk: Uint8Array): Frame[] {
     if (chunk.length) {
@@ -165,38 +178,88 @@ export class FrameDecoder {
       this.buffered += chunk.length
     }
     const frames: Frame[] = []
-    while (this.buffered >= HEADER_BYTES) {
-      const head = this.peek(HEADER_BYTES)
+    for (;;) {
+      if (this.dataLeft > 0) {
+        if (!this.buffered) break
+        // The next piece of the DATA frame being passed through, without a copy.
+        const piece = this.take(Math.min(this.dataLeft, this.chunks[0].length))
+        this.dataLeft -= piece.length
+        frames.push({ type: FrameType.DATA, stream: this.dataStream, payload: piece })
+        continue
+      }
+      if (this.buffered < HEADER_BYTES) break
+      const head = this.peekHeader()
       const type = head.readUInt8(0)
       const stream = head.readUInt32BE(1)
       const length = head.readUInt32BE(5)
       if (!TYPES.has(type)) throw new ProtocolError(`Unknown frame type ${type}`)
       if (length > maxPayload(type)) throw new ProtocolError(`Frame payload too large (${length} bytes)`)
+      if (this.options.splitData && type === FrameType.DATA && length > 0 && this.chunks[0].length < HEADER_BYTES + length) {
+        this.skip(HEADER_BYTES)
+        this.dataLeft = length
+        this.dataStream = stream
+        continue
+      }
       if (this.buffered < HEADER_BYTES + length) break
-      const whole = this.take(HEADER_BYTES + length)
-      frames.push({ type: type as FrameTypeValue, stream, payload: whole.subarray(HEADER_BYTES) })
+      this.skip(HEADER_BYTES)
+      frames.push({ type: type as FrameTypeValue, stream, payload: this.take(length) })
     }
     return frames
   }
 
   /** Bytes of an incomplete frame still waiting for the rest. */
   get pending() {
-    return this.buffered
+    return this.buffered + this.dataLeft
   }
 
-  private peek(n: number): Buffer {
-    if (this.chunks[0].length >= n) return this.chunks[0].subarray(0, n)
-    const joined = Buffer.concat(this.chunks)
-    this.chunks = [joined]
-    return joined.subarray(0, n)
+  /** The next header, copied out only when it spans chunks. */
+  private peekHeader(): Buffer {
+    if (this.chunks[0].length >= HEADER_BYTES) return this.chunks[0]
+    let off = 0
+    for (const c of this.chunks) {
+      off += c.copy(this.head, off, 0, Math.min(c.length, HEADER_BYTES - off))
+      if (off === HEADER_BYTES) break
+    }
+    return this.head
   }
 
+  private skip(n: number) {
+    while (n > 0) {
+      const first = this.chunks[0]
+      if (first.length > n) {
+        this.chunks[0] = first.subarray(n)
+        this.buffered -= n
+        return
+      }
+      this.chunks.shift()
+      this.buffered -= first.length
+      n -= first.length
+    }
+  }
+
+  /** The next n buffered bytes: a view when they are in one chunk, else one copy of just these bytes. */
   private take(n: number): Buffer {
-    if (this.chunks[0].length < n) this.chunks = [Buffer.concat(this.chunks)]
+    if (n === 0) return Buffer.alloc(0)
     const first = this.chunks[0]
-    const out = first.subarray(0, n)
-    if (first.length === n) this.chunks.shift()
-    else this.chunks[0] = first.subarray(n)
+    if (first.length >= n) {
+      if (first.length === n) this.chunks.shift()
+      else this.chunks[0] = first.subarray(n)
+      this.buffered -= n
+      return first.subarray(0, n)
+    }
+    const out = Buffer.allocUnsafe(n)
+    let off = 0
+    let i = 0
+    while (off < n) {
+      const c = this.chunks[i]
+      const k = Math.min(c.length, n - off)
+      c.copy(out, off, 0, k)
+      off += k
+      if (k === c.length) i++
+      else this.chunks[i] = c.subarray(k)
+    }
+    // One splice: a frame fed byte by byte spans thousands of chunks.
+    this.chunks.splice(0, i)
     this.buffered -= n
     return out
   }
