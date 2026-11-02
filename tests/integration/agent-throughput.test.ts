@@ -1,8 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import crypto from "node:crypto"
 import fs from "node:fs"
+import http from "node:http"
 import os from "node:os"
 import path from "node:path"
+
+import { SignJWT } from "jose"
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
@@ -38,7 +41,13 @@ import { openTestDb } from "../helpers/test-db"
 //                                   127.0.0.1:3361 with a scratch data directory,
 //                                   measured through its tunnel sockets; else
 //                                   its endpoints on a plain Node HTTP server
-//                                   (tests/helpers), without Next.js's overhead
+//                                   (tests/helpers), without Next.js's overhead.
+//                                   Also times Gantry's own file download and
+//                                   upload (/api/files/download,
+//                                   /api/uploads/files) of the same 50 MiB with a
+//                                   plain HTTP client, as a signed-in admin
+//   GANTRY_TEST_AGENT_BENCH_STANDALONE  another standalone build directory
+//                                   (with server.js) instead of .next/standalone
 //   GANTRY_TEST_AGENT_BENCH_TRIVY   an image to scan with Trivy locally and
 //                                   through each agent (the image goes out of
 //                                   the host and back in through the tunnel);
@@ -54,6 +63,8 @@ const SOCKET = process.env.DOCKER_SOCKET ?? "/var/run/docker.sock"
 const SCRIPTS = (process.env.GANTRY_TEST_AGENT_SCRIPT || "agent/gantry-agent.mjs").split(",").map((s) => s.trim())
 const NEXT = process.env.GANTRY_TEST_AGENT_BENCH_NEXT === "1"
 const NEXT_PORT = 3361
+const NEXT_SECRET = "bench-secret-bench-secret-bench-secret-0123"
+const STANDALONE = path.resolve(process.env.GANTRY_TEST_AGENT_BENCH_STANDALONE || ".next/standalone")
 
 const auditDb = vi.hoisted(() => ({ current: null as Kysely<Database> | null }))
 vi.mock("@/lib/server/db", () => ({
@@ -98,6 +109,8 @@ describe.skipIf(!enabled)("agent tunnel throughput", () => {
   let server: ChildProcess | undefined
   let dataDir = ""
   let containerId = ""
+  /** NEXT: a signed-in admin's session cookie. */
+  let session = ""
   const agents: Agent[] = []
   const log: string[] = []
 
@@ -116,7 +129,7 @@ describe.skipIf(!enabled)("agent tunnel throughput", () => {
   /** The production build on NEXT_PORT with a scratch data directory. */
   async function startNext() {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "gantry-test-c-bench-"))
-    server = spawn(process.execPath, [path.resolve(".next/standalone/server.js")], {
+    server = spawn(process.execPath, [path.join(STANDALONE, "server.js")], {
       env: {
         ...process.env,
         HOSTNAME: "127.0.0.1",
@@ -124,7 +137,7 @@ describe.skipIf(!enabled)("agent tunnel throughput", () => {
         NODE_ENV: "production",
         DB_DRIVER: "sqlite",
         DATA_DIR: dataDir,
-        GANTRY_SECRET: "bench-secret-bench-secret-bench-secret-0123",
+        GANTRY_SECRET: NEXT_SECRET,
         COOKIE_SECURE: "false",
         UPDATE_CHECK_INTERVAL_HOURS: "0",
       },
@@ -147,6 +160,19 @@ describe.skipIf(!enabled)("agent tunnel throughput", () => {
         for (const [n, script] of SCRIPTS.entries()) {
           agents.push(await waitFor(() => enroll(db, script, n).catch(() => null), 60_000, "Gantry's database"))
         }
+        // An admin, signed in the way Gantry signs sessions (lib/server/auth/token.ts).
+        const admin = await db
+          .insertInto("users")
+          .values({ username: "gantry-test-c-bench", password_hash: "!", role: "admin", created_at: new Date().toISOString() })
+          .executeTakeFirstOrThrow()
+        const jwt = await new SignJWT({ role: "admin", ver: 0 })
+          .setProtectedHeader({ alg: "HS256" })
+          .setSubject(String(admin.insertId))
+          .setIssuedAt()
+          .setIssuer("gantry")
+          .setExpirationTime("2h")
+          .sign(new TextEncoder().encode(NEXT_SECRET))
+        session = `gantry_session=${jwt}`
       } finally {
         await db.destroy()
       }
@@ -220,6 +246,46 @@ describe.skipIf(!enabled)("agent tunnel throughput", () => {
     const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
     const fmt = (xs: number[]) => `${median(xs).toFixed(1)} MiB/s [${xs.map((x) => x.toFixed(1)).join(", ")}]`
     for (const [name, r] of results) out(`${name}: upload ${fmt(r.up)}; download ${fmt(r.down)}`)
+  }, 1_800_000)
+
+  /** One request to Gantry's API with the admin's session in environment `envId`; seconds. */
+  function api(method: string, url: string, envId: number, body?: Buffer): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const t0 = performance.now()
+      let bytes = 0
+      const req = http.request(
+        `http://127.0.0.1:${NEXT_PORT}${url}`,
+        { method, headers: { Cookie: `${session}; gantry_env=${envId}`, ...(body ? { "Content-Length": body.length } : {}) } },
+        (res) => {
+          res.on("data", (c: Buffer) => (bytes += c.length))
+          res.on("end", () => {
+            if (res.statusCode !== 200) reject(new Error(`${method} ${url}: HTTP ${res.statusCode}`))
+            else if (method === "GET" && bytes !== SIZE) reject(new Error(`${url}: ${bytes} bytes`))
+            else resolve((performance.now() - t0) / 1000)
+          })
+        }
+      )
+      req.on("error", reject)
+      req.end(body)
+    })
+  }
+
+  // After "moves 50 MiB both ways", which left /tmp/big.bin in the container.
+  it.skipIf(!NEXT)("moves 50 MiB through Gantry's file download and upload", async () => {
+    const data = crypto.randomBytes(SIZE)
+    const envs: [string, number][] = [["local socket", 1], ...agents.map((a): [string, number] => [a.label, a.id])]
+    const results = new Map<string, { up: number[]; down: number[] }>()
+    for (let i = 0; i < ROUNDS; i++) {
+      for (const [name, envId] of envs) {
+        const r = results.get(name) ?? { up: [], down: [] }
+        results.set(name, r)
+        r.down.push(SIZE / 1048576 / (await api("GET", `/api/files/download?container=${containerId}&path=/tmp/big.bin`, envId)))
+        r.up.push(SIZE / 1048576 / (await api("PUT", `/api/uploads/files?container=${containerId}&path=/tmp&name=up.bin&overwrite=1`, envId, data)))
+      }
+    }
+    const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+    const fmt = (xs: number[]) => `${median(xs).toFixed(1)} MiB/s [${xs.map((x) => x.toFixed(1)).join(", ")}]`
+    for (const [name, r] of results) out(`files API, ${name}: download ${fmt(r.down)}; upload ${fmt(r.up)}`)
   }, 1_800_000)
 
   it.skipIf(!TRIVY_IMAGE_REF)("times a Trivy scan both ways", async () => {
