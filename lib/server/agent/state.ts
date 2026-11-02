@@ -3,6 +3,7 @@ import "server-only"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import type { Duplex } from "node:stream"
 
 import { config } from "@/lib/server/config"
 
@@ -28,6 +29,8 @@ export interface LiveAgent {
   readonly remoteAddress: string | null
   readonly rttMs: number | null
   readonly info: { containerId: string | null }
+  /** Tunnels a local connection (the Unix socket's, or an in-process one) to the agent's Docker socket. */
+  attach(conn: Duplex): void
 }
 
 type State = {
@@ -73,7 +76,7 @@ export function agentSocketDir(): string {
   return dir
 }
 
-/** Unix socket of an environment's tunnel (DOCKER_HOST for compose, socketPath for the API client). */
+/** Unix socket of an environment's tunnel (DOCKER_HOST for compose; Gantry's own client connects in-process, connect.ts). */
 export function agentSocketPath(environmentId: number) {
   return path.join(agentSocketDir(), `${environmentId}.sock`)
 }

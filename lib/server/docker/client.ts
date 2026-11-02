@@ -4,7 +4,8 @@ import http from "node:http"
 import https from "node:https"
 import net from "node:net"
 
-import { agentIdFromUrl, agentProblem, agentSocketPath } from "@/lib/server/agent/state"
+import { openTunnel, tunnelAgent } from "@/lib/server/agent/connect"
+import { agentIdFromUrl, agentProblem } from "@/lib/server/agent/state"
 import type { DockerEnvironmentType } from "@/lib/server/db/schema"
 
 export type DockerTarget = {
@@ -42,16 +43,18 @@ const MAX_RESPONSE_BYTES = 64 * 1024 * 1024
  * Where to connect for a target: a Unix socket, or host/port for "tcp"
  * (plus the PEM material when it uses TLS). Accepts "host:port",
  * "tcp://host:port", "http://host:port" and "https://host:port". An "agent"
- * target ("agent://<environment id>") is the local Unix socket that leads
- * into that agent's tunnel (lib/server/agent/), so Docker traffic to it is
- * plain HTTP over a socket, like the "socket" type.
+ * target ("agent://<environment id>") is that agent's tunnel
+ * (lib/server/agent/): plain HTTP, like the "socket" type, over in-process
+ * connections into the tunnel (the docker compose CLI uses the
+ * environment's Unix socket instead).
  */
 export function connectionOptions(target: DockerTarget): https.RequestOptions {
   if (target.type === "socket") return { socketPath: target.url }
   if (target.type === "agent") {
     const id = agentIdFromUrl(target.url)
     if (id === null) throw new DockerError("Invalid agent environment", 500)
-    return { socketPath: agentSocketPath(id) }
+    // In-process connections into the tunnel, pooled (lib/server/agent/connect.ts).
+    return { agent: tunnelAgent(id) }
   }
   const raw = /^[a-z]+:\/\//i.test(target.url) ? target.url : `tcp://${target.url}`
   const url = new URL(raw.replace(/^[a-z]+:/i, "http:"))
@@ -87,7 +90,12 @@ export function dockerRequest(
     const problem = agentProblem(agentIdFromUrl(target.url))
     if (problem) return failedRequest(options, new DockerError(problem, 502))
   }
-  const conn = connectionOptions(target)
+  let conn = connectionOptions(target)
+  if (target.type === "agent" && options.agent === false) {
+    // A connection of its own, as agent: false means for a socket.
+    const id = agentIdFromUrl(target.url)!
+    conn = { agent: undefined, createConnection: (opts) => openTunnel(id, opts) }
+  }
   // Over TCP the Host header must name the daemon: Node derives the TLS
   // server name from it. Over a socket any value works.
   const host = target.type === "tcp" ? `${conn.host}:${conn.port}` : "docker"

@@ -10,7 +10,7 @@ import { encodeFrame, FrameType, INITIAL_WINDOW, MAX_UPSTREAM_BODY, MAX_UPSTREAM
 import { acceptAgent, agentStatus, disconnectAgent, receiveUpstream, AGENT_ENV_FAILURE_LIMIT } from "@/lib/server/agent/hub"
 import { encodeAgentInfo } from "@/lib/server/agent/info"
 import { generateAgentKey, hashAgentKey, maskAgentKey, parseAgentKey, verifyAgentKey } from "@/lib/server/agent/keys"
-import { agentContainerIds, agentState, agentUrl } from "@/lib/server/agent/state"
+import { agentContainerIds, agentSocketPath, agentState, agentUrl } from "@/lib/server/agent/state"
 import { dockerJson, dockerRaw, dockerRequest, DockerError, type DockerTarget } from "@/lib/server/docker/client"
 import { dockerHost } from "@/lib/server/stacks/compose"
 import { clearFailures } from "@/lib/server/rate-limit"
@@ -383,6 +383,53 @@ describe("tunnel through a real agent", () => {
     expect(dockerHost(target)).toMatch(new RegExp(`^unix://.*/${id}\\.sock$`))
     const many = await Promise.all(Array.from({ length: 30 }, () => dockerJson<{ Version: string }>(target, "GET", "/version")))
     expect(many.every((v) => v.Version === "99.0.0-fake")).toBe(true)
+  })
+
+  it("still tunnels connections to the environment's Unix socket (what docker compose uses)", async () => {
+    const body = await new Promise<string>((resolve, reject) => {
+      http
+        .request({ socketPath: agentSocketPath(id), path: "/version", headers: { Host: "docker" }, agent: false }, (res) => {
+          const chunks: Buffer[] = []
+          res.on("data", (c: Buffer) => chunks.push(c))
+          res.on("end", () => resolve(Buffer.concat(chunks).toString()))
+        })
+        .on("error", reject)
+        .end()
+    })
+    expect(JSON.parse(body)).toMatchObject({ Version: "99.0.0-fake" })
+  })
+
+  it("connects Gantry's own client in-process: pooled, with idle timeouts, and either end closing frees the stream", async () => {
+    const agentSide = () => sessions.at(-1)! as unknown as { opened: number }
+    // Requests in a row share a pooled connection (one stream).
+    await dockerJson(target, "GET", "/version")
+    const opened = agentSide().opened
+    for (let i = 0; i < 3; i++) await dockerJson(target, "GET", "/version")
+    expect(agentSide().opened).toBe(opened)
+
+    // An idle timeout fires like on a socket; destroying the request closes the stream.
+    const timedOut = await new Promise<boolean>((resolve, reject) => {
+      const req = dockerRequest(target, { method: "GET", path: "/hold", agent: false, timeout: 300 }, (res) => res.resume())
+      req.on("timeout", () => {
+        req.destroy()
+        resolve(true)
+      })
+      req.on("error", (err) => (err.message === "socket hang up" ? undefined : reject(err)))
+      req.end()
+    })
+    expect(timedOut).toBe(true)
+    await waitFor(() => fake.held.size === 0, 5000, "the agent's Docker connection to close")
+    await waitFor(() => agentStatus(id).streams <= 1, 5000, "the stream to close")
+
+    // The agent's end closing (here: Docker answering and closing) ends the response.
+    const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
+      dockerRequest(target, { method: "GET", path: "/hold", agent: false }, resolve).on("error", reject).end()
+    })
+    await waitFor(() => fake.held.size === 1, 5000, "held")
+    const closed = new Promise((r) => res.on("close", r))
+    for (const h of fake.held) h.destroy()
+    await closed
+    await waitFor(() => agentStatus(id).streams <= 1, 5000, "the stream to close")
   })
 
   it("streams large bodies both ways intact", async () => {
