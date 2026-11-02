@@ -315,6 +315,9 @@ export class Session {
     this.seq = 0
     /** Upstream POSTs in flight, and how many Gantry allows. */
     this.inflight = 0
+    /** Upstream POSTs sent, and the most that were in flight at once (logged at the end). */
+    this.posts = 0
+    this.peakInflight = 0
     this.maxInflight = 1
     this.windows = new ReceiveWindows(1024 * 1024, 1024 * 1024, 0)
     this.ended = false
@@ -431,7 +434,13 @@ export class Session {
           this.touch()
           this.connectedAt = Date.now()
           this.healthy()
-          log.info(`connected to ${this.config.base} as environment "${hello.environment.name}" (id ${hello.environment.id})`)
+          // What was negotiated: an older Gantry answers without the features.
+          const mib = (n) => `${Math.round(n / 1048576)} MiB`
+          const features =
+            this.maxInflight > 1 || maxWindow > hello.window
+              ? `up to ${this.maxInflight} upstream POSTs in flight, windows ${mib(hello.window)} growing to ${mib(maxWindow)}`
+              : `one upstream POST at a time, fixed ${mib(hello.window)} windows (Gantry without concurrent POSTs and window growth)`
+          log.info(`connected to ${this.config.base} as environment "${hello.environment.name}" (id ${hello.environment.id}); ${features}`)
           return
         }
         case T.PING:
@@ -604,6 +613,8 @@ export class Session {
     const body = Buffer.concat(parts, size)
     const seq = this.seq++
     this.inflight++
+    this.posts++
+    this.peakInflight = Math.max(this.peakInflight, this.inflight)
     let settled = false
     const settle = () => {
       if (settled) return false
@@ -666,7 +677,14 @@ export class Session {
     this.request?.destroy()
     this.response?.destroy()
     if (this.config.healthFile) fs.rmSync(this.config.healthFile, { force: true })
-    this.finish({ reason, connected: Boolean(this.hello), connectedFor: this.connectedAt ? Date.now() - this.connectedAt : 0, ...opts })
+    this.finish({
+      reason,
+      connected: Boolean(this.hello),
+      connectedFor: this.connectedAt ? Date.now() - this.connectedAt : 0,
+      posts: this.posts,
+      peakInflight: this.peakInflight,
+      ...opts,
+    })
   }
 
   /** Ends the session from outside (shutdown). */
@@ -732,7 +750,9 @@ export async function runAgent(config, { signal, onSession, onInfo } = {}) {
     signal?.removeEventListener("abort", stop)
     if (signal?.aborted) break
     if (outcome.connected) {
-      log.warn(`disconnected after ${Math.round(outcome.connectedFor / 1000)}s: ${outcome.reason}`)
+      log.warn(
+        `disconnected after ${Math.round(outcome.connectedFor / 1000)}s (${outcome.posts} upstream POSTs, at most ${outcome.peakInflight} in flight): ${outcome.reason}`
+      )
       // A session that lasted resets the backoff.
       if (outcome.connectedFor > 60_000) attempt = 0
     } else {

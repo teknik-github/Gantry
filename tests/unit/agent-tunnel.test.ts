@@ -460,6 +460,29 @@ describe("tunnel through a real agent", () => {
     }
   })
 
+  it("works with a Gantry from before concurrent POSTs and window growth", async () => {
+    await stopAgent()
+    // This agent offers the features; a Gantry that predates them ignores the offer.
+    endpoint.options.legacy = true
+    try {
+      await startAgent()
+      const session = sessions.at(-1)!
+      expect(session.hello).not.toHaveProperty("upstreamInflight")
+      expect(session.hello).not.toHaveProperty("maxWindow")
+      expect(session.maxInflight).toBe(1)
+      expect(logs.filter((l) => l.includes("connected to")).at(-1)).toContain("one upstream POST at a time, fixed 1 MiB windows")
+      const low = await poolLowWater(roundTrip)
+      // Fixed windows on both ends, and never a second POST in flight.
+      expect(low).toEqual({ gantry: 0, agent: 0 })
+      expect(session.windows.max).toBe(session.windows.initial)
+      expect(session.peakInflight).toBe(1)
+    } finally {
+      endpoint.options.legacy = false
+      await stopAgent()
+      await startAgent()
+    }
+  })
+
   it("pauses the agent's reads when Gantry's side doesn't consume (flow control)", async () => {
     const size = 30 * 1024 * 1024
     let res!: http.IncomingMessage
