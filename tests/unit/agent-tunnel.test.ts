@@ -10,7 +10,7 @@ import { encodeFrame, FrameType, INITIAL_WINDOW, MAX_UPSTREAM_BODY, MAX_UPSTREAM
 import { acceptAgent, agentStatus, disconnectAgent, receiveUpstream, AGENT_ENV_FAILURE_LIMIT } from "@/lib/server/agent/hub"
 import { encodeAgentInfo } from "@/lib/server/agent/info"
 import { generateAgentKey, hashAgentKey, maskAgentKey, parseAgentKey, verifyAgentKey } from "@/lib/server/agent/keys"
-import { agentContainerIds, agentState, agentUrl } from "@/lib/server/agent/state"
+import { agentContainerIds, agentSocketPath, agentState, agentUrl } from "@/lib/server/agent/state"
 import { dockerJson, dockerRaw, dockerRequest, DockerError, type DockerTarget } from "@/lib/server/docker/client"
 import { dockerHost } from "@/lib/server/stacks/compose"
 import { clearFailures } from "@/lib/server/rate-limit"
@@ -385,6 +385,53 @@ describe("tunnel through a real agent", () => {
     expect(many.every((v) => v.Version === "99.0.0-fake")).toBe(true)
   })
 
+  it("still tunnels connections to the environment's Unix socket (what docker compose uses)", async () => {
+    const body = await new Promise<string>((resolve, reject) => {
+      http
+        .request({ socketPath: agentSocketPath(id), path: "/version", headers: { Host: "docker" }, agent: false }, (res) => {
+          const chunks: Buffer[] = []
+          res.on("data", (c: Buffer) => chunks.push(c))
+          res.on("end", () => resolve(Buffer.concat(chunks).toString()))
+        })
+        .on("error", reject)
+        .end()
+    })
+    expect(JSON.parse(body)).toMatchObject({ Version: "99.0.0-fake" })
+  })
+
+  it("connects Gantry's own client in-process: pooled, with idle timeouts, and either end closing frees the stream", async () => {
+    const agentSide = () => sessions.at(-1)! as unknown as { opened: number }
+    // Requests in a row share a pooled connection (one stream).
+    await dockerJson(target, "GET", "/version")
+    const opened = agentSide().opened
+    for (let i = 0; i < 3; i++) await dockerJson(target, "GET", "/version")
+    expect(agentSide().opened).toBe(opened)
+
+    // An idle timeout fires like on a socket; destroying the request closes the stream.
+    const timedOut = await new Promise<boolean>((resolve, reject) => {
+      const req = dockerRequest(target, { method: "GET", path: "/hold", agent: false, timeout: 300 }, (res) => res.resume())
+      req.on("timeout", () => {
+        req.destroy()
+        resolve(true)
+      })
+      req.on("error", (err) => (err.message === "socket hang up" ? undefined : reject(err)))
+      req.end()
+    })
+    expect(timedOut).toBe(true)
+    await waitFor(() => fake.held.size === 0, 5000, "the agent's Docker connection to close")
+    await waitFor(() => agentStatus(id).streams <= 1, 5000, "the stream to close")
+
+    // The agent's end closing (here: Docker answering and closing) ends the response.
+    const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
+      dockerRequest(target, { method: "GET", path: "/hold", agent: false }, resolve).on("error", reject).end()
+    })
+    await waitFor(() => fake.held.size === 1, 5000, "held")
+    const closed = new Promise((r) => res.on("close", r))
+    for (const h of fake.held) h.destroy()
+    await closed
+    await waitFor(() => agentStatus(id).streams <= 1, 5000, "the stream to close")
+  })
+
   it("streams large bodies both ways intact", async () => {
     const size = 20 * 1024 * 1024
     const { body } = await dockerRaw(target, "GET", "/blob", { query: { size } })
@@ -455,6 +502,29 @@ describe("tunnel through a real agent", () => {
       const low = await poolLowWater(roundTrip)
       expect(low).toEqual({ gantry: 0, agent: 0 })
     } finally {
+      await stopAgent()
+      await startAgent()
+    }
+  })
+
+  it("works with a Gantry from before concurrent POSTs and window growth", async () => {
+    await stopAgent()
+    // This agent offers the features; a Gantry that predates them ignores the offer.
+    endpoint.options.legacy = true
+    try {
+      await startAgent()
+      const session = sessions.at(-1)!
+      expect(session.hello).not.toHaveProperty("upstreamInflight")
+      expect(session.hello).not.toHaveProperty("maxWindow")
+      expect(session.maxInflight).toBe(1)
+      expect(logs.filter((l) => l.includes("connected to")).at(-1)).toContain("one upstream POST at a time, fixed 1 MiB windows")
+      const low = await poolLowWater(roundTrip)
+      // Fixed windows on both ends, and never a second POST in flight.
+      expect(low).toEqual({ gantry: 0, agent: 0 })
+      expect(session.windows.max).toBe(session.windows.initial)
+      expect(session.peakInflight).toBe(1)
+    } finally {
+      endpoint.options.legacy = false
       await stopAgent()
       await startAgent()
     }

@@ -1,7 +1,7 @@
 import "server-only"
 
 import crypto from "node:crypto"
-import type net from "node:net"
+import type { Duplex } from "node:stream"
 
 import {
   encodeData,
@@ -46,7 +46,8 @@ export type SessionOptions = {
 
 type Stream = {
   id: number
-  conn: net.Socket
+  /** The local end: a connection to the Unix socket, or an in-process one (connect.ts). */
+  conn: Duplex
   /** Bytes we may still send before the agent grants more. */
   sendWindow: number
   /** What we received and granted back (flow control toward Gantry). */
@@ -70,7 +71,7 @@ const UPSTREAM_ORDER_MS = 60_000
  * Answers a local connection we won't tunnel with an HTTP error, so the
  * Docker client (or the compose CLI) shows why instead of "socket hang up".
  */
-function refuse(conn: net.Socket, status: number, message: string) {
+function refuse(conn: Duplex, status: number, message: string) {
   if (conn.destroyed) return
   const body = JSON.stringify({ message })
   const reason = status === 503 ? "Service Unavailable" : "Bad Gateway"
@@ -106,7 +107,7 @@ export class AgentSession implements LiveAgent {
   expectedSeq = 0
   /** Upstream POSTs the agent may have in flight (1 for agents that didn't offer more). */
   readonly upstreamInflight: number
-  /** Totals, for the logs. */
+  /** Totals, for the logs (upstream: the POST bodies, counted by the hub). */
   bytesDown = 0
   bytesUp = 0
 
@@ -117,7 +118,7 @@ export class AgentSession implements LiveAgent {
   private heartbeat: ReturnType<typeof setInterval>
   private beats = 0
   /** Local connections waiting for a stream to free up. */
-  private waiting: { conn: net.Socket; timer: ReturnType<typeof setTimeout> }[] = []
+  private waiting: { conn: Duplex; timer: ReturnType<typeof setTimeout> }[] = []
   private lastLimitWarning = 0
   private readonly windows: ReceiveWindows
   /** A batch is being applied. */
@@ -196,11 +197,11 @@ export class AgentSession implements LiveAgent {
   }
 
   /**
-   * Tunnels a local connection (from the environment's Unix socket) to the
-   * agent's Docker socket. Beyond maxStreams it waits for a free stream (a
+   * Tunnels a local connection (from the environment's Unix socket, or an
+   * in-process one from Gantry's Docker client) to the agent's Docker socket. Beyond maxStreams it waits for a free stream (a
    * dashboard samples 30 containers at once), up to queueMs.
    */
-  attach(conn: net.Socket) {
+  attach(conn: Duplex) {
     if (this.closed) {
       refuse(conn, 502, "The agent of this environment is not connected")
       return
@@ -242,7 +243,7 @@ export class AgentSession implements LiveAgent {
     }
   }
 
-  private open(conn: net.Socket) {
+  private open(conn: Duplex) {
     const id = this.allocateId()
     const s: Stream = {
       id,
@@ -292,7 +293,6 @@ export class AgentSession implements LiveAgent {
   receive(frame: Frame) {
     if (this.closed) return
     this.lastSeen = Date.now()
-    this.bytesUp += frame.payload.length + 9
     if (frame.stream === 0) {
       if (frame.type === FrameType.PONG) {
         if (frame.payload.length === 8) this.rttMs = Math.max(0, Date.now() - frame.payload.readDoubleBE(0))

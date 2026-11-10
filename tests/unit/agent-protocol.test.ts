@@ -63,6 +63,51 @@ describe("agent frame codec", () => {
     expect(d.push(wire.subarray(wire.length - 1))).toHaveLength(1)
   })
 
+  it("passes DATA through in pieces, uncopied, with splitData", () => {
+    const one = Buffer.alloc(MAX_DATA)
+    for (let i = 0; i < one.length; i++) one[i] = (i * 7) & 0xff
+    const two = Buffer.from("tail")
+    const wire = Buffer.concat([
+      encodeFrame(FrameType.OPEN, 4),
+      encodeFrame(FrameType.DATA, 4, one),
+      encodeWindow(4, 99),
+      encodeFrame(FrameType.DATA, 6, two),
+      encodeFrame(FrameType.DATA, 4, Buffer.alloc(0)),
+      encodeFrame(FrameType.END, 4),
+    ])
+    for (const Decoder of [FrameDecoder, agent.FrameDecoder]) {
+      for (const step of [1, 5, 9, 1000, 65_536, 65_545, wire.length]) {
+        const d = new Decoder({ splitData: true })
+        const chunks: Buffer[] = []
+        const out: { type: number; stream: number; payload: Buffer }[] = []
+        for (let i = 0; i < wire.length; i += step) {
+          // Copies, so a view into one of them proves the payload wasn't copied.
+          const chunk = Buffer.from(wire.subarray(i, i + step))
+          chunks.push(chunk)
+          out.push(...d.push(chunk))
+        }
+        expect(d.pending).toBe(0)
+        const data = (stream: number) =>
+          Buffer.concat(out.filter((f) => f.type === FrameType.DATA && f.stream === stream).map((f) => f.payload))
+        expect(data(4).equals(one)).toBe(true)
+        expect(data(6).toString()).toBe("tail")
+        expect(out.filter((f) => f.type !== FrameType.DATA).map((f) => [f.type, f.stream])).toEqual([
+          [FrameType.OPEN, 4],
+          [FrameType.WINDOW, 4],
+          [FrameType.END, 4],
+        ])
+        expect(out.find((f) => f.type === FrameType.WINDOW)!.payload.readUInt32BE(0)).toBe(99)
+        // Frame order is kept: the WINDOW comes after all of the first DATA frame.
+        const windowAt = out.findIndex((f) => f.type === FrameType.WINDOW)
+        expect(Buffer.concat(out.slice(0, windowAt).filter((f) => f.type === FrameType.DATA).map((f) => f.payload)).length).toBe(MAX_DATA)
+        if (step >= 1000) {
+          const big = out.filter((f) => f.type === FrameType.DATA && f.stream === 4 && f.payload.length > 64)
+          expect(big.every((f) => chunks.some((c) => c.buffer === f.payload.buffer))).toBe(true)
+        }
+      }
+    }
+  })
+
   it("splits data at MAX_DATA", () => {
     const frames = encodeData(3, Buffer.alloc(MAX_DATA * 2 + 5, 7))
     expect(frames.map((f) => f.length - HEADER_BYTES)).toEqual([MAX_DATA, MAX_DATA, 5])

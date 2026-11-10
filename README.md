@@ -147,6 +147,22 @@ runs the script with `node` (what the image's `agent` command does). It also
 prints the tunnel's list latency and 50 MB download throughput next to the
 local socket's.
 
+This agent against an older Gantry: `tests/unit/agent-tunnel.test.ts` covers
+the agent's side (its harness can answer like a Gantry from before the
+negotiated features). To check against a real one, run that Gantry's own
+agent suite with this agent script, in a throwaway worktree:
+
+```bash
+git worktree add /tmp/gantry-old f5d586d   # before concurrent POSTs and window growth
+cp agent/gantry-agent.mjs /tmp/gantry-old/agent/
+cd /tmp/gantry-old && pnpm install --frozen-lockfile && pnpm build
+E2E_PORT=3392 E2E_SKIP_BUILD=1 pnpm exec playwright test tests/e2e/login.spec.ts tests/e2e/agent.spec.ts
+cd - && git worktree remove --force /tmp/gantry-old
+```
+
+The suite prints the agent's log at the end: its `connected` line should say
+`one upstream POST at a time, fixed 1 MiB windows`.
+
 The Git stack suite serves a private repository from the test process with
 `git http-backend` over plain http on 127.0.0.1. The test server is started
 with `GANTRY_TEST_ALLOW_HTTP_GIT=1`, which lets Gantry accept `http://` Git
@@ -766,19 +782,25 @@ upgrade connections), through any reverse proxy that streams responses:
   offers them when it connects, Gantry answers in HELLO); the frames are
   unchanged, so the protocol version stays 1. An agent from before
   (1.0.0) works with this Gantry, and this agent with an older Gantry, one
-  POST at a time with fixed 1 MB windows. Agents and Gantrys with different
-  protocol versions refuse each other (HTTP 426): run the agent from the
-  same Gantry image version.
+  POST at a time with fixed 1 MB windows. The agent logs what it got
+  (`connected … ; one upstream POST at a time, fixed 1 MiB windows` or
+  `up to 4 upstream POSTs in flight, windows 1 MiB growing to 8 MiB`), and
+  its disconnect line counts the upstream POSTs and the most that were in
+  flight at once. Agents and Gantrys with different protocol versions
+  refuse each other (HTTP 426): run the agent from the same Gantry image
+  version.
 - Gantry pings every 10 s. Either side drops a connection that stays silent
   for 35 s, and the agent reconnects with exponential backoff and jitter
   (slowly, every 5 minutes, once its key was refused).
-- In Gantry, every connected agent gets a Unix socket (`0600` in
-  `$DATA_DIR/agent-sockets`, `0700`) that leads into its tunnel. The Docker
-  API client connects there like to a local socket, so every feature works
-  unchanged: lists, inspect, logs, events, exec consoles, stats and metrics,
-  pulls with progress, file browser and archives, image build/push and Trivy
-  scans. `docker compose` (stacks) gets `DOCKER_HOST=unix://…` pointing at
-  that socket.
+- Gantry's Docker API client talks plain HTTP through the tunnel like to a
+  local socket, so every feature works unchanged: lists, inspect, logs,
+  events, exec consoles, stats and metrics, pulls with progress, file
+  browser and archives, image build/push and Trivy scans. Its connections
+  are in-process (`lib/server/agent/connect.ts`): the bytes go between the
+  client and the tunnel without a round trip through the kernel.
+  `docker compose` (stacks), a separate process, gets `DOCKER_HOST=unix://…`
+  pointing at a Unix socket every connected agent has (`0600` in
+  `$DATA_DIR/agent-sockets`, `0700`) that leads into the same tunnel.
 
 **Limits and differences.**
 
@@ -804,17 +826,33 @@ upgrade connections), through any reverse proxy that streams responses:
   a WAN. Listing 44 containers took about as long through the agent as over
   the local socket (median 430 vs 420 ms through Gantry's API, dominated by
   the daemon). A console echo round trip took about 110 ms.
-- Throughput of the tunnel itself, 50 MB into and out of a container
-  (`PUT`/`GET /archive`) through the production server, transfers
-  alternating between the local socket, agent 1.0.0 and this agent (median
-  of 5, four runs): uploads 27–65 MB/s with agent 1.0.0 and 71–114 MB/s now,
-  downloads 42–62 MB/s and 49–74 MB/s (locally 235–430 and 170–275 MB/s).
-  Agent 1.0.0 was held back by its fixed 1 MB windows and one POST at a
-  time; flow-control grants for uploads waited behind it. Through Gantry's
-  own file download and upload (`/api/files/download`,
-  `/api/uploads/files`) both agents ran at 14–17 MB/s against 31–47 MB/s
-  locally: there the Gantry process, which carries both the request and the
-  tunnel, is the limit on this host. To measure again (after `pnpm build`):
+- Throughput, 50 MiB into and out of a container through the production
+  server, with the command below (median of 5 rounds; the ranges are two
+  runs at a host load of 11–15):
+  - The tunnel itself (`PUT`/`GET /archive` through the environment's Unix
+    socket, the way `docker compose` uses it): uploads 66–111 MiB/s,
+    downloads 48–59 MiB/s (locally 329–410 and 203–247).
+  - Gantry's own file download and upload (`/api/files/download`,
+    `/api/uploads/files`, plain HTTP client): through the agent 44–53 MiB/s
+    down and 51–69 up, locally 81–95 and 86–150.
+
+  Gantry's process carries both the browser's request and the tunnel, so
+  its CPU is what limits file transfers through an agent. A 50 MiB transfer
+  cost it about 1.1 s of CPU (download) and 0.85 s (upload) through the
+  agent, against 0.4 s locally; before its Docker client connected
+  in-process and the tunnel stopped copying frames together it was 1.6 and
+  1.3 s, with about twice as many full garbage collections. Alternating the
+  old and the new build (and agent) for 7 rounds of the same file API
+  requests at a load of 7–10, downloads through the agent went from 50 to
+  68 MiB/s and uploads from 57 to 83 MiB/s; at the higher load of the runs
+  above the two builds' ranges overlapped. What is left is
+  mostly Next.js's work per upstream POST (routing, request objects) and its
+  conversion of each request body into a web stream, which copies every
+  chunk; route handlers can't avoid either. The agent e2e suite
+  (`E2E_AGENT_BENCH_ROUNDS=3`) reports lower numbers, 26 MiB/s down and
+  22 up through the agent against 31 and 38 locally, partly Playwright's
+  own overhead (its request API passes the bodies through its driver). To measure again
+  (after `pnpm build`):
 
   ```bash
   GANTRY_TEST_AGENT_BENCH=1 GANTRY_TEST_AGENT_BENCH_NEXT=1 \

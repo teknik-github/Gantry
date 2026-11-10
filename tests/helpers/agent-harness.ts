@@ -13,10 +13,29 @@ import { acceptAgent, receiveUpstream } from "@/lib/server/agent/hub"
 import type { Database } from "@/lib/server/db/schema"
 
 /**
+ * Drops the agent's feature offer from its X-Gantry-Agent-Info header, as a
+ * Gantry from before concurrent POSTs and window growth did: its parser kept
+ * only the fields it knew.
+ */
+function withoutOffer(header: string | null): string | null {
+  if (!header) return header
+  try {
+    const info = JSON.parse(Buffer.from(header, "base64url").toString("utf8"))
+    delete info.upstreamInflight
+    return Buffer.from(JSON.stringify(info)).toString("base64url")
+  } catch {
+    return header
+  }
+}
+
+/**
  * Gantry's two agent endpoints on a plain Node HTTP server (what the route
- * handlers in app/api/agent/ do inside Next.js), for tests.
+ * handlers in app/api/agent/ do inside Next.js), for tests. With
+ * `options.legacy` set it acts like a Gantry from before the negotiated
+ * features: agents get a HELLO without them.
  */
 export async function startAgentEndpoint(db: Kysely<Database>) {
+  const options = { legacy: false }
   const server = http.createServer(async (req, res) => {
     const header = (name: string) => {
       const v = req.headers[name]
@@ -24,9 +43,10 @@ export async function startAgentEndpoint(db: Kysely<Database>) {
     }
     try {
       if (req.method === "GET" && req.url === "/api/agent/connect") {
+        const info = header("x-gantry-agent-info")
         const result = await acceptAgent(db, {
           authorization: header("authorization"),
-          info: header("x-gantry-agent-info"),
+          info: options.legacy ? withoutOffer(info) : info,
           clientAddress: null,
           remoteAddress: req.socket.remoteAddress ?? null,
         })
@@ -66,6 +86,7 @@ export async function startAgentEndpoint(db: Kysely<Database>) {
   const { port } = server.address() as AddressInfo
   return {
     url: `http://127.0.0.1:${port}`,
+    options,
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections()

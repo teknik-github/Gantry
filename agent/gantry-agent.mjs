@@ -62,12 +62,24 @@ export function encodeFrame(type, stream, payload = Buffer.alloc(0)) {
   return frame
 }
 
-/** Incremental frame decoder; throws ProtocolError on unknown types and oversized frames. */
+/**
+ * Incremental frame decoder; throws ProtocolError on unknown types and
+ * oversized frames. With `splitData`, a DATA frame that doesn't arrive in one
+ * piece comes out as several DATA frames for its stream, one per piece,
+ * instead of being copied together (as FrameDecoder in lib/agent/protocol.ts;
+ * keep both in sync).
+ */
 export class FrameDecoder {
-  constructor() {
+  /** @param {{ splitData?: boolean }} [options] */
+  constructor(options = {}) {
     /** @type {Buffer[]} */
     this.chunks = []
     this.buffered = 0
+    this.splitData = Boolean(options.splitData)
+    /** splitData: payload bytes still to come of the DATA frame being passed through, and its stream. */
+    this.dataLeft = 0
+    this.dataStream = 0
+    this.head = Buffer.alloc(HEADER_BYTES)
   }
 
   /** @param {Uint8Array} chunk @returns {{ type: number, stream: number, payload: Buffer }[]} */
@@ -77,28 +89,87 @@ export class FrameDecoder {
       this.buffered += chunk.length
     }
     const frames = []
-    while (this.buffered >= HEADER_BYTES) {
-      if (this.chunks[0].length < HEADER_BYTES) this.chunks = [Buffer.concat(this.chunks)]
-      const head = this.chunks[0]
+    for (;;) {
+      if (this.dataLeft > 0) {
+        if (!this.buffered) break
+        const piece = this.take(Math.min(this.dataLeft, this.chunks[0].length))
+        this.dataLeft -= piece.length
+        frames.push({ type: FrameType.DATA, stream: this.dataStream, payload: piece })
+        continue
+      }
+      if (this.buffered < HEADER_BYTES) break
+      const head = this.peekHeader()
       const type = head.readUInt8(0)
       const stream = head.readUInt32BE(1)
       const length = head.readUInt32BE(5)
       if (!TYPES.has(type)) throw new ProtocolError(`Unknown frame type ${type}`)
       if (length > maxPayload(type)) throw new ProtocolError(`Frame payload too large (${length} bytes)`)
-      const total = HEADER_BYTES + length
-      if (this.buffered < total) break
-      if (this.chunks[0].length < total) this.chunks = [Buffer.concat(this.chunks)]
-      const first = this.chunks[0]
-      frames.push({ type, stream, payload: first.subarray(HEADER_BYTES, total) })
-      if (first.length === total) this.chunks.shift()
-      else this.chunks[0] = first.subarray(total)
-      this.buffered -= total
+      if (this.splitData && type === FrameType.DATA && length > 0 && this.chunks[0].length < HEADER_BYTES + length) {
+        this.skip(HEADER_BYTES)
+        this.dataLeft = length
+        this.dataStream = stream
+        continue
+      }
+      if (this.buffered < HEADER_BYTES + length) break
+      this.skip(HEADER_BYTES)
+      frames.push({ type, stream, payload: this.take(length) })
     }
     return frames
   }
 
   get pending() {
-    return this.buffered
+    return this.buffered + this.dataLeft
+  }
+
+  peekHeader() {
+    if (this.chunks[0].length >= HEADER_BYTES) return this.chunks[0]
+    let off = 0
+    for (const c of this.chunks) {
+      off += c.copy(this.head, off, 0, Math.min(c.length, HEADER_BYTES - off))
+      if (off === HEADER_BYTES) break
+    }
+    return this.head
+  }
+
+  skip(n) {
+    while (n > 0) {
+      const first = this.chunks[0]
+      if (first.length > n) {
+        this.chunks[0] = first.subarray(n)
+        this.buffered -= n
+        return
+      }
+      this.chunks.shift()
+      this.buffered -= first.length
+      n -= first.length
+    }
+  }
+
+  /** The next n bytes: a view when they are in one chunk, else one copy of just these. */
+  take(n) {
+    if (n === 0) return Buffer.alloc(0)
+    const first = this.chunks[0]
+    if (first.length >= n) {
+      if (first.length === n) this.chunks.shift()
+      else this.chunks[0] = first.subarray(n)
+      this.buffered -= n
+      return first.subarray(0, n)
+    }
+    const out = Buffer.allocUnsafe(n)
+    let off = 0
+    let i = 0
+    while (off < n) {
+      const c = this.chunks[i]
+      const k = Math.min(c.length, n - off)
+      c.copy(out, off, 0, k)
+      off += k
+      if (k === c.length) i++
+      else this.chunks[i] = c.subarray(k)
+    }
+    // One splice: a frame fed byte by byte spans thousands of chunks.
+    this.chunks.splice(0, i)
+    this.buffered -= n
+    return out
   }
 }
 
@@ -315,6 +386,9 @@ export class Session {
     this.seq = 0
     /** Upstream POSTs in flight, and how many Gantry allows. */
     this.inflight = 0
+    /** Upstream POSTs sent, and the most that were in flight at once (logged at the end). */
+    this.posts = 0
+    this.peakInflight = 0
     this.maxInflight = 1
     this.windows = new ReceiveWindows(1024 * 1024, 1024 * 1024, 0)
     this.ended = false
@@ -323,7 +397,8 @@ export class Session {
     this.maxStreams = 64
     this.heartbeatMs = 10_000
     this.opened = 0
-    this.decoder = new FrameDecoder()
+    // DATA pieces go to the Docker socket as they arrive.
+    this.decoder = new FrameDecoder({ splitData: true })
     this.result = new Promise((resolve) => (this.finish = resolve))
   }
 
@@ -431,7 +506,13 @@ export class Session {
           this.touch()
           this.connectedAt = Date.now()
           this.healthy()
-          log.info(`connected to ${this.config.base} as environment "${hello.environment.name}" (id ${hello.environment.id})`)
+          // What was negotiated: an older Gantry answers without the features.
+          const mib = (n) => `${Math.round(n / 1048576)} MiB`
+          const features =
+            this.maxInflight > 1 || maxWindow > hello.window
+              ? `up to ${this.maxInflight} upstream POSTs in flight, windows ${mib(hello.window)} growing to ${mib(maxWindow)}`
+              : `one upstream POST at a time, fixed ${mib(hello.window)} windows (Gantry without concurrent POSTs and window growth)`
+          log.info(`connected to ${this.config.base} as environment "${hello.environment.name}" (id ${hello.environment.id}); ${features}`)
           return
         }
         case T.PING:
@@ -604,6 +685,8 @@ export class Session {
     const body = Buffer.concat(parts, size)
     const seq = this.seq++
     this.inflight++
+    this.posts++
+    this.peakInflight = Math.max(this.peakInflight, this.inflight)
     let settled = false
     const settle = () => {
       if (settled) return false
@@ -666,7 +749,14 @@ export class Session {
     this.request?.destroy()
     this.response?.destroy()
     if (this.config.healthFile) fs.rmSync(this.config.healthFile, { force: true })
-    this.finish({ reason, connected: Boolean(this.hello), connectedFor: this.connectedAt ? Date.now() - this.connectedAt : 0, ...opts })
+    this.finish({
+      reason,
+      connected: Boolean(this.hello),
+      connectedFor: this.connectedAt ? Date.now() - this.connectedAt : 0,
+      posts: this.posts,
+      peakInflight: this.peakInflight,
+      ...opts,
+    })
   }
 
   /** Ends the session from outside (shutdown). */
@@ -732,7 +822,9 @@ export async function runAgent(config, { signal, onSession, onInfo } = {}) {
     signal?.removeEventListener("abort", stop)
     if (signal?.aborted) break
     if (outcome.connected) {
-      log.warn(`disconnected after ${Math.round(outcome.connectedFor / 1000)}s: ${outcome.reason}`)
+      log.warn(
+        `disconnected after ${Math.round(outcome.connectedFor / 1000)}s (${outcome.posts} upstream POSTs, at most ${outcome.peakInflight} in flight): ${outcome.reason}`
+      )
       // A session that lasted resets the backoff.
       if (outcome.connectedFor > 60_000) attempt = 0
     } else {
