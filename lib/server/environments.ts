@@ -2,6 +2,7 @@ import "server-only"
 
 import { cache } from "react"
 import { cookies, headers } from "next/headers"
+import { connection } from "next/server"
 
 import { ENVIRONMENT_SWITCHED, NO_ENVIRONMENT_ASSIGNED } from "@/lib/messages"
 import { NO_PERMISSIONS, permissionsFor, type EnvironmentRole, type Permissions } from "@/lib/permissions"
@@ -94,8 +95,17 @@ export class EnvironmentSwitchedError extends DockerError {
  * Docker client bound to the current environment. Callers must authenticate
  * first. Pass the id of the environment the page was rendered for so an
  * action never lands on another host after a switch in another tab.
+ *
+ * Waits for a real request first (connection()). Next also renders pages for
+ * prefetches: the App Shell of each sidebar link (session data included) and
+ * the runtime prefetch it embeds in every page response. Those renders end
+ * long before Docker answers and their output can't use the result, but
+ * without this they still sent the page's Docker calls. On a busy host with
+ * the containerd image store, the extra `GET /images/json` calls ran at the
+ * same time as the real ones and made each of them several times slower.
  */
 export async function getDocker(expectedId?: number) {
+  await connection()
   const env = await getCurrentEnvironment()
   if (!env) {
     const user = await getCurrentUser()

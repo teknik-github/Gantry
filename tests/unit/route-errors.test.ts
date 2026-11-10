@@ -19,6 +19,7 @@ vi.mock("next/headers", async () => (await import("../helpers/request-context"))
 vi.mock("next/cache", async () => (await import("../helpers/request-context")).nextCache)
 vi.mock("next/navigation", async () => (await import("../helpers/request-context")).nextNavigation)
 vi.mock("@/lib/server/db", async () => (await import("../helpers/request-context")).serverDb)
+vi.mock("next/server", async (original) => (await import("../helpers/request-context")).nextServer(original))
 
 const logsRoute = await import("@/app/api/containers/[id]/logs/route")
 const statsRoute = await import("@/app/api/stats/route")

@@ -166,7 +166,11 @@ test("private images need a registry login stored in Gantry", async ({ page }) =
   await expect(page.getByText(`Pulled ${IMAGE}`)).toBeVisible()
   // A copy of alpine:3, so old: search instead of relying on the first page.
   await page.getByRole("textbox", { name: "Search" }).fill(IMAGE)
-  await expect(page.getByRole("row").filter({ hasText: IMAGE })).toHaveCount(1)
+  // The toast comes with the action's result; the refreshed list streams in
+  // after it, once Docker has listed the images again. That listing alone can
+  // take well over 15 s on a busy host with the containerd image store, so
+  // wait like the other Docker-bound steps here.
+  await expect(page.getByRole("row").filter({ hasText: IMAGE })).toHaveCount(1, { timeout })
 })
 
 test("stacks pull private images with the stored login", async ({ page }) => {
