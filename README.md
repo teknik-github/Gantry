@@ -63,31 +63,24 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
 
 ## Run with Docker Compose
 
-```bash
-docker compose up -d --build
-```
+1. Start Gantry:
 
-That is all: SQLite, the host's Docker socket (Gantry finds its group itself)
-and sensible defaults. To change anything, copy `.env.example` to `.env` and
-uncomment what you need; [docs/configuration.md](docs/configuration.md) lists
-every variable. MySQL instead of SQLite takes three lines in `.env`:
+   ```bash
+   docker compose up -d --build
+   ```
 
-```bash
-COMPOSE_FILE=docker-compose.yml:docker-compose.mysql.yml
-MYSQL_PASSWORD=change-me
-MYSQL_ROOT_PASSWORD=change-me-too
-```
+2. Open http://localhost:3000 and create the administrator. The page asks for
+   a one-time **setup token**, printed in the log:
 
-Open http://localhost:3000. On first visit you create the administrator
-account; `/setup` asks for a one-time **setup token** that only someone with
-access to the server can read:
+   ```bash
+   docker logs gantry 2>&1 | grep -A2 "setup token"
+   ```
 
-```bash
-docker logs gantry 2>&1 | grep -A2 "setup token"
-```
-
-To skip `/setup` (e.g. for automated installs), set `GANTRY_ADMIN_USERNAME`
-and `GANTRY_ADMIN_PASSWORD`; the admin is created on startup.
+No configuration is needed: Gantry uses SQLite and the Docker of this host.
+To change a setting (port, domain, MySQL, SSO, …), copy `.env.example` to
+`.env`, edit it and run `docker compose up -d` again. The
+[configuration guide](docs/configuration.md) explains each setting and common
+tasks step by step.
 
 ### Production checklist
 
@@ -222,20 +215,14 @@ against the same throwaway cluster.
 
 ## Configuration
 
-All settings are environment variables with defaults; none is required. With
-Docker Compose they go in `.env` (see `.env.example`), and every variable in
-it reaches Gantry. The full list, the compose-only variables, MySQL and
-upgrading from the older compose file are in
-[docs/configuration.md](docs/configuration.md). The ones most installs touch:
+Settings are optional and go in `.env`. See the
+[configuration guide](docs/configuration.md) for:
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `GANTRY_PORT` | `3000` | Host port (compose); `127.0.0.1:3000` keeps it local behind a proxy |
-| `GANTRY_URL` | | Public URL; needed for SSO and the agent's connect address |
-| `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` from your reverse proxy |
-| `GANTRY_ADMIN_USERNAME` / `GANTRY_ADMIN_PASSWORD` | | Create the first admin at startup instead of `/setup` |
-| `COMPOSE_FILE` | | `docker-compose.yml:docker-compose.mysql.yml` for MySQL |
-| `BACKUP_DIR` | `$DATA_DIR/backups` | Where scheduled backups are written |
+- [how to change a setting](docs/configuration.md#changing-a-setting)
+- step-by-step tasks: another port, a domain with HTTPS, MySQL, backups on
+  another disk, SSO ([common tasks](docs/configuration.md#common-tasks))
+- [every setting](docs/configuration.md#all-settings), grouped by topic
+- [upgrading an older `.env`](docs/configuration.md#upgrading-from-an-older-version)
 
 ### MySQL
 
