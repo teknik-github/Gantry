@@ -39,7 +39,9 @@ const CONCURRENCY = 4
 const MAX_REFERENCES = 100
 
 export function updateCheckIntervalMs() {
-  const hours = Number(process.env.UPDATE_CHECK_INTERVAL_HOURS ?? 6)
+  const raw = process.env.UPDATE_CHECK_INTERVAL_HOURS
+  // Empty (`UPDATE_CHECK_INTERVAL_HOURS=` in .env) means the default, not 0.
+  const hours = raw === undefined || raw.trim() === "" ? 6 : Number(raw)
   return Number.isFinite(hours) && hours > 0 ? hours * 3_600_000 : 0
 }
 

@@ -64,15 +64,18 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
 ## Run with Docker Compose
 
 ```bash
-cp .env.example .env
-# Set DOCKER_GID to the group that owns the socket on the host:
-stat -c '%g' /var/run/docker.sock
-
-# SQLite (default)
 docker compose up -d --build
+```
 
-# MySQL: set DB_DRIVER=mysql and COMPOSE_PROFILES=mysql in .env, or:
-DB_DRIVER=mysql COMPOSE_PROFILES=mysql docker compose up -d --build
+That is all: SQLite, the host's Docker socket (Gantry finds its group itself)
+and sensible defaults. To change anything, copy `.env.example` to `.env` and
+uncomment what you need; [docs/configuration.md](docs/configuration.md) lists
+every variable. MySQL instead of SQLite takes three lines in `.env`:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker-compose.mysql.yml
+MYSQL_PASSWORD=change-me
+MYSQL_ROOT_PASSWORD=change-me-too
 ```
 
 Open http://localhost:3000. On first visit you create the administrator
@@ -219,57 +222,25 @@ against the same throwaway cluster.
 
 ## Configuration
 
+All settings are environment variables with defaults; none is required. With
+Docker Compose they go in `.env` (see `.env.example`), and every variable in
+it reaches Gantry. The full list, the compose-only variables, MySQL and
+upgrading from the older compose file are in
+[docs/configuration.md](docs/configuration.md). The ones most installs touch:
+
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DB_DRIVER` | `sqlite` | `sqlite` or `mysql` |
-| `SQLITE_PATH` | `$DATA_DIR/gantry.db` | SQLite file |
-| `DATABASE_URL` / `MYSQL_*` | | MySQL connection |
-| `DATA_DIR` | `./data` (`/data` in Docker) | SQLite and the generated secret |
-| `GANTRY_SECRET` | generated | Session signing key (≥ 32 characters) |
-| `COOKIE_SECURE` | `auto` | `true`, `false` or `auto` (Secure behind HTTPS) |
-| `SESSION_TTL_HOURS` | `12` | Session lifetime |
-| `GANTRY_SETUP_TOKEN` | generated | Token `/setup` asks for (≥ 16 chars); otherwise random, logged and kept in `$DATA_DIR/setup-token` |
+| `GANTRY_PORT` | `3000` | Host port (compose); `127.0.0.1:3000` keeps it local behind a proxy |
+| `GANTRY_URL` | | Public URL; needed for SSO and the agent's connect address |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` from your reverse proxy |
 | `GANTRY_ADMIN_USERNAME` / `GANTRY_ADMIN_PASSWORD` | | Create the first admin at startup instead of `/setup` |
-| `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` from your reverse proxy (per-client login limits) |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | Socket of the default `local` environment |
-| `METRICS_INTERVAL_SECONDS` | `60` | How often the dashboard history is sampled (minimum 10) |
-| `METRICS_RETENTION_DAYS` | `7` | How long history is kept |
-| `UPDATE_CHECK_INTERVAL_HOURS` | `6` | How often registries are asked about newer images (`0` = only on demand) |
-| `BACKUP_DIR` | `$DATA_DIR/backups` | Where scheduled backups are written (mount another disk here) |
-| `TRIVY_IMAGE` | `aquasec/trivy:0.76.1` | Scanner image for vulnerability scans (pulled on each environment when missing) |
-| `TRIVY_CACHE_VOLUME` | `gantry-trivy-cache` | Named volume, on each environment, holding Trivy's vulnerability database |
-| `TRIVY_TIMEOUT_MINUTES` | `20` | Longest a single scan (pull, export, scan) may take |
-| `TRIVY_DB_REPOSITORY`, `TRIVY_JAVA_DB_REPOSITORY`, `TRIVY_SKIP_DB_UPDATE`, `TRIVY_SKIP_JAVA_DB_UPDATE`, `TRIVY_OFFLINE_SCAN`, `TRIVY_INSECURE` | | Passed on to the scanner container as is (database mirrors, offline use) |
-| `FILES_UPLOAD_MAX_MB` | `512` | Largest file one upload may carry (file browser) |
-| `FILES_EDIT_MAX_KB` | `1024` | Largest text file the file browser opens and saves in its editor |
-| `FILES_LIST_MAX_ENTRIES` | `5000` | Entries shown per folder (the rest are counted) |
-| `FILES_SCAN_MAX_MB` / `FILES_SCAN_TIMEOUT_SECONDS` | `512` / `30` | Limits for listing a folder of a stopped or shell-less container from Docker's tar archive |
-| `FILES_HELPER_IMAGE` | `alpine:3` | Image of the short-lived containers that open volumes (needs `sh`, `stat`, `rm`; pulled when missing) |
-| `FILES_HELPER_IDLE_SECONDS` | `120` | How long a volume helper is kept for the next operation before it is removed |
-| `HELM_BIN` | `helm` on the `PATH` | The helm 3 CLI used for chart installs/upgrades/rollbacks (the Docker image includes a pinned, checksum-verified helm) |
-| `HELM_MAX_OPERATIONS` | `4` | Helm installs/upgrades/rollbacks/uninstalls running at once on the server (1–64) |
-| `GANTRY_BUILD_MAX_CONTEXT_MB` | `512` | Largest build context (uploaded archive or Git context) an image build accepts |
-| `GANTRY_BUILD_TIMEOUT_MINUTES` | `60` | An image build (clone, build and push) is stopped after this long |
-| `GANTRY_BUILD_CONCURRENCY` | `2` | Image builds running at once; more are refused until one finishes |
-| `GANTRY_URL` | | Public URL of Gantry (e.g. `https://gantry.example.com`); the OIDC callback is `$GANTRY_URL/auth/oidc/callback`, and agents are told to connect here |
-| `GANTRY_AGENT_IMAGE` | `gantry:latest` | Image named in the agent's `docker run` command |
-| `GANTRY_AGENT_MAX_STREAMS` | `64` | Tunneled Docker connections per agent at once (4–1024) |
-| `GANTRY_AGENT_QUEUE_SECONDS` | `30` | How long a Docker connection waits for a free tunnel stream when all are in use |
-| `GANTRY_AGENT_HEARTBEAT_SECONDS` | `10` | Ping interval of agent connections; silent ones are dropped after 3.5 intervals |
-| `OIDC_ISSUER` | | OpenID provider (issuer URL); single sign-on is off unless this and `OIDC_CLIENT_ID` are set |
-| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | Client registered at the provider (confidential client; the secret is optional for public clients, PKCE is always used) |
-| `OIDC_REDIRECT_URL` | `$GANTRY_URL/auth/oidc/callback` | Callback URL, if it differs |
-| `OIDC_SCOPES` | `openid profile email` | Requested scopes (`openid` is always added) |
-| `OIDC_AUTO_CREATE` | `false` | `true`: the first SSO login of an unknown identity creates a standard user |
-| `OIDC_ADMIN_GROUPS` | | Comma-separated groups whose members are administrators; when set, the role follows the claim on every SSO login |
-| `OIDC_GROUPS_CLAIM` | `groups` | Claim holding the groups (ID token, or userinfo if absent there) |
-| `OIDC_USERNAME_CLAIM` | `preferred_username` | Claim used for new usernames (then the email's local part, then the name) |
-| `PASSWORD_LOGIN` | `all` | `admins`: with SSO configured, only administrators may use the password form (break-glass access) |
+| `COMPOSE_FILE` | | `docker-compose.yml:docker-compose.mysql.yml` for MySQL |
+| `BACKUP_DIR` | `$DATA_DIR/backups` | Where scheduled backups are written |
 
 ### MySQL
 
 - **Version**: MySQL 8.0 or newer (tested with 8.4, the version in
-  `docker-compose.yml`), InnoDB tables, a database whose default character set
+  `docker-compose.mysql.yml`), InnoDB tables, a database whose default character set
   is `utf8mb4` (MySQL 8's default). Strict SQL mode (the default) is fine.
 - **Privileges**: migrations run at startup, so the user needs `CREATE`,
   `ALTER`, `INDEX` and `REFERENCES` on Gantry's database besides

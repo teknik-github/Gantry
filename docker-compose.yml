@@ -1,8 +1,11 @@
-# Gantry — choose the database in .env (see .env.example):
+# Gantry. Works without any configuration:
 #
-#   SQLite (default):  docker compose up -d
-#   MySQL:             DB_DRIVER=mysql COMPOSE_PROFILES=mysql docker compose up -d
-#                      (or put both variables in .env)
+#   docker compose up -d --build
+#
+# Settings go in .env, all optional (.env.example has the common ones,
+# docs/configuration.md every variable). MySQL instead of SQLite: add
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.mysql.yml
+# to .env.
 
 services:
   gantry:
@@ -10,80 +13,23 @@ services:
     image: gantry:latest
     container_name: gantry
     restart: unless-stopped
+    # Every variable in .env reaches Gantry as it is.
+    env_file:
+      - path: .env
+        required: false
+    # Fixed by the image and the mounts below, whatever .env says.
+    environment:
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      DATA_DIR: /data
+      SQLITE_PATH: /data/gantry.db
+      DOCKER_SOCKET: /var/run/docker.sock
     ports:
       - "${GANTRY_PORT:-3000}:3000"
-    environment:
-      DB_DRIVER: ${DB_DRIVER:-sqlite}
-      # SQLite
-      SQLITE_PATH: /data/gantry.db
-      # MySQL (used when DB_DRIVER=mysql)
-      MYSQL_HOST: ${MYSQL_HOST:-mysql}
-      MYSQL_PORT: ${MYSQL_PORT:-3306}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-gantry}
-      MYSQL_USER: ${MYSQL_USER:-gantry}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-gantry}
-      # Session signing secret; generated into /data/secret.key when empty.
-      GANTRY_SECRET: ${GANTRY_SECRET:-}
-      # "auto" marks the cookie Secure when served over HTTPS (via a reverse proxy).
-      COOKIE_SECURE: ${COOKIE_SECURE:-auto}
-      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
-      # Only behind a reverse proxy you control that sets X-Forwarded-For.
-      TRUST_PROXY: ${TRUST_PROXY:-false}
-      # First run: /setup needs the token printed in `docker logs gantry`.
-      GANTRY_SETUP_TOKEN: ${GANTRY_SETUP_TOKEN:-}
-      # Or create the first admin at startup instead of using /setup.
-      GANTRY_ADMIN_USERNAME: ${GANTRY_ADMIN_USERNAME:-}
-      GANTRY_ADMIN_PASSWORD: ${GANTRY_ADMIN_PASSWORD:-}
-      # Dashboard history: sampling interval (seconds) and retention (days).
-      METRICS_INTERVAL_SECONDS: ${METRICS_INTERVAL_SECONDS:-60}
-      METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-7}
-      # Image update checks against the registries (hours; 0 = on demand only).
-      UPDATE_CHECK_INTERVAL_HOURS: ${UPDATE_CHECK_INTERVAL_HOURS:-6}
-      # Scheduled backups (default /data/backups); mount another volume to keep them off the data disk.
-      BACKUP_DIR: ${BACKUP_DIR:-}
-      # Public URL (OIDC callback: $GANTRY_URL/auth/oidc/callback).
-      GANTRY_URL: ${GANTRY_URL:-}
-      # Single sign-on (OpenID Connect); off unless issuer and client id are set.
-      OIDC_ISSUER: ${OIDC_ISSUER:-}
-      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
-      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
-      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-}
-      OIDC_SCOPES: ${OIDC_SCOPES:-}
-      OIDC_AUTO_CREATE: ${OIDC_AUTO_CREATE:-false}
-      OIDC_ADMIN_GROUPS: ${OIDC_ADMIN_GROUPS:-}
-      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-}
-      OIDC_USERNAME_CLAIM: ${OIDC_USERNAME_CLAIM:-}
-      # "admins": with SSO on, only administrators may sign in with a password (break-glass).
-      PASSWORD_LOGIN: ${PASSWORD_LOGIN:-all}
-    # Group that owns /var/run/docker.sock on the host: stat -c '%g' /var/run/docker.sock
-    group_add:
-      - "${DOCKER_GID:-999}"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      # The entrypoint gives Gantry the socket's group; no group id to look up.
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - gantry-data:/data
-    depends_on:
-      mysql:
-        condition: service_healthy
-        required: false
-
-  mysql:
-    image: mysql:8.4
-    container_name: gantry-mysql
-    profiles: ["mysql"]
-    restart: unless-stopped
-    environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-gantry}
-      MYSQL_USER: ${MYSQL_USER:-gantry}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-gantry}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-gantry-root}
-    volumes:
-      - gantry-mysql:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
 
 volumes:
   gantry-data:
-  gantry-mysql:

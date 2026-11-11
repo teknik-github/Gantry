@@ -1,6 +1,6 @@
 import "server-only"
 
-/** Limits of the file browser, from the environment (documented in .env.example). */
+/** Limits of the file browser, from the environment (documented in docs/configuration.md). */
 
 function number(name: string, fallback: number, min: number, max: number) {
   const raw = process.env[name]

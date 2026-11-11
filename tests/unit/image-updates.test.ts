@@ -111,3 +111,23 @@ describe("localImagesFor", () => {
     expect(containerUpdates(4242, containers, local, refs).has("b")).toBe(false)
   })
 })
+
+describe("updateCheckIntervalMs", () => {
+  it("treats an empty value as the default, 0 as on demand only", async () => {
+    const { updateCheckIntervalMs } = await import("@/lib/server/image-updates")
+    const previous = process.env.UPDATE_CHECK_INTERVAL_HOURS
+    try {
+      process.env.UPDATE_CHECK_INTERVAL_HOURS = ""
+      expect(updateCheckIntervalMs()).toBe(6 * 3_600_000)
+      delete process.env.UPDATE_CHECK_INTERVAL_HOURS
+      expect(updateCheckIntervalMs()).toBe(6 * 3_600_000)
+      process.env.UPDATE_CHECK_INTERVAL_HOURS = "0"
+      expect(updateCheckIntervalMs()).toBe(0)
+      process.env.UPDATE_CHECK_INTERVAL_HOURS = "2"
+      expect(updateCheckIntervalMs()).toBe(2 * 3_600_000)
+    } finally {
+      if (previous === undefined) delete process.env.UPDATE_CHECK_INTERVAL_HOURS
+      else process.env.UPDATE_CHECK_INTERVAL_HOURS = previous
+    }
+  })
+})

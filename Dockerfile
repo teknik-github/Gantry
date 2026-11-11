@@ -39,7 +39,10 @@ RUN set -eu; \
 FROM node:24-alpine AS runner
 # docker compose CLI for stacks (talks to the environment's daemon via DOCKER_HOST),
 # git for stacks sourced from a Git repository.
-RUN apk add --no-cache docker-cli docker-cli-compose git
+# su-exec: the entrypoint drops from root to `node` after joining the Docker
+# socket's group. tini as PID 1 reaps orphans (e.g. a timed-out healthcheck's
+# wget), which Node would leave as zombies.
+RUN apk add --no-cache docker-cli docker-cli-compose git su-exec tini
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
@@ -56,8 +59,8 @@ COPY --chown=node:node agent/gantry-agent.mjs ./agent/gantry-agent.mjs
 COPY --chmod=0755 agent/docker-entrypoint.sh /usr/local/bin/gantry-entrypoint
 RUN mkdir -p /data && chown node:node /data
 
-# Runs unprivileged; docker-compose adds the docker socket's group.
-USER node
+# Starts as root only so the entrypoint can give `node` the Docker socket's
+# group (its id varies by host); Gantry then runs as `node`.
 VOLUME ["/data"]
 EXPOSE 3000
 
@@ -66,5 +69,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD gantry-entrypoint healthcheck || exit 1
 
 # `agent` as the command runs the agent instead of Gantry (agent/docker-entrypoint.sh).
-ENTRYPOINT ["gantry-entrypoint"]
+ENTRYPOINT ["/sbin/tini", "--", "gantry-entrypoint"]
 CMD ["node", "server.js"]

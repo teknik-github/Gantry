@@ -6,7 +6,8 @@ data
 *.log
 .git
 Dockerfile
-docker-compose.yml
+docker-compose*.yml
+docs
 .claude
 .test-data
 test-results

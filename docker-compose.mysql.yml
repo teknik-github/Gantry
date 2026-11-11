@@ -1,0 +1,42 @@
+# MySQL instead of SQLite, on top of docker-compose.yml. Turn it on in .env:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.mysql.yml
+#   MYSQL_PASSWORD=…
+#   MYSQL_ROOT_PASSWORD=…
+#
+# Both containers read the same MYSQL_* values, so they always match.
+
+services:
+  gantry:
+    environment:
+      DB_DRIVER: mysql
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-gantry}
+      MYSQL_USER: ${MYSQL_USER:-gantry}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-gantry}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    container_name: gantry-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-gantry}
+      MYSQL_USER: ${MYSQL_USER:-gantry}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-gantry}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-gantry-root}
+    volumes:
+      - gantry-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      # The first start initialises the database, which can take minutes.
+      start_period: 5m
+
+volumes:
+  gantry-mysql:
