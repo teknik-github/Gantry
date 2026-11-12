@@ -83,14 +83,14 @@ test("stop and start an external project", async ({ page }) => {
   expect(await states()).toEqual(["running", "running"])
 
   await openMenu(page)
-  await page.getByRole("menuitem", { name: "Stop" }).click()
+  await page.getByRole("menuitem", { name: "Stop", exact: true }).click()
   await expect(page.getByText(`${PROJECT}: stopped 2 container(s)`)).toBeVisible({ timeout: 120_000 })
   expect(await states()).toEqual(["exited", "exited"])
 
   await openMenu(page)
-  // Running containers can't be started again: only Start and Restart are offered.
-  await expect(page.getByRole("menuitem", { name: "Stop" })).toHaveCount(0)
-  await page.getByRole("menuitem", { name: "Start" }).click()
+  // Nothing is running, so Stop isn't offered.
+  await expect(page.getByRole("menuitem", { name: "Stop", exact: true })).toHaveCount(0)
+  await page.getByRole("menuitem", { name: "Start", exact: true }).click()
   await expect(page.getByText(`${PROJECT}: started 2 container(s)`)).toBeVisible({ timeout: 120_000 })
   expect(await states()).toEqual(["running", "running"])
 })
@@ -99,7 +99,7 @@ test("restart and pull & redeploy keep the project together", async ({ page }) =
   test.setTimeout(300_000)
   await signIn(page)
   await openMenu(page)
-  await page.getByRole("menuitem", { name: "Restart" }).click()
+  await page.getByRole("menuitem", { name: "Restart", exact: true }).click()
   await expect(page.getByText(`${PROJECT}: restarted 2 container(s)`)).toBeVisible({ timeout: 120_000 })
 
   await openMenu(page)
@@ -117,7 +117,7 @@ test("remove takes the project down, volumes only when asked", async ({ page }) 
   test.setTimeout(240_000)
   await signIn(page)
   await openMenu(page)
-  await page.getByRole("menuitem", { name: "Remove" }).click()
+  await page.getByRole("menuitem", { name: "Remove", exact: true }).click()
   const dialog = page.getByRole("alertdialog")
   await expect(dialog).toContainText("like docker compose down")
   await dialog.getByLabel("Also remove the project's volumes").click()
