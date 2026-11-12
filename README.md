@@ -112,8 +112,9 @@ pnpm install
 pnpm dev -H 0.0.0.0 -p 3001   # SQLite at ./data/gantry.db
 ```
 
-Extra hosts that load the dev server are listed in `allowedDevOrigins` in
-`next.config.ts`.
+The dev server can be opened at any address of this machine (its IPs are
+allowed automatically). For other names, e.g. a proxy in front of it, set
+`GANTRY_DEV_ORIGINS=dev.example.com,…`.
 
 ## Tests
 

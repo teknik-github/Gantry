@@ -1,4 +1,18 @@
+import os from "node:os"
+
 import type { NextConfig } from "next"
+
+// Hosts allowed to load dev resources (scripts, HMR) when not on localhost:
+// every address of this machine, so a new DHCP lease doesn't leave the page
+// without its JavaScript, plus GANTRY_DEV_ORIGINS (comma-separated) for names
+// or proxies in front of it.
+const devOrigins = [
+  ...Object.values(os.networkInterfaces())
+    .flat()
+    .filter((a) => a !== undefined)
+    .map((a) => a.address),
+  ...(process.env.GANTRY_DEV_ORIGINS ?? "").split(",").map((h) => h.trim()).filter(Boolean),
+]
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
@@ -13,8 +27,7 @@ const nextConfig: NextConfig = {
     instantInsights: { validationLevel: "manual-warning" },
   },
   poweredByHeader: false,
-  // Hosts allowed to load dev resources (HMR etc.) when not on localhost.
-  allowedDevOrigins: ["10.8.0.4", "192.168.1.104", "192.168.1.107"],
+  allowedDevOrigins: devOrigins,
   turbopack: {
     rules: {
       "*.css": {
