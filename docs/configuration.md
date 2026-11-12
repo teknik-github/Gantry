@@ -41,6 +41,19 @@ Docker Compose 2.24 or newer is needed (`docker compose version`).
 
 ## Common tasks
 
+### Use the published image instead of building
+
+Images for linux/amd64 and linux/arm64 are published to GitHub Container
+Registry on every change (`latest`) and release (`1.2.3`, `1.2`):
+
+```bash
+GANTRY_IMAGE=ghcr.io/teknik-github/gantry:latest
+```
+
+Then `docker compose pull && docker compose up -d`. To update later, run the
+same two commands again. Remote hosts running the agent can use the same
+image; set `GANTRY_AGENT_IMAGE` to it so the agent command shows it.
+
 ### Use another port
 
 ```bash
@@ -145,6 +158,7 @@ Every setting is optional. An empty value (`NAME=`) means the default.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| `GANTRY_IMAGE` | `gantry:latest` | Image Docker Compose runs. `ghcr.io/teknik-github/gantry:latest` = the published image |
 | `GANTRY_PORT` | `3000` | Port on the host. `127.0.0.1:3000` = only reachable from the server itself |
 | `GANTRY_URL` | | Public address of Gantry, e.g. `https://gantry.example.com`. Needed for SSO and for the remote agent's command |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker socket of the host that Gantry manages as `local` |

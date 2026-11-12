@@ -76,6 +76,10 @@ A Portainer-style web UI for Docker (and Kubernetes), built with Next.js 16 and 
    docker logs gantry 2>&1 | grep -A2 "setup token"
    ```
 
+Prefer a ready-made image (linux/amd64 and arm64)? Add
+`GANTRY_IMAGE=ghcr.io/teknik-github/gantry:latest` to `.env`, then run
+`docker compose pull && docker compose up -d` instead of building.
+
 No configuration is needed: Gantry uses SQLite and the Docker of this host.
 To change a setting (port, domain, MySQL, SSO, …), copy `.env.example` to
 `.env`, edit it and run `docker compose up -d` again. The

@@ -10,7 +10,9 @@
 services:
   gantry:
     build: .
-    image: gantry:latest
+    # GANTRY_IMAGE=ghcr.io/teknik-github/gantry:latest uses the published
+    # image (docker compose pull) instead of building it here.
+    image: ${GANTRY_IMAGE:-gantry:latest}
     container_name: gantry
     restart: unless-stopped
     # Every variable in .env reaches Gantry as it is.
