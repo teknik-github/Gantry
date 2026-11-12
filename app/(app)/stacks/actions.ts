@@ -23,8 +23,16 @@ import {
   WORKING_DIR_LABEL,
 } from "@/lib/server/stacks"
 import { auditName, loadStack, operate } from "@/lib/server/stacks/action-helpers"
+import { selfContainerIds } from "@/lib/server/docker/self"
 import { getCurrentEnvironment } from "@/lib/server/environments"
 import { createStackInCurrentEnvironment } from "@/lib/server/stacks/create"
+import {
+  composeProjectSchema,
+  EXTERNAL_OPERATIONS,
+  ExternalProjectError,
+  runExternalOperation,
+  type ExternalOperation,
+} from "@/lib/server/stacks/external"
 import { getStackGit } from "@/lib/server/stacks/git-records"
 import { shortSha } from "@/lib/git-stacks"
 import { removeStackDir, STACK_OPERATIONS, stackDir, type StackOperation } from "@/lib/server/stacks/compose"
@@ -230,5 +238,54 @@ export async function importProject(project: string): Promise<ActionState> {
 
     await insertStack({ environment_id: environmentId, name: name.data, compose, env, created_by: ctx.user.username })
     return format(msg.imported, { name: name.data })
+  })
+}
+
+/**
+ * Start, stop, restart, redeploy (pull & recreate) or remove a compose project
+ * Gantry doesn't manage, through its containers (lib/server/stacks/external.ts).
+ * Same rights as the matching container actions: operate for start/stop/
+ * restart, manage for redeploy and remove.
+ */
+export async function externalProjectOperation(
+  project: string,
+  op: ExternalOperation,
+  opts: { removeVolumes?: boolean } = {},
+  environmentId?: number
+): Promise<ActionState> {
+  const { t, format } = await getI18n()
+  const msg = t.stacks.messages
+  const parsed = z
+    .object({ project: composeProjectSchema, op: z.enum(EXTERNAL_OPERATIONS), removeVolumes: z.boolean().optional() })
+    .safeParse({ project, op, removeVolumes: opts.removeVolumes })
+  if (!parsed.success) return { error: msg.invalidRequest }
+  const { project: name, removeVolumes } = parsed.data
+  const level = parsed.data.op === "redeploy" || parsed.data.op === "remove" ? "manage" : "operate"
+  const target = `${name}${removeVolumes ? " (with volumes)" : ""}`
+
+  return runAction(inEnvironment(level, expectedEnvironment(environmentId)), `project.${parsed.data.op}`, target, async (ctx) => {
+    const environment = await getCurrentEnvironment()
+    if (environment && (await findStackByName(environment.id, name))) {
+      throw new UserError(format(msg.projectManaged, { name }))
+    }
+    let result
+    try {
+      result = await runExternalOperation(await ctx.docker(), name, parsed.data.op, {
+        removeVolumes: removeVolumes === true,
+        self: selfContainerIds(),
+      })
+    } catch (err) {
+      if (err instanceof ExternalProjectError) {
+        throw new UserError(
+          err.reason === "notFound" ? format(msg.importNoContainers, { name }) : t.containers.selfContainer
+        )
+      }
+      throw err
+    }
+    const done = format(msg.projectDone[parsed.data.op], { name, count: result.done, unchanged: result.unchanged })
+    if (result.failures.length > 0) {
+      throw new UserError(format(msg.projectPartial, { done, failures: result.failures.join("; ") }))
+    }
+    return done
   })
 }

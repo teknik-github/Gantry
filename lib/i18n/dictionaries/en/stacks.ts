@@ -21,7 +21,7 @@ export const stacks = {
     description: "Docker Compose stacks on {environment}: {managed} managed by Gantry.",
     descriptionWithExternal: "Docker Compose stacks on {environment}: {managed} managed by Gantry, {external} external.",
     externalTitle: "External projects",
-    externalDescription: "Compose projects running on this environment that Gantry doesn't manage (read-only).",
+    externalDescription: "Compose projects running on this environment that Gantry doesn't manage.",
     services: "Services",
     lastRun: "Last run",
     lastRunFailed: "failed",
@@ -41,6 +41,13 @@ export const stacks = {
     importDescription:
       "Gantry copies the project's compose file (and its .env) into a new stack so you can manage it here. Running containers are left alone. When you deploy it from Gantry, relative paths (bind mounts, build contexts, env_file) resolve from Gantry's data directory instead of the original project folder.",
     import: "Import",
+    redeployTitle: "Pull & redeploy {name}?",
+    redeployDescription:
+      "Gantry pulls the image of each of the project's containers and recreates those that got a newer image, with the same settings. Containers whose image was built locally or referenced by ID are reported and left as they are.",
+    removeVolumes: "Also remove the project's volumes (deletes their data)",
+    removeTitle: "Remove {name}?",
+    removeDescription:
+      "Stops and removes the project's containers and networks, like docker compose down. Its compose file and folder are not touched: running docker compose up there creates it again.",
     /** Columns menu, by column id. */
     columns: {
       status: "status",
@@ -237,6 +244,15 @@ export const stacks = {
     importUnreadable:
       "Gantry can't read {file}. When Gantry runs in a container it only sees its own filesystem; create the stack by pasting the file instead.",
     imported: "Imported {name}",
+    projectManaged: "{name} is a Gantry stack; use the stack's own actions",
+    projectDone: {
+      start: "{name}: started {count} container(s)",
+      stop: "{name}: stopped {count} container(s)",
+      restart: "{name}: restarted {count} container(s)",
+      redeploy: "{name}: {count} container(s) updated, {unchanged} already up to date",
+      remove: "{name} removed ({count} container(s), network(s) and volume(s))",
+    },
+    projectPartial: "{done}. Failed: {failures}",
     notGit: "This stack isn't sourced from Git",
     hostChanged: "The repository host changed: enter the token again, or remove the credentials",
     tokenNeeded: "Enter the access token for this username",

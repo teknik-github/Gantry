@@ -2,14 +2,35 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { ImportIcon, LayoutTemplateIcon, PlusIcon } from "lucide-react"
+import {
+  CloudDownloadIcon,
+  EllipsisVerticalIcon,
+  ImportIcon,
+  LayoutTemplateIcon,
+  PlayIcon,
+  PlusIcon,
+  RotateCwIcon,
+  SquareIcon,
+  Trash2Icon,
+} from "lucide-react"
 
-import { importProject } from "@/app/(app)/stacks/actions"
+import { externalProjectOperation, importProject } from "@/app/(app)/stacks/actions"
 import { columnHelperFor, DataTable, SortHeader } from "@/components/data-table"
 import { ConfirmAction } from "@/components/gantry/confirm-button"
+import { useEnvironmentId } from "@/components/gantry/environment-scope"
+import { useRunAction } from "@/components/gantry/use-action"
 import { Mono, StateBadge } from "@/components/gantry/ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Label } from "@/components/ui/label"
 import type { I18n } from "@/lib/i18n"
 import { useI18n } from "@/lib/i18n/client"
 import type { StackStatus } from "@/lib/stacks"
@@ -184,7 +205,10 @@ export function ContainerList({ containers }: { containers: StackContainer[] }) 
 
 const externalHelper = columnHelperFor<ExternalProjectRow>()
 
-function externalColumns(canImport: boolean, i18n: I18n) {
+/** Environment rights for external projects: operate starts/stops, manage redeploys/removes. */
+export type ProjectRights = { operate: boolean; manage: boolean }
+
+function externalColumns(canImport: boolean, can: ProjectRights, i18n: I18n) {
   const { t } = i18n
   return externalHelper.columns([
     externalHelper.accessor("name", {
@@ -221,32 +245,135 @@ function externalColumns(canImport: boolean, i18n: I18n) {
     }),
     externalHelper.display({
       id: "actions",
-      cell: ({ row }) =>
-        canImport && row.original.importable ? (
-          <div className="flex justify-end">
-            <ConfirmAction
-              title={i18n.format(t.stacks.list.importTitle, { name: row.original.name })}
-              description={t.stacks.list.importDescription}
-              confirmLabel={t.stacks.list.import}
-              destructive={false}
-              onConfirm={() => importProject(row.original.name)}
-            >
-              <Button variant="outline" size="sm">
-                <ImportIcon data-icon="inline-start" />
-                {t.stacks.list.import}
-              </Button>
-            </ConfirmAction>
-          </div>
-        ) : null,
+      cell: ({ row }) => <ExternalRowActions row={row.original} canImport={canImport} can={can} />,
       enableHiding: false,
     }),
   ])
 }
 
-export function ExternalProjectsTable({ data, canImport }: { data: ExternalProjectRow[]; canImport: boolean }) {
+function ExternalRowActions({ row, canImport, can }: { row: ExternalProjectRow; canImport: boolean; can: ProjectRights }) {
+  const { t, format } = useI18n()
+  const text = t.stacks.list
+  const environmentId = useEnvironmentId()
+  const [pending, run] = useRunAction()
+  const [confirmImport, setConfirmImport] = React.useState(false)
+  const [confirmRedeploy, setConfirmRedeploy] = React.useState(false)
+  const [confirmRemove, setConfirmRemove] = React.useState(false)
+  const [volumes, setVolumes] = React.useState(false)
+
+  const importable = canImport && row.importable
+  if (!importable && !can.operate) return null
+  const act = (op: "start" | "stop" | "restart") => run(() => externalProjectOperation(row.name, op, {}, environmentId))
+
+  return (
+    <div className="flex justify-end">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" disabled={pending}>
+            <EllipsisVerticalIcon />
+            <span className="sr-only">{t.common.actions.openMenu}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          {can.operate && row.running < row.total ? (
+            <DropdownMenuItem onSelect={() => act("start")}>
+              <PlayIcon />
+              {t.common.actions.start}
+            </DropdownMenuItem>
+          ) : null}
+          {can.operate && row.running > 0 ? (
+            <DropdownMenuItem onSelect={() => act("stop")}>
+              <SquareIcon />
+              {t.common.actions.stop}
+            </DropdownMenuItem>
+          ) : null}
+          {can.operate ? (
+            <DropdownMenuItem onSelect={() => act("restart")}>
+              <RotateCwIcon />
+              {t.common.actions.restart}
+            </DropdownMenuItem>
+          ) : null}
+          {can.manage ? (
+            <DropdownMenuItem onSelect={() => setConfirmRedeploy(true)}>
+              <CloudDownloadIcon />
+              {t.stacks.actions.pullRedeploy}
+            </DropdownMenuItem>
+          ) : null}
+          {importable ? (
+            <>
+              {can.operate ? <DropdownMenuSeparator /> : null}
+              <DropdownMenuItem onSelect={() => setConfirmImport(true)}>
+                <ImportIcon />
+                {text.import}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+          {can.manage ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={() => setConfirmRemove(true)}>
+                <Trash2Icon />
+                {t.common.actions.remove}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {importable ? (
+        <ConfirmAction
+          open={confirmImport}
+          onOpenChange={setConfirmImport}
+          title={format(text.importTitle, { name: row.name })}
+          description={text.importDescription}
+          confirmLabel={text.import}
+          destructive={false}
+          onConfirm={() => importProject(row.name)}
+        />
+      ) : null}
+      {can.manage ? (
+        <>
+          <ConfirmAction
+            open={confirmRedeploy}
+            onOpenChange={setConfirmRedeploy}
+            title={format(text.redeployTitle, { name: row.name })}
+            description={text.redeployDescription}
+            confirmLabel={t.stacks.actions.pullRedeploy}
+            destructive={false}
+            onConfirm={() => externalProjectOperation(row.name, "redeploy", {}, environmentId)}
+          />
+          <ConfirmAction
+            open={confirmRemove}
+            onOpenChange={setConfirmRemove}
+            title={format(text.removeTitle, { name: row.name })}
+            description={text.removeDescription}
+            confirmLabel={t.common.actions.remove}
+            onConfirm={() => externalProjectOperation(row.name, "remove", { removeVolumes: volumes }, environmentId)}
+            extra={
+              <Label className="font-normal">
+                <Checkbox checked={volumes} onCheckedChange={(v) => setVolumes(v === true)} />
+                {text.removeVolumes}
+              </Label>
+            }
+          />
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+export function ExternalProjectsTable({
+  data,
+  canImport,
+  can,
+}: {
+  data: ExternalProjectRow[]
+  canImport: boolean
+  can: ProjectRights
+}) {
   const i18n = useI18n()
   const { t } = i18n
-  const columns = React.useMemo(() => externalColumns(canImport, i18n), [canImport, i18n])
+  const rights = React.useMemo(() => ({ operate: can.operate, manage: can.manage }), [can.operate, can.manage])
+  const columns = React.useMemo(() => externalColumns(canImport, rights, i18n), [canImport, rights, i18n])
   const labels = t.stacks.list.columns
   return (
     <DataTable

@@ -20,7 +20,7 @@ export const stacks: Dictionary["stacks"] = {
     description: "Stack Docker Compose di {environment}: {managed} dikelola Gantry.",
     descriptionWithExternal: "Stack Docker Compose di {environment}: {managed} dikelola Gantry, {external} eksternal.",
     externalTitle: "Project eksternal",
-    externalDescription: "Project Compose yang berjalan di environment ini tetapi tidak dikelola Gantry (hanya-baca).",
+    externalDescription: "Project Compose yang berjalan di environment ini tetapi tidak dikelola Gantry.",
     services: "Service",
     lastRun: "Terakhir dijalankan",
     lastRunFailed: "gagal",
@@ -40,6 +40,13 @@ export const stacks: Dictionary["stacks"] = {
     importDescription:
       "Gantry menyalin file compose project ini (beserta .env-nya) ke stack baru agar Anda bisa mengelolanya di sini. Container yang sedang berjalan tidak diubah. Saat Anda men-deploy-nya dari Gantry, path relatif (bind mount, build context, env_file) dibaca dari direktori data Gantry, bukan dari folder project aslinya.",
     import: "Impor",
+    redeployTitle: "Pull & redeploy {name}?",
+    redeployDescription:
+      "Gantry mengambil (pull) image setiap container project ini dan membuat ulang container yang mendapat image lebih baru, dengan pengaturan yang sama. Container yang image-nya dibuat lokal atau dirujuk lewat ID dilaporkan dan dibiarkan apa adanya.",
+    removeVolumes: "Hapus juga volume project ini (datanya ikut terhapus)",
+    removeTitle: "Hapus {name}?",
+    removeDescription:
+      "Menghentikan dan menghapus container serta network project ini, seperti docker compose down. File compose dan foldernya tidak disentuh: menjalankan docker compose up di sana akan membuatnya lagi.",
     columns: {
       status: "status",
       services: "service",
@@ -237,6 +244,15 @@ export const stacks: Dictionary["stacks"] = {
     importUnreadable:
       "Gantry tidak bisa membaca {file}. Saat Gantry berjalan di container, ia hanya melihat filesystem-nya sendiri; buat stack dengan menempelkan file-nya.",
     imported: "{name} diimpor",
+    projectManaged: "{name} adalah stack Gantry; gunakan aksi di halaman stack-nya",
+    projectDone: {
+      start: "{name}: {count} container dijalankan",
+      stop: "{name}: {count} container dihentikan",
+      restart: "{name}: {count} container di-restart",
+      redeploy: "{name}: {count} container diperbarui, {unchanged} sudah versi terbaru",
+      remove: "{name} dihapus ({count} container, network, dan volume)",
+    },
+    projectPartial: "{done}. Gagal: {failures}",
     notGit: "Stack ini tidak bersumber dari Git",
     hostChanged: "Host repository berubah: masukkan token lagi, atau hapus kredensialnya",
     tokenNeeded: "Masukkan access token untuk username ini",

@@ -113,7 +113,11 @@ export default async function StacksPage() {
             description={t.stacks.list.externalDescription}
           />
           {/* Importing reads a file path named by container labels: administrators only. */}
-          <ExternalProjectsTable data={external} canImport={user.role === "admin"} />
+          <ExternalProjectsTable
+            data={external}
+            canImport={user.role === "admin"}
+            can={{ operate: can.operate, manage: can.manage }}
+          />
         </>
       ) : null}
     </PageBody>
